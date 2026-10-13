@@ -1,6 +1,7 @@
 //! Enrollment store (docs/design/enrollment.md C4/C5, dashq.md D11): one SQLite file, WAL with
 //! `synchronous=FULL`, one bounded writer. An acknowledgement is returned only after its commit.
-//! Inactive capability: the pairing and ingestion routes that call it are separate tasks.
+//! Data rows carry the workspace of the grant that sent them: a reconnect into another workspace never shows
+//! earlier data there (C1).
 
 use rusqlite::{Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior, params};
 use std::path::Path;
@@ -14,9 +15,9 @@ CREATE TABLE IF NOT EXISTS members(workspace TEXT NOT NULL, subject TEXT NOT NUL
 CREATE TABLE IF NOT EXISTS installations(id TEXT PRIMARY KEY, product TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS grants(installation TEXT NOT NULL REFERENCES installations(id), generation INTEGER NOT NULL, verifier BLOB NOT NULL UNIQUE, workspace TEXT NOT NULL, account TEXT NOT NULL, scopes TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (installation, generation));
 CREATE TABLE IF NOT EXISTS revocations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
-CREATE TABLE IF NOT EXISTS receipts(installation TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, content TEXT NOT NULL, outcome TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation, event_id));
-CREATE TABLE IF NOT EXISTS snapshots(installation TEXT PRIMARY KEY, event_id TEXT NOT NULL, schema TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS history(installation TEXT NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS receipts(installation TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, schema TEXT NOT NULL, content TEXT NOT NULL, outcome TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation, event_id));
+CREATE TABLE IF NOT EXISTS snapshots(installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, schema TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (installation, workspace));
+CREATE TABLE IF NOT EXISTS history(installation TEXT NOT NULL, workspace TEXT NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS history_by_time ON history(installation, observed);
 CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, queued INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL);
@@ -121,12 +122,35 @@ pub struct Event<'a> {
     pub payload: &'a str,
 }
 
-/// Receipt: rejected, durably accepted, or accepted and projected as the current value.
+/// Receipt: rejected, durably accepted, or accepted and read through the dashboard projection (`project`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     Projected,
     Accepted,
+    /// Wire reason: `scope`, `replay_mismatch`, `expired`, `store_full` or `outbox_full`.
     Rejected(&'static str),
+}
+
+/// Whose installations a projection shows (C3): the host administrator sees all; a workspace administrator its
+/// workspace; a member the installations it approved.
+#[derive(Clone, Copy, Debug)]
+pub enum Scope<'a> {
+    All,
+    Subject(&'a str),
+}
+
+/// One expected installation as the dashboard projects it; `snapshot` is `None` until one arrives.
+#[derive(Debug, PartialEq)]
+pub struct Row {
+    pub installation: String,
+    pub product: String,
+    pub runtime: String,
+    pub label: String,
+    pub workspace: String,
+    pub generation: i64,
+    /// `active`, `pending` (approved, not acknowledged) or `revoked`.
+    pub connection: &'static str,
+    pub snapshot: Option<Snapshot>,
 }
 
 /// A pairing session as the approval page shows it.
@@ -235,9 +259,18 @@ fn grant(tx: &Transaction, inst: &Installation, workspace: &str, account: &str, 
     match known {
         Some((p, r)) if p != inst.product || r != inst.runtime => return Err(Error::Conflict),
         Some(_) => {
-            // ponytail: a workspace switch (C1 old → new) is refused until its explicit flow exists
-            let last: Option<String> = tx.query_row("SELECT workspace FROM grants WHERE installation = ?1 ORDER BY generation DESC LIMIT 1", [inst.id], |r| r.get(0)).optional()?;
-            if last.is_some_and(|w| w != workspace) {
+            // a live grant elsewhere is never moved silently; after revoke a new approval may pick another workspace,
+            // and earlier data stays with its own workspace
+            // ponytail: no live switch (C1 old → new) until its explicit flow exists
+            let live: Option<String> = tx
+                .query_row(
+                    "SELECT workspace FROM grants g WHERE installation = ?1
+                     AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation) ORDER BY generation DESC LIMIT 1",
+                    [inst.id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if live.is_some_and(|w| w != workspace) {
                 return Err(Error::Conflict);
             }
         }
@@ -485,7 +518,8 @@ impl Store {
         })
     }
 
-    /// Stores a batch atomically. Replays of `(generation, event id)` return the first outcome.
+    /// Stores a batch atomically. Ownership comes from the credential's grant; a schema outside the grant is
+    /// rejected. Replays of `(generation, event id)` return the first outcome; changed content is rejected.
     pub fn accept(&self, verifier: &[u8], events: &[Event], now: i64) -> Result<Vec<Outcome>, Error> {
         if events.len() > self.limits.records {
             return Err(Error::TooMany);
@@ -493,6 +527,7 @@ impl Store {
         let l = self.limits;
         self.write(|tx| {
             let g = authorize(tx, verifier)?.ok_or(Error::Denied)?;
+            let scopes: Vec<String> = serde_json::from_str(&g.scopes).unwrap_or_default();
             let full = used(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes;
             let mut outbox = tx.query_row("SELECT COALESCE(SUM(length(payload)), 0) FROM outbox", [], |r| r.get::<_, i64>(0))? as u64;
             let mut out = Vec::with_capacity(events.len());
@@ -508,31 +543,32 @@ impl Store {
                     .optional()?;
                 let o = match seen {
                     Some((c, o)) if c == content => outcome(&o),
-                    Some(_) => Outcome::Rejected("event id reused with different content"),
+                    Some(_) => Outcome::Rejected("replay_mismatch"),
+                    None if !scopes.iter().any(|s| s == e.schema) => Outcome::Rejected("scope"),
                     // a dedup record may be pruned already: refuse instead of duplicating
-                    None if e.observed < now - l.receipt_secs => Outcome::Rejected("older than the retention window"),
-                    None if full => Outcome::Rejected("store full"),
-                    None if e.kind == Kind::Export && outbox + e.payload.len() as u64 > l.outbox_bytes => Outcome::Rejected("export outbox full"),
+                    None if e.observed < now - l.receipt_secs => Outcome::Rejected("expired"),
+                    None if full => Outcome::Rejected("store_full"),
+                    None if e.kind == Kind::Export && outbox + e.payload.len() as u64 > l.outbox_bytes => Outcome::Rejected("outbox_full"),
                     None => {
-                        let o = if e.kind == Kind::Export {
+                        if e.kind == Kind::Export {
                             outbox += e.payload.len() as u64;
                             tx.execute("INSERT INTO outbox (installation, generation, event_id, observed, queued, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, g.generation, e.id, e.observed, now, e.payload])?;
-                            Outcome::Accepted
                         } else {
                             let uncertain = e.observed > now + l.future_secs;
-                            tx.execute("INSERT INTO history VALUES (?1, ?2, ?3, ?4, ?5)", params![g.installation, e.id, e.observed, uncertain, e.payload])?;
+                            tx.execute("INSERT INTO history VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, g.workspace, e.id, e.observed, uncertain, e.payload])?;
                             // late samples join history only; an uncertain current value yields to any sample
-                            let current: Option<(i64, bool)> = tx.query_row("SELECT observed, clock_uncertain FROM snapshots WHERE installation = ?1", [&g.installation], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+                            let current: Option<(i64, bool)> = tx
+                                .query_row("SELECT observed, clock_uncertain FROM snapshots WHERE installation = ?1 AND workspace = ?2", [&g.installation, &g.workspace], |r| Ok((r.get(0)?, r.get(1)?)))
+                                .optional()?;
                             if current.is_none_or(|(t, u)| u || e.observed >= t) {
-                                tx.execute("INSERT OR REPLACE INTO snapshots VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, e.id, e.schema, e.observed, uncertain, e.payload])?;
-                                Outcome::Projected
-                            } else {
-                                Outcome::Accepted
+                                tx.execute(
+                                    "INSERT OR REPLACE INTO snapshots VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                    params![g.installation, g.workspace, g.generation, e.id, e.schema, e.observed, uncertain, e.payload],
+                                )?;
                             }
-                        };
-                        let s = if o == Outcome::Projected { "projected" } else { "accepted" };
-                        tx.execute("INSERT INTO receipts VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, g.generation, e.id, content, s, now])?;
-                        o
+                        }
+                        tx.execute("INSERT INTO receipts VALUES (?1, ?2, ?3, ?4, ?5, 'accepted', ?6)", params![g.installation, g.generation, e.id, e.schema, content, now])?;
+                        Outcome::Accepted
                     }
                 };
                 out.push(o);
@@ -541,23 +577,81 @@ impl Store {
         })
     }
 
-    /// A device reads only its own receipts.
-    pub fn receipt(&self, verifier: &[u8], event_id: &str) -> Result<Option<Outcome>, Error> {
+    /// A device reads only its own generation's receipts: `(schema, outcome)`.
+    pub fn receipt(&self, verifier: &[u8], event_id: &str) -> Result<Option<(String, Outcome)>, Error> {
         let c = self.lock()?;
         let g = authorize(&c, verifier)?.ok_or(Error::Denied)?;
-        let o: Option<String> = c
-            .query_row("SELECT outcome FROM receipts WHERE installation = ?1 AND generation = ?2 AND event_id = ?3", params![g.installation, g.generation, event_id], |r| r.get(0))
+        let o: Option<(String, String)> = c
+            .query_row(
+                "SELECT schema, outcome FROM receipts WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
+                params![g.installation, g.generation, event_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?;
-        Ok(o.map(|o| outcome(&o)))
+        Ok(o.map(|(s, o)| (s, outcome(&o))))
     }
 
+    /// The newest current snapshot of an installation in any workspace.
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
             .lock()?
-            .query_row("SELECT event_id, schema, observed, clock_uncertain, payload FROM snapshots WHERE installation = ?1", [installation], |r| {
+            .query_row("SELECT event_id, schema, observed, clock_uncertain, payload FROM snapshots WHERE installation = ?1 ORDER BY observed DESC LIMIT 1", [installation], |r| {
                 Ok(Snapshot { event_id: r.get(0)?, schema: r.get(1)?, observed: r.get(2)?, clock_uncertain: r.get(3)?, payload: r.get(4)? })
             })
             .optional()?)
+    }
+
+    /// The dashboard projection (D11): every expected installation in `scope`, one row per installation and
+    /// workspace from its newest grant there, with that workspace's current snapshot or none. Receipts of the
+    /// snapshots read here become `projected` in the same transaction, so `projected` means this read showed it.
+    pub fn project(&self, scope: Scope) -> Result<Vec<Row>, Error> {
+        let subject = match scope {
+            Scope::All => None,
+            Scope::Subject(s) => Some(s),
+        };
+        self.write(|tx| {
+            let mut q = tx.prepare(
+                "SELECT i.id, i.product, i.runtime, i.label, g.workspace, g.generation,
+                   EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation),
+                   EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation),
+                   s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation
+                 FROM grants g JOIN installations i ON i.id = g.installation
+                 LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
+                 WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
+                   AND (?1 IS NULL OR EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?1 AND (m.role = 'admin' OR g.account = ?1)))
+                 ORDER BY i.label, i.id, g.workspace",
+            )?;
+            let rows: Vec<(Row, Option<i64>)> = q
+                .query_map([subject], |r| {
+                    let (revoked, active): (bool, bool) = (r.get(6)?, r.get(7)?);
+                    let snapshot = match r.get::<_, Option<String>>(8)? {
+                        Some(event_id) => Some(Snapshot { event_id, schema: r.get(9)?, observed: r.get(10)?, clock_uncertain: r.get(11)?, payload: r.get(12)? }),
+                        None => None,
+                    };
+                    let row = Row {
+                        installation: r.get(0)?,
+                        product: r.get(1)?,
+                        runtime: r.get(2)?,
+                        label: r.get(3)?,
+                        workspace: r.get(4)?,
+                        generation: r.get(5)?,
+                        connection: if revoked { "revoked" } else if active { "active" } else { "pending" },
+                        snapshot,
+                    };
+                    Ok((row, r.get(13)?))
+                })?
+                .collect::<Result<_, _>>()?;
+            drop(q);
+            for (row, generation) in &rows {
+                if let (Some(s), Some(generation)) = (&row.snapshot, generation) {
+                    tx.execute(
+                        "UPDATE receipts SET outcome = 'projected' WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
+                        params![row.installation, generation, s.event_id],
+                    )?;
+                }
+            }
+            Ok(rows.into_iter().map(|(r, _)| r).collect())
+        })
     }
 
     /// `(observed, payload)` samples in time order.
@@ -626,6 +720,7 @@ mod tests {
     use std::path::PathBuf;
 
     const NOW: i64 = 1_800_000_000;
+    const SCOPES: &str = r#"["agentq.snapshot/1", "agentq.run/1"]"#;
     const AGENT: Installation = Installation { id: "inst-1", product: "agentq", runtime: "native", label: "fra" };
 
     fn dir(name: &str) -> PathBuf {
@@ -648,10 +743,13 @@ mod tests {
         let p = dir("crash").join("dashq.db");
         let s = Store::open(&p, LIMITS).unwrap();
         s.add_member("w", "github:1", "admin").unwrap();
-        s.grant(&AGENT, "w", "github:1", "snapshot", b"v1", NOW).unwrap();
-        s.grant(&Installation { id: "inst-2", ..AGENT }, "w", "github:1", "snapshot", b"v2", NOW).unwrap();
+        s.grant(&AGENT, "w", "github:1", SCOPES, b"v1", NOW).unwrap();
+        s.grant(&Installation { id: "inst-2", ..AGENT }, "w", "github:1", SCOPES, b"v2", NOW).unwrap();
         assert!(s.revoke("inst-2", NOW).unwrap());
-        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "{}"), export("x1", "{}")], NOW).unwrap(), [Outcome::Projected, Outcome::Accepted]);
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "{}"), export("x1", "{}")], NOW).unwrap(), [Outcome::Accepted, Outcome::Accepted]);
+        // durable, not yet read through the projection; the projection read makes it `projected`
+        assert_eq!(s.receipt(b"v1", "e1").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Accepted)));
+        assert_eq!(s.project(Scope::All).unwrap().len(), 2);
         // crash: no close, no checkpoint; committed WAL frames must be enough
         std::mem::forget(s);
         let s = Store::open(&p, LIMITS).unwrap();
@@ -659,11 +757,15 @@ mod tests {
         assert_eq!(s.authorize(b"v1").unwrap().unwrap().generation, 1);
         assert_eq!(s.authorize(b"v2").unwrap(), None);
         assert_eq!(s.accept(b"v2", &[snap("e1", NOW, "{}")], NOW), Err(Error::Denied));
-        assert_eq!(s.receipt(b"v1", "e1").unwrap(), Some(Outcome::Projected));
+        assert_eq!(s.receipt(b"v1", "e1").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert_eq!(s.snapshot("inst-1").unwrap().unwrap().event_id, "e1");
         // the replay after a lost response returns the same outcome, no duplicate
         assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "{}")], NOW).unwrap(), [Outcome::Projected]);
         assert_eq!(s.history("inst-1").unwrap().len(), 1);
+        // a schema outside the grant is rejected and not stored
+        let other = Event { schema: "serverq-report/1", ..snap("e9", NOW, "{}") };
+        assert_eq!(s.accept(b"v1", &[other], NOW).unwrap(), [Outcome::Rejected("scope")]);
+        assert_eq!(s.receipt(b"v1", "e9").unwrap(), None);
         #[cfg(unix)]
         assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&p).unwrap().permissions()) & 0o777, 0o600);
     }
@@ -671,26 +773,26 @@ mod tests {
     #[test]
     fn dedup_mismatch_late_and_future_samples() {
         let s = Store::open(&dir("dedup").join("dashq.db"), LIMITS).unwrap();
-        s.grant(&AGENT, "w", "a", "snapshot", b"v1", NOW).unwrap();
-        assert_eq!(s.accept(b"v1", &[snap("e2", NOW, "new")], NOW).unwrap(), [Outcome::Projected]);
-        assert_eq!(s.accept(b"v1", &[snap("e2", NOW, "changed")], NOW).unwrap(), [Outcome::Rejected("event id reused with different content")]);
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        assert_eq!(s.accept(b"v1", &[snap("e2", NOW, "new")], NOW).unwrap(), [Outcome::Accepted]);
+        assert_eq!(s.accept(b"v1", &[snap("e2", NOW, "changed")], NOW).unwrap(), [Outcome::Rejected("replay_mismatch")]);
         // late sample: history only, current value unchanged
         assert_eq!(s.accept(b"v1", &[snap("e1", NOW - 60, "old")], NOW).unwrap(), [Outcome::Accepted]);
         assert_eq!(s.snapshot("inst-1").unwrap().unwrap().payload, "new");
         assert_eq!(s.history("inst-1").unwrap(), [(NOW - 60, "old".into()), (NOW, "new".into())]);
-        assert_eq!(s.accept(b"v1", &[snap("e0", NOW - 9 * 86400, "x")], NOW).unwrap(), [Outcome::Rejected("older than the retention window")]);
+        assert_eq!(s.accept(b"v1", &[snap("e0", NOW - 9 * 86400, "x")], NOW).unwrap(), [Outcome::Rejected("expired")]);
         // future time: clock-uncertain, and it never blocks the next real sample
         s.accept(b"v1", &[snap("e3", NOW + 3600, "future")], NOW).unwrap();
         assert!(s.snapshot("inst-1").unwrap().unwrap().clock_uncertain);
-        assert_eq!(s.accept(b"v1", &[snap("e4", NOW + 60, "real")], NOW + 60).unwrap(), [Outcome::Projected]);
+        assert_eq!(s.accept(b"v1", &[snap("e4", NOW + 60, "real")], NOW + 60).unwrap(), [Outcome::Accepted]);
         assert!(!s.snapshot("inst-1").unwrap().unwrap().clock_uncertain);
         // re-enrollment: new generation, same identity and history; the old credential is dead
-        let g = s.grant(&AGENT, "w", "a", "snapshot", b"v1b", NOW).unwrap();
+        let g = s.grant(&AGENT, "w", "a", SCOPES, b"v1b", NOW).unwrap();
         assert_eq!(g.generation, 2);
         assert_eq!(s.accept(b"v1", &[snap("e5", NOW, "x")], NOW), Err(Error::Denied));
         assert_eq!(s.history("inst-1").unwrap().len(), 4);
-        assert_eq!(s.grant(&Installation { runtime: "wsl", ..AGENT }, "w", "a", "snapshot", b"v9", NOW), Err(Error::Conflict));
-        assert_eq!(s.grant(&AGENT, "other", "a", "snapshot", b"v9", NOW), Err(Error::Conflict));
+        assert_eq!(s.grant(&Installation { runtime: "wsl", ..AGENT }, "w", "a", SCOPES, b"v9", NOW), Err(Error::Conflict));
+        assert_eq!(s.grant(&AGENT, "other", "a", SCOPES, b"v9", NOW), Err(Error::Conflict));
         assert!(s.authorize(b"v1b").unwrap().is_some());
         let many: Vec<_> = (0..101).map(|_| snap("e", NOW, "")).collect();
         assert_eq!(s.accept(b"v1b", &many, NOW), Err(Error::TooMany));
@@ -703,14 +805,14 @@ mod tests {
     fn full_store_refuses_telemetry_keeps_control_reserve() {
         let l = Limits { store_bytes: 2 << 20, reserve_bytes: 1 << 20, ..LIMITS };
         let s = Store::open(&dir("full").join("dashq.db"), l).unwrap();
-        s.grant(&AGENT, "w", "a", "snapshot", b"v1", NOW).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
         let big = "x".repeat(32 << 10);
         let ids: Vec<String> = (0..200).map(|i| format!("e{i}")).collect();
         let mut acked = vec![];
         for id in &ids {
             match s.accept(b"v1", &[snap(id, NOW, &big)], NOW).unwrap()[0] {
                 Outcome::Rejected(r) => {
-                    assert_eq!(r, "store full");
+                    assert_eq!(r, "store_full");
                     break;
                 }
                 _ => acked.push(id),
@@ -725,7 +827,7 @@ mod tests {
         assert_eq!(s.history("inst-1").unwrap().len(), acked.len());
         // past the hard ceiling SQLite itself refuses; the error is explicit, never success
         let s = Store::open(&dir("hard").join("dashq.db"), Limits { reserve_bytes: 0, ..l }).unwrap();
-        s.grant(&AGENT, "w", "a", "snapshot", b"v1", NOW).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
         let huge = "x".repeat(4 << 20);
         assert_eq!(s.accept(b"v1", &[snap("h", NOW, &huge)], NOW), Err(Error::Full));
         assert_eq!(s.receipt(b"v1", "h").unwrap(), None);
@@ -747,8 +849,8 @@ mod tests {
     fn retention_and_outbox_ceiling() {
         let p = dir("retain").join("dashq.db");
         let s = Store::open(&p, Limits { outbox_bytes: 10, ..LIMITS }).unwrap();
-        s.grant(&AGENT, "w", "a", "snapshot export", b"v1", NOW).unwrap();
-        assert_eq!(s.accept(b"v1", &[export("x1", "123456"), export("x2", "123456"), snap("e1", NOW, "s")], NOW).unwrap(), [Outcome::Accepted, Outcome::Rejected("export outbox full"), Outcome::Projected]);
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        assert_eq!(s.accept(b"v1", &[export("x1", "123456"), export("x2", "123456"), snap("e1", NOW, "s")], NOW).unwrap(), [Outcome::Accepted, Outcome::Rejected("outbox_full"), Outcome::Accepted]);
         // a backpressured export was not acknowledged: its retry is evaluated again
         assert_eq!(s.receipt(b"v1", "x2").unwrap(), None);
         let later = NOW + 8 * 86400 + 1;
@@ -759,7 +861,8 @@ mod tests {
         assert_eq!(s.accept(b"v1", &[Event { observed: later, ..export("x3", "123456") }], later).unwrap(), [Outcome::Accepted]);
         assert_eq!(s.history("inst-1").unwrap(), [(later, "s2".into())]);
         assert_eq!(s.receipt(b"v1", "e1").unwrap(), None);
-        assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(Outcome::Projected));
+        s.project(Scope::All).unwrap();
+        assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert!(s.authorize(b"v1").unwrap().is_some());
     }
 
@@ -767,10 +870,11 @@ mod tests {
     fn backup_restore_keeps_grants_and_revocations() {
         let d = dir("backup");
         let s = Store::open(&d.join("dashq.db"), LIMITS).unwrap();
-        s.grant(&AGENT, "w", "a", "snapshot", b"v1", NOW).unwrap();
-        s.grant(&Installation { id: "inst-2", ..AGENT }, "w", "a", "snapshot", b"v2", NOW).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        s.grant(&Installation { id: "inst-2", ..AGENT }, "w", "a", SCOPES, b"v2", NOW).unwrap();
         s.revoke("inst-2", NOW).unwrap();
         s.accept(b"v1", &[snap("e1", NOW, "{}")], NOW).unwrap();
+        s.project(Scope::All).unwrap();
         s.backup(&d.join("backup.db")).unwrap();
         assert!(matches!(s.backup(&d.join("backup.db")), Err(Error::Io(_))));
         #[cfg(unix)]
@@ -779,6 +883,6 @@ mod tests {
         let r = Store::restore(&d.join("backup.db"), &d.join("restored.db"), LIMITS).unwrap();
         assert!(r.authorize(b"v1").unwrap().is_some());
         assert_eq!(r.authorize(b"v2").unwrap(), None);
-        assert_eq!(r.receipt(b"v1", "e1").unwrap(), Some(Outcome::Projected));
+        assert_eq!(r.receipt(b"v1", "e1").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
     }
 }

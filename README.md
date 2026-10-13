@@ -24,6 +24,8 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
 }
 ```
 
+`langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show.
+
 ## Deployment (D3)
 
 FRA, user service `dashq-dashq.service`, config in `<install>/config.json`. Caddy site, after the Langfuse UI Access guard:
