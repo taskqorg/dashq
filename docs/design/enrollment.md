@@ -1,12 +1,12 @@
 # Connect independent products
 
-Design proposal for owner review. Implements the intended AgentQ PRODUCT R5/R9/R10 experience; requires the contract amendments below before code. Supersedes the withdrawn Langfuse-source selection proposal. Existing deployment and permissions are unchanged.
+Accepted implementation contract. Implements AgentQ PRODUCT R5/R9/R10 and amends dashq D1–D8 through D11. Follows [shared connection rules](https://github.com/taskqorg/specq/blob/main/engineering/product-connections.md). Supersedes the withdrawn source-selection proposal. Acceptance is not evidence that the feature is shipped; deployment changes require the scoped release task.
 
 ## C1. User outcome
 
 An installed product connects to DashQ with one command and one browser approval. No configuration-file editing, copying API keys, selecting installation IDs, opening host ports or installing another service. Each product remains useful without DashQ and during its outages.
 
-Proposed entry points: `agentq enroll <https-url>`, later `serverq enroll <https-url>` and `taskq enroll <https-url>`. These are design targets, not commands available in current releases. Agent-led setup invokes the same path and never approves the browser grant on the person's behalf.
+Accepted entry points: `agentq enroll <https-url>`, later `serverq enroll <https-url>` and `taskq enroll <https-url>`. These are design targets, not commands available in current releases. Agent-led setup invokes the same path and never approves the browser grant on the person's behalf.
 
 ### First connection
 
@@ -33,7 +33,7 @@ AgentQ's eligible telemetry is also forwarded by DashQ to its configured Langfus
 
 | Owner | Responsibility |
 |---|---|
-| specq | Reusable connection semantics, evidence, consent, independence and UI rules after acceptance |
+| specq | Reusable connection semantics, evidence, consent, independence and UI rules |
 | coreq library | Pairing client, protected credential handling, connection state, bounded authenticated delivery, acknowledgement/recovery; no daemon or UI framework |
 | DashQ process | Existing web UI plus pairing/ingestion handlers, membership checks, connection registry, durable receipts/snapshots/history, forwarding and rendering |
 | AgentQ | Installation identity, engine/routing health, resource probes, metadata projection; existing service and sender queue |
@@ -47,12 +47,12 @@ Task answers are a distinct capability: enrollment for observation cannot author
 ## C3. Identity and access
 
 - Use the device-authorization interaction and pending/slow-down/expiry behavior from [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628). The command is a public client; do not embed a shared client secret. Browser approval uses the existing authenticated identity, not a second password system or a copied GitHub token.
-- Proposed routes: browser `/connect` and connection management remain behind the current guard. Explicit machine routes `/connect/device`, `/connect/token`, `/connect/ack`, `/ingest`, `/connection/receipt` and `/connection/revoke` use their own narrow pairing/device authorization. They must not redirect machines to browser login or expose `/data` publicly. Proxy changes are part of the reviewed deployment, not a blanket guard bypass.
+- Routes: browser `/connect` and connection management remain behind the current guard. Explicit machine routes `/connect/device`, `/connect/token`, `/connect/ack`, `/ingest`, `/connection/receipt` and `/connection/revoke` use their own narrow pairing/device authorization. They must not redirect machines to browser login or expose `/data` publicly. Proxy changes are part of the reviewed deployment, not a blanket guard bypass.
 - Bind a grant to server-side account, workspace, product, installation, runtime and allowed schemas/data scopes. Ignore/reject conflicting authority fields in payloads. A device can submit its own data and read its own receipts, never another device's records or dashboard data.
 - Administrator: workspace installations and membership/revocation. Member: own installations and authorized views. Apply checks to HTML, JSON, history, evidence links and exports; client-side filters are insufficient. Unmapped/expired browser identity denies access. Normal browser mutations require CSRF/origin protection.
 - A verified account is not yet a workspace administrator. Deployment binds the authorized installer's verified provider subject as the initial admin through the setup flow; it never trusts a client-supplied email or an arbitrary forwarded header. Proxy identity is accepted only from the trusted boundary, with spoofed headers stripped. This mapping must be qualified before release; additional users accept an admin invitation through the UI. No unauthenticated first-visitor admin bootstrap.
 - Initial DashQ setup reuses the existing guarded deployment and presents only missing server-side inputs through its setup flow; connection users never edit config. Langfuse export may remain unconfigured without blocking dashboard enrollment or resource history.
-- Generate an opaque random 256-bit device credential, store only its verifier server-side, and keep it in the host's protected credential store. It is explicitly revocable, with no silent credential expiry in this proposal. Rotation through re-enrollment replaces the credential without replacing installation identity. This deliberate lifetime choice must be included in owner review.
+- Generate an opaque random 256-bit device credential, store only its verifier server-side, and keep it in the host's protected credential store. It is explicitly revocable, without automatic expiry. Rotation through re-enrollment replaces the credential without replacing installation identity. Owner-accepted exception to the shared bounded-token-lifetime baseline: unattended observation must continue without periodic human enrollment. This exception applies only to this installation ingestion/receipt/revoke credential; never to browser, administrator, forge, agent execution or task-action access. Revocation and scope isolation are release gates.
 - A grant identifies a product installation, not a physical machine. Host names/IPs are labels. Do not merge unrelated installations, native Windows and WSL. Future grouping is an explicit owner action; adding ServerQ on the same named host does not inherit AgentQ access.
 - Pairing timeout: 10 min; minimum poll interval 5 s with RFC slow-down behavior. Codes are single-use and random: 8 characters from a 32-symbol alphabet; at most 5 failed approvals per code, then invalidate it. Limit new sessions to 10/min per source IP and 1,000 pending globally, with a clear retry response; shared-NAT handling is part of qualification. Repeated token delivery after a lost response recovers the same grant until client acknowledgement/expiry; keep any required token-response secret encrypted and erase it at acknowledgement or 10 min expiry. Never issue another grant on a blind retry.
 
@@ -72,9 +72,9 @@ Only allowlisted metadata and producer schemas cross this connection. Do not upl
 
 ## C5. Operational defaults to qualify
 
-These are proposed release targets, not measured performance or existing policy.
+These are accepted release targets, not measured performance or claims about existing releases.
 
-| Concern | Proposed bound / behavior |
+| Concern | Required bound / behavior |
 |---|---|
 | Heartbeat | Immediate real snapshot on connect; then 60 s, coalesced; stale after 180 s |
 | Resources | Keep AgentQ's 300 s samples and 900 s freshness; first CPU baseline is unknown; at least 3 samples for a trend |
@@ -109,7 +109,7 @@ Chain tests cover enrollment → commit → projection → receipt and revoke �
 
 ## C7. Contract changes and delivery
 
-Before implementation approval, update together:
+Canonical adoption boundaries:
 
 - DashQ D1–D3: narrow enrollment/ingestion writes, SQLite, actor authorization and machine routes; retain loopback listener and guarded browser data. D4/D6/D7: push source projection, durable expected installations and independent optional sources. D8: connection UI and scoped views.
 - AgentQ §§1/5/6/8 and INSTALL: real enroll/status/disconnect workflow, protected grant, immediate snapshot, destination ownership and recovery. Replace the ambiguous GitHub-device-flow wording with approval through the actual DashQ identity provider; preserve standalone mode.
@@ -119,4 +119,4 @@ Before implementation approval, update together:
 
 Delivery batches are implementation boundaries, not partial product releases: (1) shared connection contract/client and conformance traces; (2) DashQ authenticated enrollment/store/ingestion/projection; (3) AgentQ integration and migration; (4) full UI/platform/outage/guard qualification and release. Changes can merge behind an inactive capability; user-facing connection ships only when E1–E10 applicable to AgentQ pass. One approved task contract governs its publication and rollout, not a manual approval at each build step.
 
-Use existing coreq #22, dashq #4/#24 and agentq #60 for ownership and split bounded implementation work after design acceptance. Reuse resource probes/qualification #85/#86 and dashboard #23; do not create another sampler. Production access and credential changes are not authorized by this design document.
+Use existing coreq #22, dashq #4/#24 and agentq #60 for ownership and split bounded implementation work under this accepted contract. Reuse resource probes/qualification #85/#86 and dashboard #23; do not create another sampler. Production access and credential changes are not authorized by this design document.

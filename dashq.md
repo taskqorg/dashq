@@ -1,8 +1,9 @@
 # dashq
 
-dashq is one read-only page for the taskqorg tools: hosts and versions, taskq boards, agent activity and compression from Langfuse, and serverq checks. This file holds every decision; changes follow specq [spec first](https://github.com/taskqorg/specq/blob/main/engineering/spec-first.md). No history here: decisions only, at most 200 lines.
+dashq is one operator page for the taskqorg tools: hosts and versions, taskq boards, agent activity and compression from Langfuse, and serverq checks. This file holds every decision; changes follow specq [spec first](https://github.com/taskqorg/specq/blob/main/engineering/spec-first.md). No history here: decisions only, at most 200 lines.
 
 ## D1. Scope
+The pull-only rules below describe the current baseline. Accepted D11 narrowly replaces the no-write, no-push and no-database restrictions for enrollment, ingestion and connection management; it does not authorize host commands.
 - Read-only: dashq never writes to Langfuse, GitHub, serverq or any host. No buttons that change state.
 - No new auth system: the page sits behind the existing Langfuse UI forward-auth guard (D3).
 - No push channel from hosts: dashq only pulls the sources in D4. Host push is a later task (#4).
@@ -15,7 +16,7 @@ dashq is one read-only page for the taskqorg tools: hosts and versions, taskq bo
 - `dashq report [--period=S] [--host=H] [--agent=A] [--session=ID]` prints the `/data` JSON once (D7) for agents on the host without a browser login.
 - `dashq selftest` loads config, renders the fixture snapshot and reads each source once; no writes.
 - `dashq --snapshot DIR` writes the fixture page as `DIR/page.html` (stylesheet inlined, no script) and `DIR/page.png`, so a reviewer sees the rendering without a browser login. PNG renderer: headless Chrome (`--headless --screenshot`, 1280 px wide), the binary from env `DASHQ_CHROME`, else `google-chrome`, `chromium`, `chromium-browser` on `PATH`, else the macOS Google Chrome app. No Chrome: `page.html` is written and the command fails naming the missing renderer. No config, no source reads.
-- Routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. Any other path 404; any other method 405.
+- Baseline routes (D11 adds its explicit authenticated routes): `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. Any other path 404; any other method 405.
 - Headers on every response: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, CSP `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. No third-party assets.
 - Config: a private JSON file named by env `DASHQ_CONFIG`, else `<install>/config.json` (coreq service units pass only `PATH`), mode 0600: Langfuse base URL, project id and keys, a read-only GitHub token, the project list (D4.2), the serverq report path and the host id its row joins, the public `dash.` host name. Requests whose `Host` is not the loopback address or that name get 421 (DNS rebinding). Secrets never reach the browser, `/data`, logs or `report` output. Invalid config: the service refuses to start and names the bad key, never the value. `selftest` without any config file skips the source reads and says so.
 - `dashq service install|uninstall|run` and `dashq update [--check]` are the coreq commands; `service run` is `serve` and marks the release healthy after 60 s.
@@ -24,7 +25,7 @@ dashq is one read-only page for the taskqorg tools: hosts and versions, taskq bo
 ## D3. Deployment
 - Runs on the production host (FRA), where Langfuse and the serverq report live.
 - Served under the `dash.` host name of the Langfuse UI domain. The reverse proxy site for that name runs the same `forward_auth` guard as the Langfuse UI first, then proxies to `127.0.0.1:18882`.
-- No public port: no firewall change, no listener on a public address, no route under `/api/public`, no bypass of the guard for any path including `/data`.
+- No public port: no firewall change, no listener on a public address, no route under `/api/public`, browser data including `/data` always remains guarded. D11 machine routes use their own narrow authorization instead of browser forward-auth; no wildcard exemption.
 - Rollback: remove the `dash.` site block, stop the dashq service. Nothing else changes.
 - dashq supersedes the agentq ServiceQ panel (`/serviceq`); its removal is agentq's task, not dashq's.
 
@@ -107,7 +108,7 @@ Every view of agentq `docs/SERVICEQ.md` maps here:
 
 ## D10. Dashboard redesign target
 
-Integration research: [independent products](docs/design/integration.md), [service adapters and owner answers](docs/design/adapters.md). Latest exploratory layout: [review findings](docs/design/overview-review.md). These proposals do not amend D1–D7 or replace the accepted references below.
+Integration research: [independent products](docs/design/integration.md), [service adapters and owner answers](docs/design/adapters.md). Latest exploratory layout: [review findings](docs/design/overview-review.md). The layout review remains exploratory; accepted enrollment in D11 amends D1–D8 without replacing the layout references below.
 
 Approved design; not implemented by this specification change. Apply [shared dashboard and widget rules W1–W15](https://github.com/taskqorg/specq/blob/main/design/dashboards.md). The [accepted reference](docs/design/overview.md) owns layout and preview parameters. D8 documents the existing section inventory; preserve its information while changing hierarchy.
 
@@ -130,3 +131,14 @@ Acceptance: review the first viewport and deeper content with representative liv
 - Follows the [specq security baseline](https://github.com/taskqorg/specq/blob/main/engineering/security.md); reports go to the route in `SECURITY.md`.
 - Every workflow declares top-level `permissions: contents: read`; a publishing job adds only what it writes (`release.yml` `publish`: `contents: write`).
 - Accepted exception (owner @alexkirs): the repository is private on the GitHub free plan, so branch protection, secret scanning with push protection, Dependabot alerts and private vulnerability reporting are unavailable. Reason: the plan does not offer them for private repositories. Compensation: owner-only pushes and tags, reviewed PRs, committed lockfile. Revisit when the repository goes public or the plan changes.
+
+## D11. Independent product connections
+
+Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1–E10, owns the end-to-end connection contract. Implementation and release qualification remain pending.
+
+- One process and one SQLite store (WAL/FULL) own grants, membership, revocations, receipts, projections, history and bounded export outbox. No extra daemon or database server.
+- C3 owns browser/device routes and authority; C4 owns durable acceptance and replay; C5 owns limits. Adjust CSP only for reviewed same-origin approval forms. Keep the loopback listener; never expose read APIs through machine-route exceptions.
+- D4 gains authenticated producer snapshots. Enrollment registry supplies expected installations even without recent events; optional Langfuse/GitHub sources cannot block independent product enrollment or hide committed snapshots. Legacy sources keep their provenance and never create duplicate identities by hostname.
+- D6/D7 apply the authenticated actor's scope server-side, including HTML, history, evidence, exports and local report. Local report is a protected host-administrator capability, never a remote identity bypass. Freshness uses producer observation time; connection and export health remain separate.
+- D8 adds approval, scoped installation overview and explicit revoke. First completion requires the same projection as the browser; resource history needs real samples. Observation grants provide no task-answer or host-command authority.
+- Security exception: C3's owner-accepted non-expiring ingestion credential is revocable, per installation and observation-only; all other credential classes follow the shared security baseline.

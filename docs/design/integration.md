@@ -1,6 +1,6 @@
 # Independent products, one dashboard
 
-Owner requirement: TaskQ, AgentQ and ServerQ remain independently installable and useful. DashQ integrates whichever products the owner connects. This design proposal does not amend [D1–D7](../../dashq.md), enable host push or authorize writes.
+Owner requirement: TaskQ, AgentQ and ServerQ remain independently installable and useful. DashQ integrates whichever products the owner connects. The accepted [enrollment contract](enrollment.md) and [D11](../../dashq.md#d11-independent-product-connections) amend D1–D8. This inventory supplies context; enrollment owns the connection lifecycle.
 
 ## Existing common ground
 
@@ -15,7 +15,7 @@ Owner requirement: TaskQ, AgentQ and ServerQ remain independently installable an
 
 coreq already removes repeated lifecycle code. Its common status keys do not describe every product capability, establish cross-product host identity or transport remote reports. A matching `host` name is insufficient identity proof.
 
-## Proposed integration
+## Integration boundaries
 
 1. Connect an explicit source: product kind, supported schema, scope and access reference. Do not scan hosts or require installation of the other products.
 2. A DashQ adapter reads that product's existing interface and returns an internal view with source identity, observation time, freshness, completeness and available capabilities. Keep producer-specific payloads; do not force every product into a task model.
