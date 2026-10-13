@@ -1,6 +1,6 @@
 # dashq
 
-dashq is one read-only page for the taskqorg tools: hosts and versions, taskq boards, agent activity and compression from Langfuse, and serverq checks. This file holds every decision. A change that alters a decision edits this file first (AGENTS.md); code, README and deployment follow. No history here: decisions only, at most 200 lines.
+dashq is one read-only page for the taskqorg tools: hosts and versions, taskq boards, agent activity and compression from Langfuse, and serverq checks. This file holds every decision; changes follow specq [spec first](https://github.com/taskqorg/specq/blob/main/engineering/spec-first.md). No history here: decisions only, at most 200 lines.
 
 ## D1. Scope
 - Read-only: dashq never writes to Langfuse, GitHub, serverq or any host. No buttons that change state.
