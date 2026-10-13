@@ -242,7 +242,13 @@ impl Store {
             let known: Option<(String, String)> = tx.query_row("SELECT product, runtime FROM installations WHERE id = ?1", [inst.id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
             match known {
                 Some((p, r)) if p != inst.product || r != inst.runtime => return Err(Error::Conflict),
-                Some(_) => {}
+                Some(_) => {
+                    // ponytail: a workspace switch (C1 old → new) is refused until its explicit flow exists
+                    let last: Option<String> = tx.query_row("SELECT workspace FROM grants WHERE installation = ?1 ORDER BY generation DESC LIMIT 1", [inst.id], |r| r.get(0)).optional()?;
+                    if last.is_some_and(|w| w != workspace) {
+                        return Err(Error::Conflict);
+                    }
+                }
                 None => {
                     tx.execute("INSERT INTO installations VALUES (?1, ?2, ?3, ?4, ?5)", params![inst.id, inst.product, inst.runtime, inst.label, now])?;
                 }
@@ -474,6 +480,8 @@ mod tests {
         assert_eq!(s.accept(b"v1", &[snap("e5", NOW, "x")], NOW), Err(Error::Denied));
         assert_eq!(s.history("inst-1").unwrap().len(), 4);
         assert_eq!(s.grant(&Installation { runtime: "wsl", ..AGENT }, "w", "a", "snapshot", b"v9", NOW), Err(Error::Conflict));
+        assert_eq!(s.grant(&AGENT, "other", "a", "snapshot", b"v9", NOW), Err(Error::Conflict));
+        assert!(s.authorize(b"v1b").unwrap().is_some());
         let many: Vec<_> = (0..101).map(|_| snap("e", NOW, "")).collect();
         assert_eq!(s.accept(b"v1b", &many, NOW), Err(Error::TooMany));
         // the writer queue is bounded: past it callers get Busy, not an unbounded wait
