@@ -2,6 +2,8 @@
 
 Accepted under [D13](../../dashq.md#d13-taskq-answer-card). [TaskQ shared answer card](https://github.com/taskqorg/taskq/blob/main/docs/design/answer-card.md) owns presentation, interaction, assets and fixtures. Reuse it; do not fork it. [Enrollment](enrollment.md) continues to authorize observation only.
 
+Composition follows [first-screen F-A1–F-A5](first-screen.md); compact blocks inherit [TaskQ B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md). The dashboard shell may place or disclose the shared component, never fork its internal layout/icons or remove required controls.
+
 ## Placement
 
 Open the shared card directly under its project/task in Boards. Keep the linked board icon, aligned counts and charts. Attention links to the same card, not a duplicate editor. Retain expansion, drafts, focus and scroll on automatic refresh. After acceptance retain the local receipt; update counters only from the new authoritative snapshot. Never claim worker resumption from answer acceptance.

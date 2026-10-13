@@ -2,6 +2,8 @@
 
 Accepted under [D14](../../dashq.md#d14-taskq-resource-controls). The [TaskQ shared-resource contract](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-resource-controls.md) owns component behavior, policy semantics and target-host adapter. Reuse the versioned static assets from the shared-card delivery mechanism; no independently maintained renderer or copied Auto rules.
 
+Composition follows [first-screen F-A1–F-A5](first-screen.md); compact blocks inherit [TaskQ B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md). The dashboard shell may place or disclose the shared component, never fork its internal layout/icons or remove required controls.
+
 ## Placement and scope
 
 - Connected node rows expose runtime usage/effective limits, Auto/Fixed or the legacy guard, current blockers and policy/sample age. Open the same Work mode editor beside the selected node. Preserve the first-screen resource charts and board layout; detailed settings appear on demand.
