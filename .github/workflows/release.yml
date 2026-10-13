@@ -1,0 +1,70 @@
+# dashq.md D2 Release: static Linux binary per arch, SHA256SUMS, latest.json. A failing selftest publishes nothing.
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            name: linux-aarch64
+    runs-on: ${{ matrix.os }}
+    env:
+      DASHQ_SELFTEST_OFFLINE: '1'
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: rustup update stable --no-self-update && rustup default stable && rustup target add "$TARGET"
+      - name: Tag equals Cargo.toml version
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          grep -q "^version = \"$ver\"" Cargo.toml
+          echo "VER=$ver" >> "$GITHUB_ENV"
+      - run: cargo test --locked
+      - run: cargo build --locked --release --target "$TARGET"
+      - name: Selftest and stage
+        run: |
+          bin="target/$TARGET/release/dashq"
+          file "$bin" | grep -Eq 'static(ally|-pie) linked'
+          "$bin" selftest
+          mkdir dist
+          cp "$bin" "dist/dashq-$VER-${{ matrix.name }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Describe
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          cd dist
+          sha256sum dashq-* > SHA256SUMS
+          python3 - "$ver" <<'PY'
+          import json, os, sys
+          ver = sys.argv[1]
+          files = {n[len(f'dashq-{ver}-'):]: n for n in sorted(os.listdir('.')) if n.startswith(f'dashq-{ver}-')}
+          assert set(files) == {'linux-x86_64', 'linux-aarch64'}, files
+          json.dump({'version': ver, 'files': files}, open('latest.json', 'w'), indent=1)
+          PY
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "DashQ $GITHUB_REF_NAME" --notes "dashq $GITHUB_REF_NAME"
