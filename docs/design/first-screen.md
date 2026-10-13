@@ -68,3 +68,5 @@ Implementation: #23 owns composition, #43 answers/board children, #46 node contr
 ServerQ detail and task handoff follow [H1–H4](finding-tasks.md); Attention, finding and Boards share one task editor. The first-screen layout is unchanged.
 
 Connection detail uses [L1–L4](connections.md); source freshness and enrollment state remain distinct in the overview.
+
+AgentQ integration detail follows [G1–G4](agentq-settings.md); configuration, host readback and client verification stay distinct. TaskQ Work mode remains the separate task/admission owner.

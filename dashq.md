@@ -161,3 +161,7 @@ Accepted target: [resource controls](docs/design/resource-controls.md) reuses Ta
 ## D15. ServerQ finding handoff
 
 Accepted target: [finding tasks H1–H4](docs/design/finding-tasks.md) narrowly extends D1 with an explicitly authorized TaskQ create/optional-start adapter and shared TaskQ composer. Observation credentials and `/answer` gain no authority. TaskQ owns board mutation/readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Implementation and live qualification remain pending.
+
+## D16. AgentQ integration settings
+
+Accepted target: [client integration G1–G4](docs/design/agentq-settings.md) adds a separately authorized typed AgentQ configuration adapter to D1/D2. AgentQ owns discovery, plans, revision checks, journaled apply, readback and native-client verification; DashQ supplies scoped presentation and delivery. Observation credentials and `/answer` gain no authority. Release remains gated by real host and consumer qualification.
