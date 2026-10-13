@@ -148,11 +148,15 @@ fn handle(app: &App, mut s: TcpStream) {
     if r.read_line(&mut line).is_err() {
         return;
     }
-    let (mut h, mut host) = (String::new(), None);
-    loop {
+    let (mut h, mut host, start) = (String::new(), None, std::time::Instant::now());
+    for _ in 0..100 {
         h.clear();
         if r.read_line(&mut h).map_or(true, |n| n == 0) || h.trim().is_empty() {
             break;
+        }
+        // a slow drip of header lines gets 10 s in total, not per line
+        if start.elapsed() > Duration::from_secs(10) {
+            return;
         }
         if let Some((k, v)) = h.split_once(':')
             && k.eq_ignore_ascii_case("host")
@@ -226,7 +230,8 @@ fn serve(t: &Tool, service: bool) -> ! {
         }
         let (app, open) = (app.clone(), open.clone());
         std::thread::spawn(move || {
-            handle(&app, s);
+            // the slot is freed even when a request panics
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle(&app, s)));
             open.fetch_sub(1, SeqCst);
         });
     }

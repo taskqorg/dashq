@@ -148,7 +148,7 @@ fn civil(t: u64) -> (i64, i64, i64, u64) {
 /// `2026-10-13T07:05:39Z`, fractions ignored. `ponytail:` UTC only; Langfuse and GitHub send `Z`.
 pub fn iso_secs(s: &str) -> Option<u64> {
     let n = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
-    if s.len() < 19 || &s[4..5] != "-" || &s[10..11] != "T" {
+    if s.get(4..5) != Some("-") || s.get(10..11) != Some("T") {
         return None;
     }
     let t = days_from_civil(n(0..4)?, n(5..7)?, n(8..10)?) * 86400 + n(11..13)? * 3600 + n(14..16)? * 60 + n(17..19)?;
@@ -291,6 +291,7 @@ mod tests {
         assert_eq!((r.status, r.date, r.body["a"].as_i64()), (200, Some(1_791_875_139), Some(1)));
         assert_eq!(dec("fra%2Fnative").as_deref(), Some("fra/native"));
         assert_eq!(enc("a b/c"), "a%20b%2Fc");
+        assert_eq!(iso_secs("2026-1€-13T07:05:39Z"), None, "non-ASCII never panics");
     }
 
     #[test]
