@@ -3,6 +3,8 @@
 mod data;
 mod page;
 mod source;
+#[allow(dead_code)] // inactive until the enrollment routes use it (D11)
+mod store;
 
 use coreq::Tool;
 use serde_json::{Value, json};
