@@ -198,6 +198,40 @@
         "reason": "no serverq report for this host"
       },
       "services": []
+    },
+    {
+      "id": "win-1/native",
+      "snapshot": {
+        "state": "unknown",
+        "at": null,
+        "age_s": null,
+        "reason": "no snapshot in 24 h"
+      },
+      "taskq": {
+        "version": null,
+        "latest": "4.2.0",
+        "behind": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no heartbeat"
+      },
+      "agentq": {
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.4.17",
+        "updater": null,
+        "subscription": null,
+        "behind": null
+      },
+      "serverq": {
+        "status": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no serverq report for this host"
+      },
+      "services": []
     }
   ],
   "attention": {
@@ -315,6 +349,14 @@
         "trace_id": "tr-n1"
       },
       {
+        "source": "Langfuse",
+        "host": "win-1/native",
+        "what": "agentq installation inst-win: stale",
+        "since": null,
+        "detail": "no heartbeat in 24 h",
+        "trace_id": "tr-q5"
+      },
+      {
         "source": "serverq",
         "host": "fra/native",
         "what": "bounded-journal: unknown",
@@ -324,6 +366,14 @@
       }
     ],
     "incidents": [
+      {
+        "source": "agentq",
+        "host": "win-1/native",
+        "what": "agentq incident (update)",
+        "since": 1791867600,
+        "occurrences": null,
+        "trace_id": "tr-q6"
+      },
       {
         "source": "Langfuse",
         "host": "fra/native",
@@ -435,8 +485,49 @@
     "incomplete": {
       "activity": false,
       "compression": false,
-      "native_tools": true
+      "native_tools": true,
+      "agentq.installation": false,
+      "agentq.run": false,
+      "agentq.retrieval": false
     },
+    "fleet": [
+      {
+        "installation": "inst-fra",
+        "host": "fra/native",
+        "runtime": "linux",
+        "version": "0.5.0",
+        "last_seen": 1791874560,
+        "heartbeat_at": 1791873000,
+        "runs": 2,
+        "nonzero_exits": 1,
+        "exit_samples": 2,
+        "retrievals": 1,
+        "failed_retrievals": 0,
+        "trace_id": "tr-q4",
+        "state": "ok",
+        "reason": null,
+        "latest": "0.4.17",
+        "behind": false
+      },
+      {
+        "installation": "inst-win",
+        "host": "win-1/native",
+        "runtime": "windows",
+        "version": "0.4.0",
+        "last_seen": 1791874800,
+        "heartbeat_at": null,
+        "runs": 0,
+        "nonzero_exits": 0,
+        "exit_samples": 0,
+        "retrievals": 1,
+        "failed_retrievals": 1,
+        "trace_id": "tr-q5",
+        "state": "stale",
+        "reason": "no heartbeat in 24 h",
+        "latest": "0.4.17",
+        "behind": true
+      }
+    ],
     "activity": [
       {
         "host": "fra/native",
