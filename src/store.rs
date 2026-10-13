@@ -138,6 +138,8 @@ pub struct Pairing {
     pub label: String,
     /// JSON array of the requested schemas.
     pub schemas: String,
+    /// The installation has a live grant that approval replaces.
+    pub replaces: bool,
 }
 
 /// `/connect/token` answer (RFC 8628 § 3.5).
@@ -379,8 +381,10 @@ impl Store {
     pub fn pending(&self, user_code: &str, now: i64) -> Result<Option<Pairing>, Error> {
         Ok(self
             .lock()?
-            .query_row("SELECT product, installation, runtime, label, schemas FROM pairings WHERE user_code = ?1 AND state = 'pending' AND expires > ?2", params![user_code, now], |r| {
-                Ok(Pairing { product: r.get(0)?, installation: r.get(1)?, runtime: r.get(2)?, label: r.get(3)?, schemas: r.get(4)? })
+            .query_row("SELECT product, installation, runtime, label, schemas, EXISTS (SELECT 1 FROM grants g WHERE g.installation = p.installation
+               AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation))
+             FROM pairings p WHERE user_code = ?1 AND state = 'pending' AND expires > ?2", params![user_code, now], |r| {
+                Ok(Pairing { product: r.get(0)?, installation: r.get(1)?, runtime: r.get(2)?, label: r.get(3)?, schemas: r.get(4)?, replaces: r.get(5)? })
             })
             .optional()?)
     }

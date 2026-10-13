@@ -359,6 +359,8 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
         Ok(None) => return fail("404 Not Found", "This code is unknown, expired or already used. Start the connection again on the host."),
         Err(_) => return fail("503 Service Unavailable", "The connection store is unavailable."),
     };
+    // installation IDs are not secrets: say plainly when approval ends a live connection
+    let replaces = if p.replaces { "<p><strong>This installation is already connected. Approving replaces that connection; its current credential stops working.</strong></p>\n" } else { "" };
     let scopes: Vec<String> = serde_json::from_str::<Vec<String>>(&p.schemas).unwrap_or_default().iter().map(|s| format!("<code>{}</code>", esc(s))).collect();
     // pick a workspace only when there is a choice (C1)
     let ws = if let [(w, _)] = spaces.as_slice() {
@@ -370,7 +372,7 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     html(
         "200 OK",
         &format!(
-            "{who}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
+            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
             esc(&p.product),
             esc(&p.label),
             esc(&p.runtime),
@@ -551,6 +553,12 @@ mod tests {
         assert_eq!(call(&e, "POST", "/connect", &ok_h, &form.replace(&csrf, ""), T0).0, "403 Forbidden");
         let other = e.as_ref().unwrap().token("github|9", &code);
         assert_eq!(call(&e, "POST", "/connect", &ok_h, &form.replace(&csrf, &other), T0).0, "403 Forbidden");
+        // re-pairing a connected installation says it replaces that connection
+        assert!(!page(&e, "github|1", &code, T0).1.contains("already connected"));
+        let (_, c0) = start(&e, "inst-0", T0);
+        decide(&e, "github|1", &c0, "approve", "ws-1", T0);
+        let (_, c1) = start(&e, "inst-0", T0);
+        assert!(page(&e, "github|1", &c1, T0).1.contains("already connected"));
         // a forged subject header on a machine route grants nothing
         let forged = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 5);
         assert_eq!(forged.1["error"], "authorization_pending");
