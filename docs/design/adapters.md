@@ -38,7 +38,7 @@ Each adapter reads one existing producer interface and returns the coreq source 
 | Adapter | Reads | Capabilities | Status |
 |---|---|---|---|
 | `taskq-labels` | GitHub issues and heartbeats (D4.2) | `board-counts`, `attempts` | shipped; fallback while no snapshot |
-| `taskq-snapshot` | `taskq status --json` per board (S3) | `board-counts`, `questions`, `failures`, `attempts` | proposed |
+| `taskq-snapshot` | `taskq status --json` per board (S3) | `board-counts`, `questions`, `failures` | shipped (R1, [#39](https://github.com/taskqorg/dashq/issues/39)); attempts stay heartbeat reads |
 | `agentq-langfuse` | Langfuse events (D4.1) | `fleet`, `activity`, `incidents`, later `resources` | shipped, `resources` proposed |
 | `agentq-ingest` | enrollment snapshot and samples (C2, C4) | same as above | proposed |
 | `serverq-report` | local `report.json` (D4.3) | `findings`, `incidents` | shipped |
@@ -57,7 +57,7 @@ Composition (integration I1–I7, A7):
 
 dashq never folds the taskq log (integration: do not rebuild the state machine). Two read paths deliver the taskq#886 snapshot:
 
-- **R1 (recommended now).** dashq runs the pinned `taskq status --json` binary per configured board with its existing read-only GitHub token, under the same single flight, 10 s timeout and 60 s cache as D4.2. No host push, no new credential. Qualification: taskq reads a board without a project checkout and with a read-only token; otherwise R2 only.
+- **R1 (recommended now).** dashq runs the pinned `taskq status --json` binary per configured board with its existing read-only GitHub token, under the same single flight, 10 s timeout and 60 s cache as D4.2. No host push, no new credential. Qualification: taskq reads a board without a project checkout and with a read-only token; otherwise R2 only. #39: reads without a checkout qualified (scratch `taskq.json`, cleared environment, no files written); a read-only token remains to qualify on the deployment host.
 - **R2 (later).** taskq services deliver the same snapshot through enrollment (C2 TaskQ row). Same frame, same question shape.
 
 Question shape per coreq § 3: `{id: issue url, revision, text, choices[{k, text}], recommended, free_text}`.

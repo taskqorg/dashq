@@ -116,6 +116,26 @@
       "value": {"date": 1791874800, "issues": [{"number": 3, "title": "dashq 0.1", "url": "https://github.com/taskqorg/dashq/issues/3", "labels": ["taskq", "q-doing"]}], "hosts": []}
     }
   },
+  "taskq": {
+    "taskqorg/taskq": {
+      "at": 1791875100, "error": null, "incomplete": false,
+      "value": {
+        "schema": 1, "source": "board", "observed": 1791875100, "complete": true, "reason": null,
+        "totals": {"ask": 1, "doing": 1, "failed": 1, "held": 0, "later": 0, "ready": 1, "review": 1, "waiting": 0},
+        "tasks": [
+          {"n": 10, "title": "Doing task", "state": "doing", "url": "https://github.com/taskqorg/taskq/issues/10", "revision": 6139993856, "card": null, "question": null, "failed": null},
+          {"n": 11, "title": "Review task", "state": "review", "url": "https://github.com/taskqorg/taskq/issues/11", "revision": 6139993901, "card": "Merge now or wait?",
+           "question": {"parsed": false, "text": "Merge now or wait?", "done": null, "problem": null, "evidence": [], "choices": []}, "failed": null},
+          {"n": 12, "title": "Which option? <b>", "state": "ask", "url": "https://github.com/taskqorg/taskq/issues/12", "revision": 6139994000, "card": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★",
+           "question": {"parsed": true, "text": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★", "done": "checked", "problem": "pick a store <i>", "evidence": [],
+                        "choices": [{"id": 1, "text": "SQLite", "recommended": false, "consequential": false}, {"id": 3, "text": "Files", "recommended": true, "consequential": false}]}, "failed": null},
+          {"n": 13, "title": "Ready task", "state": "ready", "url": "https://github.com/taskqorg/taskq/issues/13", "revision": 6139994100, "card": null, "question": null, "failed": null},
+          {"n": 14, "title": "Broken task", "state": "failed", "url": "https://github.com/taskqorg/taskq/issues/14", "revision": 6139994200, "card": null, "question": null, "failed": "Reason: CI <red> on every runner"}
+        ]
+      }
+    },
+    "taskqorg/dashq": {"value": null, "at": null, "error": "taskq timeout", "incomplete": false}
+  },
   "releases": {
     "taskqorg/taskq": {"value": "4.2.0", "at": 1791875000, "error": null, "incomplete": false},
     "taskqorg/agentq": {"value": "0.4.17", "at": 1791875000, "error": null, "incomplete": false},

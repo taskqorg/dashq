@@ -24,6 +24,13 @@
       "age_s": 3600,
       "reason": null,
       "incomplete": false
+    },
+    "taskq": {
+      "state": "unknown",
+      "at": 1791875100,
+      "age_s": 39,
+      "reason": "taskqorg/dashq: read failed (taskq timeout)",
+      "incomplete": false
     }
   },
   "hosts": [
@@ -239,7 +246,7 @@
       "state": "unknown",
       "at": 1791871539,
       "age_s": 3600,
-      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC",
+      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout)",
       "incomplete": true
     },
     "current": [
@@ -301,7 +308,7 @@
         "host": null,
         "what": "taskqorg/taskq#14: failed",
         "since": null,
-        "detail": "Broken task",
+        "detail": "Reason: CI <red> on every runner",
         "trace_id": null,
         "url": "https://github.com/taskqorg/taskq/issues/14"
       },
@@ -411,21 +418,55 @@
         "reason": null,
         "incomplete": false
       },
+      "adapter": "taskq-snapshot",
       "in_work": 2,
       "waiting": 1,
       "ready": 1,
       "questions": [
         {
+          "id": "https://github.com/taskqorg/taskq/issues/11",
+          "number": 11,
+          "title": "Review task",
+          "url": "https://github.com/taskqorg/taskq/issues/11",
+          "state": "review",
+          "revision": 6139993901,
+          "parsed": false,
+          "done": null,
+          "text": "Merge now or wait?",
+          "choices": [],
+          "recommended": null,
+          "free_text": false
+        },
+        {
+          "id": "https://github.com/taskqorg/taskq/issues/12",
           "number": 12,
           "title": "Which option? <b>",
-          "url": "https://github.com/taskqorg/taskq/issues/12"
+          "url": "https://github.com/taskqorg/taskq/issues/12",
+          "state": "ask",
+          "revision": 6139994000,
+          "parsed": true,
+          "done": "checked",
+          "text": "pick a store <i>",
+          "choices": [
+            {
+              "k": 1,
+              "text": "SQLite"
+            },
+            {
+              "k": 3,
+              "text": "Files"
+            }
+          ],
+          "recommended": 3,
+          "free_text": true
         }
       ],
       "failed": [
         {
           "number": 14,
           "title": "Broken task",
-          "url": "https://github.com/taskqorg/taskq/issues/14"
+          "url": "https://github.com/taskqorg/taskq/issues/14",
+          "reason": "Reason: CI <red> on every runner"
         }
       ],
       "attempts": [
@@ -447,6 +488,7 @@
         "reason": "read failed (timeout)",
         "incomplete": false
       },
+      "adapter": "taskq-labels",
       "in_work": null,
       "waiting": null,
       "ready": null,
@@ -459,15 +501,16 @@
       "project": "taskqorg/dashq",
       "url": "https://github.com/taskqorg/dashq/issues",
       "source": {
-        "state": "unconfirmed",
-        "at": 1791874800,
-        "age_s": 339,
-        "reason": "read failed (rate limited), showing 07:00 UTC",
+        "state": "unknown",
+        "at": null,
+        "age_s": null,
+        "reason": "read failed (taskq timeout)",
         "incomplete": false
       },
-      "in_work": 1,
-      "waiting": 0,
-      "ready": 0,
+      "adapter": "taskq-snapshot",
+      "in_work": null,
+      "waiting": null,
+      "ready": null,
       "questions": [],
       "failed": [],
       "attempts": [],

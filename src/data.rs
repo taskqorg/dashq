@@ -602,6 +602,7 @@ pub fn build(inp: &Value) -> Value {
     let latest = |repo: &str| releases[repo]["value"].clone();
     let mut boards = Vec::new();
     let mut gh_states = Vec::new();
+    let mut taskq_states = Vec::new();
     for repo in inp["projects"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let snap = &inp["boards"][repo];
         let src = source(snap, now, GITHUB_LIMIT, None);
@@ -644,16 +645,33 @@ pub fn build(inp: &Value) -> Value {
             t["state"] = json!(if age.is_none() { "unknown" } else if fresh { "ok" } else { "stale" });
             t["reason"] = if fresh { Value::Null } else { json!(age.map_or("heartbeat age unknown".into(), |a| format!("heartbeat {} old (ttl {})", dur(a), dur(ttl)))) };
         }
-        let failed = list(&["q-failed"]);
-        for i in failed.as_array().unwrap() {
-            current.push(json!({"source": "taskq", "host": null, "what": format!("{repo}#{}: failed", i["number"]), "since": null, "detail": i["title"], "trace_id": null, "url": i["url"]}));
-        }
-        boards.push(json!({
-            "project": repo, "url": format!("https://github.com/{repo}/issues"), "source": src,
+        let mut board = json!({
+            "project": repo, "url": format!("https://github.com/{repo}/issues"), "source": src, "adapter": "taskq-labels",
             "in_work": issues.map(|_| json!(with(&["q-doing", "q-review"]).unwrap().len())), "waiting": count(&["q-ask"]), "ready": count(&["q-ready"]),
-            "questions": list(&["q-ask"]), "failed": failed, "attempts": attempts, "latest": latest(repo),
-        }));
+            "questions": list(&["q-ask"]), "failed": list(&["q-failed"]), "attempts": attempts, "latest": latest(repo),
+        });
+        // taskq-snapshot (adapters.md S3 R1) replaces counts, questions and failures when configured; heartbeats stay
+        if let Some(ts) = inp["taskq"].get(repo) {
+            let tsrc = source(ts, now, GITHUB_LIMIT, None);
+            taskq_states.push((repo.to_string(), tsrc.clone()));
+            let tasks = ts["value"]["tasks"].as_array();
+            let total = |k: &[&str]| -> Value { k.iter().map(|k| ts["value"]["totals"][k].as_u64()).sum::<Option<u64>>().map_or(Value::Null, |n| json!(n)) };
+            let pick = |f: &dyn Fn(&Value) -> bool, m: &dyn Fn(&Value) -> Value| -> Value { tasks.into_iter().flatten().filter(|t| f(t)).map(m).collect::<Vec<_>>().into() };
+            board["source"] = tsrc;
+            board["adapter"] = json!("taskq-snapshot");
+            board["in_work"] = total(&["doing", "review"]);
+            board["waiting"] = total(&["ask"]);
+            board["ready"] = total(&["ready"]);
+            board["questions"] = pick(&|t| t["state"] == "ask" || (t["state"] == "review" && t["question"].is_object()), &question);
+            board["failed"] = pick(&|t| t["state"] == "failed", &|t| json!({"number": t["n"], "title": t["title"], "url": t["url"], "reason": t["failed"]}));
+        }
+        for i in board["failed"].as_array().unwrap() {
+            let detail = i["reason"].as_str().filter(|r| !r.is_empty()).map_or(i["title"].clone(), |r| json!(r));
+            current.push(json!({"source": "taskq", "host": null, "what": format!("{repo}#{}: failed", i["number"]), "since": null, "detail": detail, "trace_id": null, "url": i["url"]}));
+        }
+        boards.push(board);
     }
+    let taskq_src = (!taskq_states.is_empty()).then(|| worst(taskq_states.iter().map(|(n, s)| (n.clone(), s)), now));
     let gh_src = if gh_states.is_empty() { source(&Value::Null, now, GITHUB_LIMIT, None) } else { worst(gh_states.iter().map(|(n, s)| (n.clone(), s)), now) };
 
     // serverq (D4.3)
@@ -706,14 +724,21 @@ pub fn build(inp: &Value) -> Value {
 
     let hostf = |v: &Vec<Value>| -> Vec<Value> { v.iter().filter(|i| fhost.is_none_or(|x| i["host"] == x || i["host"].is_null())).cloned().collect() };
     history.sort_by_key(|i| std::cmp::Reverse(i["since"].as_u64()));
+    let mut sources = json!({"langfuse": lf_src, "github": gh_src, "serverq": sq_src});
+    let mut att_states = vec![("Langfuse".to_string(), lf_src.clone()), ("GitHub".to_string(), gh_src.clone()), ("serverq".to_string(), sq_src.clone())];
+    // listed only when configured: an absent adapter is not a failed source (adapters.md S2)
+    if let Some(t) = taskq_src {
+        sources["taskq"] = t.clone();
+        att_states.push(("taskq".to_string(), t));
+    }
     json!({
         "schema": 1,
         "generated_at": now,
         "period": period,
         "filters": f,
-        "sources": {"langfuse": lf_src, "github": gh_src, "serverq": sq_src},
+        "sources": sources,
         "hosts": hosts.into_values().filter(|h| fhost.is_none_or(|x| h["id"] == x)).collect::<Vec<_>>(),
-        "attention": {"source": worst([("Langfuse".to_string(), &lf_src), ("GitHub".to_string(), &gh_src), ("serverq".to_string(), &sq_src)].iter().map(|(n, s)| (n.clone(), *s)), now),
+        "attention": {"source": worst(att_states.iter().map(|(n, s)| (n.clone(), s)), now),
                       "current": hostf(&current), "gaps": hostf(&gaps), "incidents": hostf(&history)},
         "boards": boards,
         "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
@@ -721,6 +746,18 @@ pub fn build(inp: &Value) -> Value {
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
     })
+}
+
+/// One open question in the S3 shape: source choice ids, order and text kept; a card that does not parse
+/// keeps its verbatim text and no choices. Read-only: no answer control (D1).
+fn question(t: &Value) -> Value {
+    let q = &t["question"];
+    let parsed = q["parsed"] == true;
+    let choices: Vec<Value> = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).map(|c| json!({"k": c["id"], "text": c["text"]})).collect();
+    let recommended = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).find(|c| c["recommended"] == true).map_or(Value::Null, |c| c["id"].clone());
+    let text = if parsed { q["problem"].clone() } else { q["text"].clone() };
+    json!({"id": t["url"], "number": t["n"], "title": t["title"], "url": t["url"], "state": t["state"], "revision": t["revision"],
+           "parsed": parsed, "done": q["done"], "text": text, "choices": choices, "recommended": recommended, "free_text": t["state"] == "ask"})
 }
 
 /// 503 when every source failed with no value to show (D7).
@@ -740,6 +777,26 @@ mod tests {
         for bad in ["period=60", "host=a%2Fb", "agent=x", "session=a%20b", "x=1", "host=a&host=b", "period"] {
             assert!(query(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn taskq_snapshot_feeds_boards_questions_and_failures() {
+        let doc = build(&serde_json::from_str(include_str!("../fixture/input.json")).unwrap());
+        let b = &doc["boards"][0];
+        assert_eq!((b["adapter"].as_str(), b["in_work"].as_u64(), b["waiting"].as_u64(), b["ready"].as_u64()), (Some("taskq-snapshot"), Some(2), Some(1), Some(1)));
+        let q = &b["questions"];
+        // parsed card: source k, order and text kept, ★ as recommended; unparsed review card: verbatim, no choices
+        assert_eq!(q[1], json!({"id": "https://github.com/taskqorg/taskq/issues/12", "number": 12, "title": "Which option? <b>", "url": "https://github.com/taskqorg/taskq/issues/12", "state": "ask",
+            "revision": 6139994000u64, "parsed": true, "done": "checked", "text": "pick a store <i>", "choices": [{"k": 1, "text": "SQLite"}, {"k": 3, "text": "Files"}], "recommended": 3, "free_text": true}));
+        assert_eq!((q[0]["state"].as_str(), q[0]["text"].as_str(), q[0]["choices"].as_array().map(Vec::len)), (Some("review"), Some("Merge now or wait?"), Some(0)));
+        assert_eq!(b["failed"][0]["reason"], "Reason: CI <red> on every runner");
+        assert!(doc["attention"]["current"].as_array().unwrap().iter().any(|i| i["what"] == "taskqorg/taskq#14: failed" && i["detail"] == "Reason: CI <red> on every runner"));
+        // a failed snapshot reads unknown with its reason, never zero
+        let d = &doc["boards"][2];
+        assert_eq!((d["adapter"].as_str(), d["source"]["state"].as_str(), d["source"]["reason"].as_str()), (Some("taskq-snapshot"), Some("unknown"), Some("read failed (taskq timeout)")));
+        assert!(d["in_work"].is_null() && d["questions"] == json!([]));
+        assert_eq!(doc["boards"][1]["adapter"], "taskq-labels");
+        assert_eq!(doc["sources"]["taskq"]["state"], "unknown");
     }
 
     #[test]

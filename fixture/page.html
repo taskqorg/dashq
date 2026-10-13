@@ -15,7 +15,7 @@
 <main id="main">
 <p class="bar">Updated <time>07:05 UTC</time> · Period <strong>30 min</strong> · <a href="/?period=7200">2 h</a> · <a href="/?period=86400">24 h</a> <button id="refresh" type="button">Refresh</button></p>
 <p id="banner" class="banner" role="alert" hidden></p>
-<ul class="summary"><li><span class="s warn">incomplete</span> Langfuse: capped query</li><li><span class="s unknown">unknown</span> GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC</li></ul>
+<ul class="summary"><li><span class="s warn">incomplete</span> Langfuse: capped query</li><li><span class="s unknown">unknown</span> GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC</li><li><span class="s unknown">unknown</span> taskq: taskqorg/dashq: read failed (taskq timeout)</li></ul>
 <section id="attention">
 <h2>Attention</h2>
 <h3>Current problems</h3>
@@ -23,7 +23,7 @@
 <li><b>Langfuse</b> · fra/native · gateway: warning · since 07:01 UTC (4m ago)<br><span class="detail">Telemetry send failed; data stays queued.</span><br><span class="detail">Last native failure receipt (at snapshot time, not a countdown): schema 1 · at unknown · jobId unknown · version unknown · stage process · nodeCode unknown · exitCode 1 · signal unknown · killed unknown · stdoutCapturedBytes unknown · stderrCapturedBytes unknown · outputCapped unknown · elapsedMs unknown · sdkPhase unknown · httpStatus unknown · sdkErrorType unknown · sdkFailure unknown · sdkRequests unknown · sdkMaxBodyBytes unknown · sdkMaxSpanBytes unknown · sdkMaxSpans unknown · sdkRequestFinishMs unknown · sdkResponseMs unknown · sdkResponseStatus unknown · sdkRequestMs unknown · sdkTimedOut unknown · sdkSocketWrittenBytes unknown</span> <a href="https://langfuse.example.com/project/p1/traces/tr-fra-2">trace</a></li>
 <li><b>Langfuse</b> · fra/native · Codex: model call errors · in this period<br><span class="detail">1 ERROR calls in the period.</span> <a href="https://langfuse.example.com/project/p1/traces/tr-a2">trace</a></li>
 <li><b>Langfuse</b> · fra/native · Codex: compression failures · in this period<br><span class="detail">1 measured calls failed in the period.</span> <a href="https://langfuse.example.com/project/p1/traces/tr-c3">trace</a></li>
-<li><b>taskq</b> · taskqorg/taskq#14: failed · in this period<br><span class="detail">Broken task</span> <a href="https://github.com/taskqorg/taskq/issues/14">issue</a></li>
+<li><b>taskq</b> · taskqorg/taskq#14: failed · in this period<br><span class="detail">Reason: CI &lt;red&gt; on every runner</span> <a href="https://github.com/taskqorg/taskq/issues/14">issue</a></li>
 <li><b>serverq</b> · fra/native · failed-services: warn · since 02:53 UTC (4h ago)<br><span class="detail">1 failed unit</span></li>
 </ul>
 <h3>Observation gaps</h3>
@@ -58,9 +58,9 @@
 <h2>Boards</h2>
 <table>
 <tr><th>Project</th><th>Tasks</th><th>Questions</th><th>Failed</th><th>Live attempts</th></tr>
-<tr><td><a href="https://github.com/taskqorg/taskq/issues">taskqorg/taskq</a></td><td>In work 2 · Waiting for answer 1 · Ready 1</td><td><a href="https://github.com/taskqorg/taskq/issues/12">#12</a> Which option? &lt;b&gt;</td><td><a href="https://github.com/taskqorg/taskq/issues/14">#14</a> Broken task</td><td>macbook-m2.local: #10 6139993856</td></tr>
+<tr><td><a href="https://github.com/taskqorg/taskq/issues">taskqorg/taskq</a></td><td>In work 2 · Waiting for answer 1 · Ready 1</td><td><a href="https://github.com/taskqorg/taskq/issues/11">#11</a> Review task <span class="s unknown">review</span><br><span class="detail">Merge now or wait?</span><br><a href="https://github.com/taskqorg/taskq/issues/12">#12</a> Which option? &lt;b&gt;<br><span class="detail">pick a store &lt;i&gt;</span><ol class="choices"><li value="1">SQLite</li><li value="3">Files <span aria-label="recommended">★</span></li></ol></td><td><a href="https://github.com/taskqorg/taskq/issues/14">#14</a> Broken task<br><span class="detail">Reason: CI &lt;red&gt; on every runner</span></td><td>macbook-m2.local: #10 6139993856</td></tr>
 <tr><td><a href="https://github.com/taskqorg/agentq/issues">taskqorg/agentq</a><p class="note"><span class="s unknown">unknown</span> read failed (timeout)</p></td><td>In work <span class="unknown" title="unknown: read failed (timeout)">—</span> · Waiting for answer <span class="unknown" title="unknown: read failed (timeout)">—</span> · Ready <span class="unknown" title="unknown: read failed (timeout)">—</span></td><td>—</td><td>—</td><td>—</td></tr>
-<tr><td><a href="https://github.com/taskqorg/dashq/issues">taskqorg/dashq</a><p class="note"><span class="s warn">unconfirmed</span> read failed (rate limited), showing 07:00 UTC</p></td><td>In work 1 · Waiting for answer 0 · Ready 0</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td><a href="https://github.com/taskqorg/dashq/issues">taskqorg/dashq</a><p class="note"><span class="s unknown">unknown</span> read failed (taskq timeout)</p></td><td>In work <span class="unknown" title="unknown: read failed (taskq timeout)">—</span> · Waiting for answer <span class="unknown" title="unknown: read failed (taskq timeout)">—</span> · Ready <span class="unknown" title="unknown: read failed (taskq timeout)">—</span></td><td>—</td><td>—</td><td>—</td></tr>
 </table>
 </section>
 <section id="agents">
