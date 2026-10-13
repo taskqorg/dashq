@@ -1,6 +1,6 @@
 # Accepted dashboard overview
 
-Owner-approved layout under [D10](../../dashq.md#d10-dashboard-redesign-target). Shared visual behavior lives in [specq W1–W12](https://github.com/taskqorg/specq/blob/main/design/dashboards.md); do not duplicate it here.
+Owner-approved layout under [D10](../../dashq.md#d10-dashboard-redesign-target). Shared visual behavior lives in [specq W1–W15](https://github.com/taskqorg/specq/blob/main/design/dashboards.md); do not duplicate it here.
 
 ## Reference
 
@@ -15,7 +15,7 @@ Owner-approved layout under [D10](../../dashq.md#d10-dashboard-redesign-target).
 2. One shared grid: host identity and sample age; CPU percentage and line chart; RAM used/total, percentage, capacity bar and line chart; used/total and capacity bar for each filesystem. Keep row and column alignment across hosts.
 3. CPU and RAM plots cover 30 minutes on the same 0–100% scale. Label time endpoints and share scale/window labels where unambiguous. Disk bars show current utilization; detailed disk history remains available below the overview.
 4. Keep resource warnings beside the affected value and in Attention. Use the same calm fill for ordinary capacity and line marks. Threshold marks and warning colors require approved production thresholds; 85/90% in the preview are illustrative only.
-5. Below the overview: the D10 supporting views, history and diagnostics. No production demo banner, simulation button or animation playground.
+5. Immediately after the host overview: the accepted [project board block](boards.md), followed by the remaining D10 supporting views, history and diagnostics. No production demo banner, simulation button or animation playground.
 
 ## Update reference
 
