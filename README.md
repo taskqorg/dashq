@@ -20,11 +20,13 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
   "github": {"token": "<read-only token>"},
   "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/serverq", "taskqorg/coreq", "taskqorg/specq", "taskqorg/dashq"],
   "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"},
-  "public_host": "dash.example.com"
+  "public_host": "dash.example.com",
+  "taskq": {"binary": "/opt/taskq/taskq"},
+  "answer": {"token": "/home/<user>/.config/dashq/answer-token", "boards": {"taskqorg/dashq": "<workspace>"}}
 }
 ```
 
-`langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show.
+`langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show. `answer` (D13) is off unless set and stays unset in production until #44 qualifies the real board: a dedicated forge credential file (0600) and the workspace of each answerable board; `dashq answerer <workspace> <subject> on|off` grants or removes the answer capability of a workspace administrator ([answers § Route](docs/design/answers.md#route-41)).
 
 ## Deployment (D3)
 

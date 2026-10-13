@@ -450,11 +450,13 @@
           "choices": [
             {
               "k": 1,
-              "text": "SQLite"
+              "text": "SQLite",
+              "unavailable": null
             },
             {
               "k": 3,
-              "text": "Files"
+              "text": "Files",
+              "unavailable": null
             }
           ],
           "recommended": 3,

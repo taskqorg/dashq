@@ -276,6 +276,26 @@ pub fn release(repo: &str, token: &str) -> Result<(Value, bool), Fail> {
 /// with `taskq.json` and a scratch install whose `token` is the read-only token (taskq reads its token only from
 /// `$TASKQ_INSTALL/token`), 10 s timeout. The folder is removed after the run. An incomplete snapshot is a failed read.
 pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool), Fail> {
+    let (status, text) = taskq(bin, repo, token, &["status", "--json"], 10)?;
+    if !status.success() {
+        return Err((format!("taskq exit {}", status.code().unwrap_or(-1)), None));
+    }
+    let v: Value = serde_json::from_str(&text).map_err(|_| (String::from("taskq output invalid"), None))?;
+    if v["schema"] != 1 || !v["tasks"].is_array() {
+        return Err(("taskq snapshot schema unsupported".into(), None));
+    }
+    if v["complete"] != true {
+        // taskq's reason is a short board-read outcome; cap it so no stray output reaches the page
+        let r: String = v["reason"].as_str().unwrap_or("no reason").chars().take(160).collect();
+        return Err((format!("taskq incomplete: {r}"), None));
+    }
+    Ok((v, false))
+}
+
+/// One pinned taskq run for `repo` with the argument array `args` (no shell) in a fresh scratch folder holding
+/// `taskq.json` and a scratch install whose `token` is `token`: exit status and stdout. `Err` only when the run
+/// did not finish: never started (nothing written) or killed after `secs` (`taskq timeout`, outcome unknown).
+pub fn taskq(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64) -> Result<(std::process::ExitStatus, String), Fail> {
     static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dir = std::env::temp_dir().join(format!("dashq-taskq-{}-{n}", std::process::id()));
@@ -284,18 +304,18 @@ pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool),
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
     b.create(&dir).map_err(|_| (String::from("scratch folder unwritable"), None))?;
-    let r = taskq_run(bin, repo, token, &dir);
+    let r = taskq_run(bin, repo, token, args, secs, &dir);
     let _ = std::fs::remove_dir_all(&dir);
     r
 }
 
-fn taskq_run(bin: &str, repo: &str, token: &str, dir: &std::path::Path) -> Result<(Value, bool), Fail> {
+fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: &std::path::Path) -> Result<(std::process::ExitStatus, String), Fail> {
     let fail = |e: &str| (e.to_string(), None);
     let install = dir.join("install");
     std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
-    let mut child = coreq::quiet(Command::new(bin).args(["status", "--json"]))
+    let mut child = coreq::quiet(Command::new(bin).args(args))
         .current_dir(dir)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
@@ -318,27 +338,14 @@ fn taskq_run(bin: &str, repo: &str, token: &str, dir: &std::path::Path) -> Resul
         if let Some(s) = child.try_wait().map_err(|_| fail("taskq wait failed"))? {
             break s;
         }
-        if start.elapsed() > std::time::Duration::from_secs(10) {
+        if start.elapsed() > std::time::Duration::from_secs(secs) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(fail("taskq timeout"));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
-    let text = reader.join().unwrap_or_default();
-    if !status.success() {
-        return Err((format!("taskq exit {}", status.code().unwrap_or(-1)), None));
-    }
-    let v: Value = serde_json::from_str(&text).map_err(|_| fail("taskq output invalid"))?;
-    if v["schema"] != 1 || !v["tasks"].is_array() {
-        return Err(fail("taskq snapshot schema unsupported"));
-    }
-    if v["complete"] != true {
-        // taskq's reason is a short board-read outcome; cap it so no stray output reaches the page
-        let r: String = v["reason"].as_str().unwrap_or("no reason").chars().take(160).collect();
-        return Err((format!("taskq incomplete: {r}"), None));
-    }
-    Ok((v, false))
+    Ok((status, reader.join().unwrap_or_default()))
 }
 
 // ---- serverq (D4.3)
