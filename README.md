@@ -18,7 +18,8 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
   "langfuse": {"base_url": "https://langfuse.example.com", "project_id": "…", "public_key": "pk-lf-…", "secret_key": "sk-lf-…"},
   "github": {"token": "<read-only token>"},
   "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/serverq", "taskqorg/coreq", "taskqorg/specq", "taskqorg/dashq"],
-  "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"}
+  "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"},
+  "public_host": "dash.example.com"
 }
 ```
 

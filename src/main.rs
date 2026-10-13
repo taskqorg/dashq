@@ -29,6 +29,7 @@ struct Config {
     projects: Vec<String>,
     serverq_report: String,
     serverq_host: String,
+    public_host: String,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -61,6 +62,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         .ok_or("config: bad key projects")?;
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
+    let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     let base = base.trim_end_matches('/').to_string();
     let b64 = base64(format!("{public}:{secret}").as_bytes());
     let project_url = format!("{base}/project/{project}");
@@ -72,7 +74,12 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         projects,
         serverq_report: report,
         serverq_host: host,
+        public_host,
     })
+}
+
+fn safe_host(x: &str) -> bool {
+    x.contains('.') && x.len() <= 253 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
 fn base64(b: &[u8]) -> String {
@@ -134,23 +141,34 @@ fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) {
 
 fn handle(app: &App, mut s: TcpStream) {
     let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
-    let mut r = BufReader::new(s.try_clone().unwrap());
+    // request line and headers together at most 16 KiB; no body is read
+    let Ok(clone) = s.try_clone() else { return };
+    let mut r = BufReader::new(std::io::Read::take(clone, 16 * 1024));
     let mut line = String::new();
     if r.read_line(&mut line).is_err() {
         return;
     }
-    // drain headers (bounded): the request has no body we use
-    let mut h = String::new();
-    for _ in 0..100 {
+    let (mut h, mut host) = (String::new(), None);
+    loop {
         h.clear();
-        if r.read_line(&mut h).map_or(true, |n| n == 0) || h == "\r\n" || h == "\n" {
+        if r.read_line(&mut h).map_or(true, |n| n == 0) || h.trim().is_empty() {
             break;
+        }
+        if let Some((k, v)) = h.split_once(':')
+            && k.eq_ignore_ascii_case("host")
+        {
+            host = Some(v.trim().to_ascii_lowercase());
         }
     }
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    let (status, ctype, body) = route(app, method, path, query);
+    // DNS rebinding: only the loopback address and the configured public name
+    let (status, ctype, body) = if host.is_some_and(|h| [ADDR, "localhost:18882", app.cfg.public_host.as_str()].contains(&h.as_str())) {
+        route(app, method, path, query)
+    } else {
+        ("421 Misdirected Request", "text/plain", b"unknown host".to_vec())
+    };
     respond(&mut s, status, ctype, &body);
 }
 
@@ -197,9 +215,20 @@ fn serve(t: &Tool, service: bool) -> ! {
         });
     }
     let app = Arc::new(App { cfg, cache: source::Cache::default() });
-    for s in l.incoming().flatten() {
-        let app = app.clone();
-        std::thread::spawn(move || handle(&app, s));
+    let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    for mut s in l.incoming().flatten() {
+        use std::sync::atomic::Ordering::SeqCst;
+        // ponytail: one thread per connection, capped; a pool if load ever grows
+        if open.fetch_add(1, SeqCst) >= 64 {
+            open.fetch_sub(1, SeqCst);
+            respond(&mut s, "503 Service Unavailable", "text/plain", b"busy");
+            continue;
+        }
+        let (app, open) = (app.clone(), open.clone());
+        std::thread::spawn(move || {
+            handle(&app, s);
+            open.fetch_sub(1, SeqCst);
+        });
     }
     std::process::exit(1)
 }
@@ -300,7 +329,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse_base: String::new(), langfuse_auth: String::new(), links: json!({}), github_token: String::new(), projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into() }
+        Config { langfuse_base: String::new(), langfuse_auth: String::new(), links: json!({}), github_token: String::new(), projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
     }
 
     #[test]
@@ -309,7 +338,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let p = d.join("config.json");
         let good = json!({"langfuse": {"base_url": "https://lf.example.com", "public_key": "pk-lf-1", "secret_key": "sk-lf-SECRET", "project_id": "p1"},
-            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": "/tmp/report.json", "host": "fra/native"}});
+            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": "/tmp/report.json", "host": "fra/native"}, "public_host": "dash.example.com"});
         let write = |v: &Value| {
             std::fs::write(&p, v.to_string()).unwrap();
             #[cfg(unix)]
