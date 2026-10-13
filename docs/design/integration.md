@@ -52,7 +52,7 @@ Connection states distinguish not configured, disconnected, unsupported capabili
 
 ## Ownership and remaining decisions
 
-First concrete connection: [AgentQ standalone](#agentq-standalone-connection). It reuses the existing telemetry path and identifies the minimum DashQ changes before any shared transport is built.
+The [AgentQ standalone exploration](#agentq-standalone-connection) below is withdrawn as the recommended direction. Rework from the complete connection scenario before selecting a transport.
 
 - [coreq #22](https://github.com/taskqorg/coreq/issues/22): reusable contract proposal, two-consumer proof, independent operation and compatibility. Shared semantics go to specq; Rust helpers stay in coreq.
 - [serverq #21](https://github.com/taskqorg/serverq/issues/21): report projection, recommendation references and resource identity without requiring AgentQ or TaskQ.
@@ -64,7 +64,9 @@ Resolve transport for remote snapshots, source enrollment/revocation, verified h
 
 ## AgentQ standalone connection
 
-Proposal AG1–AG6. Inspected AgentQ `938b6288cbb0446b28e9caf7898e336047082369` and DashQ `cc2b41f6d56d9c79401a3d1438062f4c8b10377a`. Source inspection, not live qualification. The owner requirement is independent products; this particular connection mechanism awaits design acceptance.
+Withdrawn proposal AG1–AG6: the owner rejected a partial connection built around manual source setup. Retained as investigation evidence, not an implementation brief. Reassess the complete user journey under specq engineering and design workflow; the recommendation below is superseded.
+
+Inspected AgentQ `938b6288cbb0446b28e9caf7898e336047082369` and DashQ `cc2b41f6d56d9c79401a3d1438062f4c8b10377a`. Source inspection, not live qualification. The owner requirement is independent products; this particular connection mechanism awaits design acceptance.
 
 ### AG1. Reuse the existing data path
 
