@@ -97,6 +97,8 @@ pub struct Grant {
     pub workspace: String,
     pub account: String,
     pub scopes: String,
+    /// Approved board scope `{"name", "value"}` as JSON; `None` when the request carried none.
+    pub board: Option<String>,
 }
 
 pub struct Installation<'a> {
@@ -166,6 +168,8 @@ pub struct Pairing {
     pub label: String,
     /// JSON array of the requested schemas.
     pub schemas: String,
+    /// Requested board scope `{"name", "value"}` as JSON, if any.
+    pub board: Option<String>,
     /// The installation has a live grant that approval replaces.
     pub replaces: bool,
 }
@@ -251,16 +255,16 @@ fn used(c: &Connection, path: &Path) -> Result<u64, Error> {
 
 fn authorize(c: &Connection, verifier: &[u8]) -> Result<Option<Grant>, Error> {
     Ok(c.query_row(
-        "SELECT installation, generation, workspace, account, scopes FROM grants g WHERE verifier = ?1
+        "SELECT installation, generation, workspace, account, scopes, board FROM grants g WHERE verifier = ?1
          AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)",
         [verifier],
-        |r| Ok(Grant { installation: r.get(0)?, generation: r.get(1)?, workspace: r.get(2)?, account: r.get(3)?, scopes: r.get(4)? }),
+        |r| Ok(Grant { installation: r.get(0)?, generation: r.get(1)?, workspace: r.get(2)?, account: r.get(3)?, scopes: r.get(4)?, board: r.get(5)? }),
     )
     .optional()?)
 }
 
 /// New connection generation; revokes the previous one, keeps installation identity and history (C1).
-fn grant(tx: &Transaction, inst: &Installation, workspace: &str, account: &str, scopes: &str, verifier: &[u8], now: i64) -> Result<Grant, Error> {
+fn grant(tx: &Transaction, inst: &Installation, workspace: &str, account: &str, scopes: &str, board: Option<&str>, verifier: &[u8], now: i64) -> Result<Grant, Error> {
     let known: Option<(String, String)> = tx.query_row("SELECT product, runtime FROM installations WHERE id = ?1", [inst.id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
     match known {
         Some((p, r)) if p != inst.product || r != inst.runtime => return Err(Error::Conflict),
@@ -289,8 +293,11 @@ fn grant(tx: &Transaction, inst: &Installation, workspace: &str, account: &str, 
         params![inst.id, now],
     )?;
     let generation: i64 = tx.query_row("SELECT COALESCE(MAX(generation), 0) + 1 FROM grants WHERE installation = ?1", [inst.id], |r| r.get(0))?;
-    tx.execute("INSERT INTO grants VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)", params![inst.id, generation, verifier, workspace, account, scopes, now])?;
-    Ok(Grant { installation: inst.id.into(), generation, workspace: workspace.into(), account: account.into(), scopes: scopes.into() })
+    tx.execute(
+        "INSERT INTO grants (installation, generation, verifier, workspace, account, scopes, created, board) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![inst.id, generation, verifier, workspace, account, scopes, now, board],
+    )?;
+    Ok(Grant { installation: inst.id.into(), generation, workspace: workspace.into(), account: account.into(), scopes: scopes.into(), board: board.map(Into::into) })
 }
 
 /// Pairing session lifetime (C3).
@@ -306,12 +313,12 @@ fn expire(tx: &Transaction, now: i64) -> Result<(), Error> {
 
 fn credential(c: &Connection, verifier: &[u8]) -> Result<Option<Credential>, Error> {
     Ok(c.query_row(
-        "SELECT installation, generation, workspace, account, scopes,
+        "SELECT installation, generation, workspace, account, scopes, board,
            EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation),
            EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation)
          FROM grants g WHERE verifier = ?1",
         [verifier],
-        |r| Ok(Credential { grant: Grant { installation: r.get(0)?, generation: r.get(1)?, workspace: r.get(2)?, account: r.get(3)?, scopes: r.get(4)? }, revoked: r.get(5)?, active: r.get(6)? }),
+        |r| Ok(Credential { grant: Grant { installation: r.get(0)?, generation: r.get(1)?, workspace: r.get(2)?, account: r.get(3)?, scopes: r.get(4)?, board: r.get(5)? }, revoked: r.get(6)?, active: r.get(7)? }),
     )
     .optional()?)
 }
@@ -341,6 +348,12 @@ impl Store {
         // additive: gaps recorded before the column existed keep workspace '' and show in no scoped view
         if c.query_row("SELECT COUNT(*) FROM pragma_table_info('export_gaps') WHERE name = 'workspace'", [], |r| r.get::<_, i64>(0))? == 0 {
             c.execute_batch("ALTER TABLE export_gaps ADD COLUMN workspace TEXT NOT NULL DEFAULT ''")?;
+        }
+        // additive: requests and grants from before board scopes carry none
+        for t in ["pairings", "grants"] {
+            if c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('{t}') WHERE name = 'board'"), [], |r| r.get::<_, i64>(0))? == 0 {
+                c.execute_batch(&format!("ALTER TABLE {t} ADD COLUMN board TEXT"))?;
+            }
         }
         Ok(Store { conn: Mutex::new(c), waiting: AtomicUsize::new(0), limits })
     }
@@ -379,7 +392,7 @@ impl Store {
 
     /// New connection generation; revokes the previous one, keeps installation identity and history (C1).
     pub fn grant(&self, inst: &Installation, workspace: &str, account: &str, scopes: &str, verifier: &[u8], now: i64) -> Result<Grant, Error> {
-        self.write(|tx| grant(tx, inst, workspace, account, scopes, verifier, now))
+        self.write(|tx| grant(tx, inst, workspace, account, scopes, None, verifier, now))
     }
 
     /// Revokes the live generation; true when one was live. Uses the control reserve.
@@ -415,7 +428,7 @@ impl Store {
     }
 
     /// New pairing session (C3). `TooMany` at `max_pending` live sessions, `Exists` on a user code collision.
-    pub fn pair(&self, device: &[u8], user_code: &str, inst: &Installation, schemas: &str, now: i64, max_pending: i64) -> Result<(), Error> {
+    pub fn pair(&self, device: &[u8], user_code: &str, inst: &Installation, schemas: &str, board: Option<&str>, now: i64, max_pending: i64) -> Result<(), Error> {
         self.write(|tx| {
             expire(tx, now)?;
             if tx.query_row("SELECT COUNT(*) FROM pairings WHERE state = 'pending' AND expires > ?1", [now], |r| r.get::<_, i64>(0))? >= max_pending {
@@ -425,8 +438,8 @@ impl Store {
                 return Err(Error::Exists);
             }
             tx.execute(
-                "INSERT INTO pairings (device, user_code, product, installation, runtime, label, schemas, expires, interval, polled, failures, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 5, ?9, 0, 'pending')",
-                params![device, user_code, inst.product, inst.id, inst.runtime, inst.label, schemas, now + PAIRING_SECS, now - 5],
+                "INSERT INTO pairings (device, user_code, product, installation, runtime, label, schemas, expires, interval, polled, failures, state, board) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 5, ?9, 0, 'pending', ?10)",
+                params![device, user_code, inst.product, inst.id, inst.runtime, inst.label, schemas, now + PAIRING_SECS, now - 5, board],
             )?;
             Ok(())
         })
@@ -437,9 +450,9 @@ impl Store {
         Ok(self
             .lock()?
             .query_row("SELECT product, installation, runtime, label, schemas, EXISTS (SELECT 1 FROM grants g WHERE g.installation = p.installation
-               AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation))
+               AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)), p.board
              FROM pairings p WHERE user_code = ?1 AND state = 'pending' AND expires > ?2", params![user_code, now], |r| {
-                Ok(Pairing { product: r.get(0)?, installation: r.get(1)?, runtime: r.get(2)?, label: r.get(3)?, schemas: r.get(4)?, replaces: r.get(5)? })
+                Ok(Pairing { product: r.get(0)?, installation: r.get(1)?, runtime: r.get(2)?, label: r.get(3)?, schemas: r.get(4)?, replaces: r.get(5)?, board: r.get(6)? })
             })
             .optional()?)
     }
@@ -449,12 +462,12 @@ impl Store {
     pub fn decide(&self, user_code: &str, approve: bool, workspace: &str, subject: &str, verifier: &[u8], seal: &dyn Fn(&[u8]) -> Vec<u8>, now: i64) -> Result<Decision, Error> {
         self.write(|tx| {
             expire(tx, now)?;
-            let row: Option<(Vec<u8>, String, String, String, String, String, String)> = tx
-                .query_row("SELECT device, state, product, installation, runtime, label, schemas FROM pairings WHERE user_code = ?1 AND expires > ?2", params![user_code, now], |r| {
-                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))
+            let row: Option<(Vec<u8>, String, String, String, String, String, String, Option<String>)> = tx
+                .query_row("SELECT device, state, product, installation, runtime, label, schemas, board FROM pairings WHERE user_code = ?1 AND expires > ?2", params![user_code, now], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?))
                 })
                 .optional()?;
-            let Some((device, state, product, id, runtime, label, schemas)) = row else { return Ok(Decision::Invalid) };
+            let Some((device, state, product, id, runtime, label, schemas, board)) = row else { return Ok(Decision::Invalid) };
             match state.as_str() {
                 "approved" | "acked" if approve => return Ok(Decision::Already),
                 "pending" => {}
@@ -472,7 +485,7 @@ impl Store {
                 return Ok(Decision::Denied);
             }
             let inst = Installation { id: &id, product: &product, runtime: &runtime, label: &label };
-            let g = grant(tx, &inst, workspace, subject, &schemas, verifier, now)?;
+            let g = grant(tx, &inst, workspace, subject, &schemas, board.as_deref(), verifier, now)?;
             tx.execute("UPDATE pairings SET state = 'approved', workspace = ?2, generation = ?3, sealed = ?4 WHERE device = ?1", params![device, workspace, g.generation, seal(&device)])?;
             Ok(Decision::Approved(g))
         })
@@ -494,8 +507,8 @@ impl Store {
                 "denied" => Poll::Denied,
                 "invalid" => Poll::Invalid,
                 "approved" => {
-                    let g = tx.query_row("SELECT workspace, account, scopes FROM grants WHERE installation = ?1 AND generation = ?2", params![id, generation], |r| {
-                        Ok(Grant { installation: id.clone(), generation: generation.unwrap_or(0), workspace: r.get(0)?, account: r.get(1)?, scopes: r.get(2)? })
+                    let g = tx.query_row("SELECT workspace, account, scopes, board FROM grants WHERE installation = ?1 AND generation = ?2", params![id, generation], |r| {
+                        Ok(Grant { installation: id.clone(), generation: generation.unwrap_or(0), workspace: r.get(0)?, account: r.get(1)?, scopes: r.get(2)?, board: r.get(3)? })
                     })?;
                     Poll::Token { sealed: sealed.unwrap_or_default(), grant: g, product, schemas: schemas.unwrap_or_default() }
                 }

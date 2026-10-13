@@ -260,12 +260,14 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                 Ok(Poll::Expired) => error("400 Bad Request", "expired_token"),
                 Ok(Poll::Invalid) => error("400 Bad Request", "invalid_grant"),
                 Ok(Poll::Token { sealed, grant, product, schemas }) => {
+                    if !same_board(&body, &grant) {
+                        return error("403 Forbidden", "scope");
+                    }
                     let Some(credential) = open_sealed(e, &device, sealed) else { return error("400 Bad Request", "expired_token") };
-                    json(
-                        "200 OK",
-                        json!({"protocol": 1, "credential": credential, "installation": grant.installation, "generation": grant.generation,
-                            "product": product, "workspace": grant.workspace, "schemas": serde_json::from_str::<Value>(&schemas).unwrap_or(json!([]))}),
-                    )
+                    let mut v = json!({"protocol": 1, "credential": credential, "installation": grant.installation, "generation": grant.generation,
+                        "product": product, "workspace": grant.workspace, "schemas": serde_json::from_str::<Value>(&schemas).unwrap_or(json!([]))});
+                    with_board(&mut v, &grant);
+                    json("200 OK", v)
                 }
                 Err(x) => unavailable(x),
             }
@@ -275,6 +277,12 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                 return error("401 Unauthorized", "invalid_credential");
             };
             let v = sha256(cred);
+            match e.store.credential(&v) {
+                // revoke always ends a connection, whatever scope it names
+                Ok(Some(c)) if r.path != "/connection/revoke" && !same_board(&body, &c.grant) => return error("403 Forbidden", "scope"),
+                Err(x) => return unavailable(x),
+                _ => {}
+            }
             if ["/ingest", "/connection/receipt"].contains(&r.path) {
                 return device_data(e, r.path, &v, &body, now);
             }
@@ -283,7 +291,11 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                 Ok(None) => error("401 Unauthorized", "invalid_credential"),
                 // a revoked credential cannot activate; revoke repeats its reply so offline retries end
                 Ok(Some(c)) if c.revoked && r.path == "/connect/ack" => error("401 Unauthorized", "revoked"),
-                Ok(Some(c)) => json("200 OK", json!({"protocol": 1, "state": if c.revoked { "revoked" } else { "active" }, "generation": c.grant.generation})),
+                Ok(Some(c)) => {
+                    let mut x = json!({"protocol": 1, "state": if c.revoked { "revoked" } else { "active" }, "generation": c.grant.generation});
+                    with_board(&mut x, &c.grant);
+                    json("200 OK", x)
+                }
                 Err(x) => unavailable(x),
             }
         }
@@ -312,11 +324,12 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
     if path == "/connection/receipt" {
         let Some(id) = body["event_id"].as_str() else { return error("400 Bad Request", "invalid_request") };
         return match e.store.receipt(v, id) {
-            Ok(Some((schema, o))) => json(
-                "200 OK",
-                json!({"protocol": 1, "installation": g.installation, "generation": g.generation, "schema": schema, "event_id": id,
-                    "state": if o == Outcome::Projected { "projected" } else { "accepted" }}),
-            ),
+            Ok(Some((schema, o))) => {
+                let mut x = json!({"protocol": 1, "installation": g.installation, "generation": g.generation, "schema": schema, "event_id": id,
+                    "state": if o == Outcome::Projected { "projected" } else { "accepted" }});
+                with_board(&mut x, g);
+                json("200 OK", x)
+            }
             Ok(None) => error("404 Not Found", "unknown_event"),
             Err(store::Error::Denied) => error("401 Unauthorized", "revoked"),
             Err(_) => error("503 Service Unavailable", "unavailable"),
@@ -447,6 +460,33 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
     Some(json!({"source": src("ok", None), "rows": rows}))
 }
 
+/// The optional board scope of a device request (coreq#36): `{"name": "<id>/<version>", "value": "<short line>"}`;
+/// `Ok(None)` when absent, `Err` when malformed.
+fn board(b: &Value) -> Result<Option<String>, ()> {
+    let s = &b["scope"];
+    if s.is_null() {
+        return Ok(None);
+    }
+    let (Some(name), Some(value)) = (s["name"].as_str(), s["value"].as_str()) else { return Err(()) };
+    let named = name.split_once('/').is_some_and(|(n, v)| id(n, 32) && !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
+    if !named || s.as_object().is_some_and(|o| o.len() != 2) || value.is_empty() || value.chars().count() > 128 || value.chars().any(char::is_control) {
+        return Err(());
+    }
+    Ok(Some(json!({"name": name, "value": value}).to_string()))
+}
+
+/// A request after approval may repeat its scope but never change it (A2); one without a scope is unchanged.
+fn same_board(b: &Value, g: &store::Grant) -> bool {
+    b["scope"].is_null() || board(b).ok().flatten().is_some_and(|x| g.board.as_deref() == Some(x.as_str()))
+}
+
+/// Names the approved scope in token, status and receipt replies; replies without one keep today's shape.
+fn with_board(v: &mut Value, g: &store::Grant) {
+    if let Some(b) = g.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()) {
+        v["scope"] = b;
+    }
+}
+
 fn open_sealed(e: &Enroll, device: &[u8], mut sealed: Vec<u8>) -> Option<String> {
     if sealed.len() < 12 {
         return None;
@@ -472,6 +512,7 @@ fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
     // a grant only ever covers its own product's schemas (C3 scope isolation)
     let ok_schema = |x: &&str| x.strip_prefix(product).and_then(|x| x.strip_prefix('-')).and_then(|x| x.split_once('/')).is_some_and(|(n, v)| id(n, 32) && !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
     let Some(schemas) = schemas.filter(|v| PRODUCTS.contains(&product) && v.iter().all(ok_schema)) else { return error("400 Bad Request", "invalid_request") };
+    let Ok(board) = board(b) else { return error("400 Bad Request", "invalid_request") };
     if !id(s("installation"), 64) || !matches!(s("runtime"), "native" | "wsl") || !id(s("host_label"), 64) {
         return error("400 Bad Request", "invalid_request");
     }
@@ -486,7 +527,7 @@ fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
         let device = b64url(&e.random(32));
         let code: String = e.random(8).iter().map(|b| ALPHABET[(b & 31) as usize] as char).collect();
         let code = user_code(&code).expect("alphabet");
-        match e.store.pair(&sha256(&device), &code, &inst, &json!(schemas).to_string(), now, MAX_PENDING) {
+        match e.store.pair(&sha256(&device), &code, &inst, &json!(schemas).to_string(), board.as_deref(), now, MAX_PENDING) {
             Ok(()) => {
                 return json(
                     "200 OK",
@@ -593,6 +634,10 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     // installation IDs are not secrets: say plainly when approval ends a live connection
     let replaces = if p.replaces { "<p><strong>This installation is already connected. Approving replaces that connection; its current credential stops working.</strong></p>\n" } else { "" };
     let scopes: Vec<String> = serde_json::from_str::<Vec<String>>(&p.schemas).unwrap_or_default().iter().map(|s| format!("<code>{}</code>", esc(s))).collect();
+    // the person signs exactly the board scope the client gets; none renders as before
+    let scope = p.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()).map_or(String::new(), |b| {
+        format!("<dt>Board scope</dt><dd><code>{}</code>: <code>{}</code></dd>\n", esc(b["name"].as_str().unwrap_or("")), esc(b["value"].as_str().unwrap_or("")))
+    });
     // pick a workspace only when there is a choice (C1)
     let ws = if let [(w, _)] = spaces.as_slice() {
         format!("<dt>Workspace</dt><dd>{0}<input type=\"hidden\" name=\"workspace\" value=\"{0}\"></dd>\n", esc(w))
@@ -603,7 +648,7 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     html(
         "200 OK",
         &format!(
-            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
+            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{scope}{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
             esc(&p.product),
             esc(&p.label),
             esc(&p.runtime),
@@ -817,6 +862,37 @@ mod tests {
         let (_, code3) = start(&e, "inst-3", T0 + 800);
         assert!(decide(&e, "github|1", &code3, "approve", "ws-1", T0 + 1400).1.contains("unknown, expired"));
         assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": "nope"}), T0).1["error"], "invalid_grant");
+    }
+
+    #[test]
+    fn board_scope_is_shown_granted_named_and_never_changed() {
+        let (_d, e) = setup("board");
+        let scope = json!({"name": "taskq-board/1", "value": "taskqorg/taskq"});
+        let req = |inst: &str, scope: Value| json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["agentq-snapshot/1"], "scope": scope});
+        for bad in [json!({"name": "taskq-board"}), json!({"name": "board", "value": "x"}), json!({"name": "taskq-board/1", "value": "a\nb"}), json!("taskq-board/1")] {
+            assert_eq!(machine(&e, "/connect/device", None, req("inst-x", bad.clone()), T0).1["error"], "invalid_request", "{bad}");
+        }
+        // A1: the page names the scope the device requested; a request without one renders as before
+        let (_, v) = machine(&e, "/connect/device", None, req("inst-1", scope.clone()), T0);
+        let (device, code) = (v["device_code"].as_str().unwrap(), v["user_code"].as_str().unwrap());
+        assert!(page(&e, "github|1", code, T0).1.contains("<dt>Board scope</dt><dd><code>taskq-board/1</code>: <code>taskqorg/taskq</code></dd>"));
+        assert!(!page(&e, "github|1", &start(&e, "inst-2", T0).1, T0).1.contains("Board scope"));
+        // A2: the grant keeps the approved scope and token, status and receipt replies name it
+        assert!(decide(&e, "github|1", code, "approve", "ws-1", T0 + 5).1.contains("Approved"));
+        let tok = |scope: Value| machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device, "scope": scope}), T0 + 10);
+        assert_eq!(tok(json!({"name": "taskq-board/1", "value": "taskqorg/other"})), (403, json!({"protocol": 1, "error": "scope"})));
+        let (s, t) = tok(scope.clone());
+        assert_eq!((s, &t["scope"]), (200, &scope));
+        let cred = t["credential"].as_str().unwrap();
+        let (s, a) = machine(&e, "/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 11);
+        assert_eq!((s, &a["scope"]), (200, &scope));
+        let other = json!({"protocol": 1, "scope": {"name": "taskq-board/1", "value": "taskqorg/other"}, "records": [rec("e1", T0, json!({"n": 1}))]});
+        assert_eq!(machine(&e, "/ingest", Some(cred), other, T0 + 12), (403, json!({"protocol": 1, "error": "scope"})));
+        assert_eq!(ingest(&e, cred, vec![rec("e1", T0, json!({"n": 1}))], T0 + 12).0, 200);
+        let (s, r) = machine(&e, "/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": "e1", "scope": scope}), T0 + 13);
+        assert_eq!((s, &r["scope"]), (200, &scope));
+        // revoke always ends the connection
+        assert_eq!(machine(&e, "/connection/revoke", Some(cred), json!({"protocol": 1, "scope": {"name": "x/1", "value": "y"}}), T0 + 14).1["state"], "revoked");
     }
 
     #[test]
