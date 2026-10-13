@@ -270,6 +270,77 @@ pub fn release(repo: &str, token: &str) -> Result<(Value, bool), Fail> {
     Ok((r.body["tag_name"].as_str().filter(|_| r.status == 200).map(|t| json!(t.trim_start_matches('v'))).unwrap_or(Value::Null), false))
 }
 
+// ---- taskq snapshot (adapters.md S3 R1)
+
+/// `taskq status --json` of one board through the pinned binary: no project checkout, only a fresh scratch folder
+/// with `taskq.json` and a scratch install whose `token` is the read-only token (taskq reads its token only from
+/// `$TASKQ_INSTALL/token`), 10 s timeout. The folder is removed after the run. An incomplete snapshot is a failed read.
+pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool), Fail> {
+    static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("dashq-taskq-{}-{n}", std::process::id()));
+    // create, not create_all: a folder planted by another user fails the read instead of receiving the token
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(&dir).map_err(|_| (String::from("scratch folder unwritable"), None))?;
+    let r = taskq_run(bin, repo, token, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    r
+}
+
+fn taskq_run(bin: &str, repo: &str, token: &str, dir: &std::path::Path) -> Result<(Value, bool), Fail> {
+    let fail = |e: &str| (e.to_string(), None);
+    let install = dir.join("install");
+    std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
+    std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
+    std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
+    let mut child = coreq::quiet(Command::new(bin).args(["status", "--json"]))
+        .current_dir(dir)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("TASKQ_INSTALL", &install)
+        .env("TASKQ_INCIDENT_REPORTS", "off")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| fail("taskq binary not found"))?;
+    let mut out = child.stdout.take().unwrap();
+    // read in a thread: a full pipe must not stall the timeout loop
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = std::io::Read::read_to_string(&mut out, &mut s);
+        s
+    });
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().map_err(|_| fail("taskq wait failed"))? {
+            break s;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(10) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(fail("taskq timeout"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let text = reader.join().unwrap_or_default();
+    if !status.success() {
+        return Err((format!("taskq exit {}", status.code().unwrap_or(-1)), None));
+    }
+    let v: Value = serde_json::from_str(&text).map_err(|_| fail("taskq output invalid"))?;
+    if v["schema"] != 1 || !v["tasks"].is_array() {
+        return Err(fail("taskq snapshot schema unsupported"));
+    }
+    if v["complete"] != true {
+        // taskq's reason is a short board-read outcome; cap it so no stray output reaches the page
+        let r: String = v["reason"].as_str().unwrap_or("no reason").chars().take(160).collect();
+        return Err((format!("taskq incomplete: {r}"), None));
+    }
+    Ok((v, false))
+}
+
 // ---- serverq (D4.3)
 
 /// Read on each refresh; no cache beyond the file.
@@ -309,5 +380,35 @@ mod tests {
         assert_eq!((b["value"].as_i64(), b["error"].as_str()), (Some(1), Some("timeout")));
         let fresh = c.get("k2", 60, || Ok((json!(2), false)));
         assert_eq!(c.get("k2", 60, || panic!("cached")), fresh);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn taskq_status_runs_without_checkout_and_fails_with_a_reason() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = std::env::temp_dir().join(format!("dashq-tq-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let fake = |name: &str, script: &str| {
+            let p = d.join(name);
+            std::fs::write(&p, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        // the fake checks its arguments, the scratch config, the token where real taskq reads it and no HOME
+        let ok = fake("ok", &format!(r#"pwd > {}/cwd; [ "$1 $2" = "status --json" ] && [ "$(cat "$TASKQ_INSTALL/token")" = tok ] && [ -z "$HOME" ] && grep -q '"repo":"o/r"' taskq.json && echo '{{"schema":1,"complete":true,"tasks":[]}}'"#, d.display()));
+        assert_eq!(taskq_status(&ok, "o/r", "tok").unwrap().0["schema"], 1);
+        let cwd = std::fs::read_to_string(d.join("cwd")).unwrap();
+        assert!(!std::path::Path::new(cwd.trim()).exists(), "the scratch folder with the token is removed");
+        let cases = [
+            ("exit", "exit 3", "taskq exit 3"),
+            ("bad", "echo nope", "taskq output invalid"),
+            ("schema", r#"echo '{"schema":2,"tasks":[]}'"#, "taskq snapshot schema unsupported"),
+            ("part", r#"echo '{"schema":1,"complete":false,"reason":"HTTP 401","tasks":[]}'"#, "taskq incomplete: HTTP 401"),
+            ("slow", "sleep 30", "taskq timeout"),
+        ];
+        for (name, script, reason) in cases {
+            assert_eq!(taskq_status(&fake(name, script), "o/r", "tok").unwrap_err().0, reason);
+        }
+        assert_eq!(taskq_status("/nonexistent/taskq", "o/r", "tok").unwrap_err().0, "taskq binary not found");
     }
 }

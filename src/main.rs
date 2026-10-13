@@ -31,6 +31,8 @@ struct Config {
     /// `None`: GitHub not configured, boards read unknown.
     github_token: Option<String>,
     projects: Vec<String>,
+    /// Pinned `taskq` binary for the `taskq-snapshot` adapter; absent: the label read alone (adapters.md S2).
+    taskq_bin: Option<String>,
     serverq_report: String,
     serverq_host: String,
     public_host: String,
@@ -81,6 +83,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
             (Some(token), projects)
         }
     };
+    let taskq_bin = match v.pointer("/taskq/binary") {
+        None => None,
+        Some(_) => Some(s("/taskq/binary", &|x| std::path::Path::new(x).is_absolute())?),
+    };
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
@@ -89,6 +95,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         langfuse,
         github_token: token,
         projects,
+        taskq_bin,
         serverq_report: report,
         serverq_host: host,
         public_host,
@@ -122,7 +129,7 @@ impl App {
     fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
         let c = &self.cfg;
         let now = source::now();
-        let (lf, boards, releases) = std::thread::scope(|sc| {
+        let (lf, boards, releases, taskq) = std::thread::scope(|sc| {
             let lf = sc.spawn(|| match &c.langfuse {
                 Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
                 None => Value::Null,
@@ -135,23 +142,28 @@ impl App {
                     sc.spawn(move || {
                         let b = self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
                         let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, token));
-                        (r.clone(), b, l)
+                        // one single flight per board: callers inside 60 s share one `taskq status --json` run
+                        let t = c.taskq_bin.as_ref().map(|bin| self.cache.get(&format!("taskq:{r}"), 60, || source::taskq_status(bin, r, token)));
+                        (r.clone(), b, l, t)
                     })
                 })
                 .collect();
-            let (mut boards, mut releases) = (json!({}), json!({}));
+            let (mut boards, mut releases, mut taskq) = (json!({}), json!({}), json!({}));
             for h in gh {
-                if let Ok((r, b, l)) = h.join() {
+                if let Ok((r, b, l, t)) = h.join() {
                     boards[&r] = b;
                     releases[&r] = l;
+                    if let Some(t) = t {
+                        taskq[&r] = t;
+                    }
                 }
             }
-            (lf.join().unwrap_or(Value::Null), boards, releases)
+            (lf.join().unwrap_or(Value::Null), boards, releases, taskq)
         });
         let host = filters["host"].as_str().map(String::from);
         let mut doc = data::build(&json!({
             "now": source::now(), "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
-            "langfuse": lf, "boards": boards, "releases": releases, "serverq": source::serverq(&c.serverq_report),
+            "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": source::serverq(&c.serverq_report),
         }));
         // committed snapshots never wait for or depend on the optional sources above (D11)
         if let Some(p) = enroll::projection(&self.enroll, scope, host.as_deref(), source::now()) {
@@ -472,7 +484,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
+        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
     }
 
     #[test]
@@ -502,6 +514,13 @@ mod tests {
             std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
             assert_eq!(load_config(&p).err().unwrap(), "config: mode must be 0600");
         }
+        let mut t = good.clone();
+        t["taskq"] = json!({"binary": "/opt/taskq"});
+        write(&t);
+        assert_eq!(load_config(&p).unwrap().taskq_bin.as_deref(), Some("/opt/taskq"));
+        t["taskq"]["binary"] = json!("taskq");
+        write(&t);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq.binary");
         assert_eq!(base64(b"ab"), "YWI=");
     }
 }

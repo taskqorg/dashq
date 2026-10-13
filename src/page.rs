@@ -58,6 +58,49 @@ fn unknown_line(src: &Value) -> String {
     }
 }
 
+fn issue(i: &Value) -> String {
+    format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
+}
+
+/// Questions read only (S3, S7): text, then the source choices with `k`; ★ marks the recommendation. No answer control.
+fn questions(b: &Value) -> String {
+    let v: Vec<String> = b["questions"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|q| {
+            let mut out = issue(q);
+            if q["state"] == "review" {
+                out += " <span class=\"s unknown\">review</span>";
+            }
+            if let Some(t) = q["text"].as_str() {
+                let _ = write!(out, "<br><span class=\"detail\">{}</span>", esc(t));
+            }
+            let choices: Vec<String> = q["choices"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|c| format!("<li value=\"{}\">{}{}</li>", text(&c["k"]), text(&c["text"]), if q["recommended"] == c["k"] { " <span aria-label=\"recommended\">★</span>" } else { "" }))
+                .collect();
+            if !choices.is_empty() {
+                let _ = write!(out, "<ol class=\"choices\">{}</ol>", choices.join(""));
+            }
+            out
+        })
+        .collect();
+    if v.is_empty() { "—".into() } else { v.join("<br>") }
+}
+
+fn failures(b: &Value) -> String {
+    let v: Vec<String> = b["failed"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|i| format!("{}{}", issue(i), i["reason"].as_str().filter(|r| !r.is_empty()).map(|r| format!("<br><span class=\"detail\">{}</span>", esc(r))).unwrap_or_default()))
+        .collect();
+    if v.is_empty() { "—".into() } else { v.join("<br>") }
+}
+
 /// `links`: `{traces, dashboards}` Langfuse project URLs.
 pub fn render(doc: &Value, links: &Value) -> String {
     let now = doc["generated_at"].as_u64().unwrap_or(0);
@@ -95,6 +138,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 "langfuse" => "Langfuse",
                 "github" => "GitHub",
                 "enrollment" => "Connections",
+                "taskq" => "taskq",
                 _ => "serverq",
             };
             format!("<li>{} {name}: {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")))
@@ -192,10 +236,6 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = writeln!(w, "<table>\n<tr><th>Project</th><th>Tasks</th><th>Questions</th><th>Failed</th><th>Live attempts</th></tr>");
     for b in doc["boards"].as_array().into_iter().flatten() {
         let src = &b["source"];
-        let links = |k: &str| -> String {
-            let v: Vec<String> = b[k].as_array().into_iter().flatten().map(|i| format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))).collect();
-            if v.is_empty() { "—".into() } else { v.join("<br>") }
-        };
         let attempts: Vec<String> = b["attempts"].as_array().into_iter().flatten().map(|a| format!("{}: #{} {}", text(&a["host"]), text(&a["task"]), text(&a["attempt"]))).collect();
         let _ = writeln!(
             w,
@@ -206,8 +246,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
             num(&b["in_work"], src),
             num(&b["waiting"], src),
             num(&b["ready"], src),
-            links("questions"),
-            links("failed"),
+            questions(b),
+            failures(b),
             if attempts.is_empty() { "—".into() } else { attempts.join("<br>") }
         );
     }
