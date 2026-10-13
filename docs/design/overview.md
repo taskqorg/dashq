@@ -1,5 +1,7 @@
 # Accepted dashboard overview
 
+Current combined visual authority: [published first-screen reference and pinned TaskQ sources](first-screen.md#published-reference). Older previews do not override it.
+
 Owner-approved layout under [D10](../../dashq.md#d10-dashboard-redesign-target). Shared visual behavior lives in [specq W1–W15](https://github.com/taskqorg/specq/blob/main/design/dashboards.md); do not duplicate it here.
 
 [Combined first screen](first-screen.md) supersedes vertical block placement; the resource reference below remains authoritative only for its chart/update behavior. TaskQ styling comes from its parent components.
