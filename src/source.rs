@@ -272,18 +272,34 @@ pub fn release(repo: &str, token: &str) -> Result<(Value, bool), Fail> {
 
 // ---- taskq snapshot (adapters.md S3 R1)
 
-/// `taskq status --json` of one board through the pinned binary: no project checkout, only a scratch folder
-/// with `taskq.json`, the read-only token in the environment, 10 s timeout. An incomplete snapshot is a failed read.
+/// `taskq status --json` of one board through the pinned binary: no project checkout, only a fresh scratch folder
+/// with `taskq.json` and a scratch install whose `token` is the read-only token (taskq reads its token only from
+/// `$TASKQ_INSTALL/token`), 10 s timeout. The folder is removed after the run. An incomplete snapshot is a failed read.
 pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool), Fail> {
+    static RUN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("dashq-taskq-{}-{n}", std::process::id()));
+    // create, not create_all: a folder planted by another user fails the read instead of receiving the token
+    let mut b = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
+    b.create(&dir).map_err(|_| (String::from("scratch folder unwritable"), None))?;
+    let r = taskq_run(bin, repo, token, &dir);
+    let _ = std::fs::remove_dir_all(&dir);
+    r
+}
+
+fn taskq_run(bin: &str, repo: &str, token: &str, dir: &std::path::Path) -> Result<(Value, bool), Fail> {
     let fail = |e: &str| (e.to_string(), None);
-    let dir = std::env::temp_dir().join("dashq-taskq").join(repo.replace('/', "_"));
-    std::fs::create_dir_all(&dir).map_err(|_| fail("scratch folder unwritable"))?;
+    let install = dir.join("install");
+    std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
+    std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
     let mut child = coreq::quiet(Command::new(bin).args(["status", "--json"]))
-        .current_dir(&dir)
+        .current_dir(dir)
         .env_clear()
         .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-        .env("TASKQ_TOKEN", token)
+        .env("TASKQ_INSTALL", &install)
         .env("TASKQ_INCIDENT_REPORTS", "off")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -378,9 +394,11 @@ mod tests {
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
             p.to_string_lossy().into_owned()
         };
-        // the fake checks its arguments, the scratch config and the token, and echoes the repo back
-        let ok = fake("ok", r#"[ "$1 $2" = "status --json" ] && [ "$TASKQ_TOKEN" = tok ] && grep -q '"repo":"o/r"' taskq.json && echo '{"schema":1,"complete":true,"tasks":[]}'"#);
+        // the fake checks its arguments, the scratch config, the token where real taskq reads it and no HOME
+        let ok = fake("ok", &format!(r#"pwd > {}/cwd; [ "$1 $2" = "status --json" ] && [ "$(cat "$TASKQ_INSTALL/token")" = tok ] && [ -z "$HOME" ] && grep -q '"repo":"o/r"' taskq.json && echo '{{"schema":1,"complete":true,"tasks":[]}}'"#, d.display()));
         assert_eq!(taskq_status(&ok, "o/r", "tok").unwrap().0["schema"], 1);
+        let cwd = std::fs::read_to_string(d.join("cwd")).unwrap();
+        assert!(!std::path::Path::new(cwd.trim()).exists(), "the scratch folder with the token is removed");
         let cases = [
             ("exit", "exit 3", "taskq exit 3"),
             ("bad", "echo nope", "taskq output invalid"),

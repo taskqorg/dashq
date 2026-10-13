@@ -57,7 +57,7 @@ Composition (integration I1–I7, A7):
 
 dashq never folds the taskq log (integration: do not rebuild the state machine). Two read paths deliver the taskq#886 snapshot:
 
-- **R1 (recommended now).** dashq runs the pinned `taskq status --json` binary per configured board with its existing read-only GitHub token, under the same single flight, 10 s timeout and 60 s cache as D4.2. No host push, no new credential. Qualification: taskq reads a board without a project checkout and with a read-only token; otherwise R2 only. #39: reads without a checkout qualified (scratch `taskq.json`, cleared environment, no files written); a read-only token remains to qualify on the deployment host.
+- **R1 (recommended now).** dashq runs the pinned `taskq status --json` binary per configured board with its existing read-only GitHub token, under the same single flight, 10 s timeout and 60 s cache as D4.2. No host push, no new credential. Qualification: taskq reads a board without a project checkout and with a read-only token; otherwise R2 only. #39 qualified with the real binary: taskq reads its token only from `$TASKQ_INSTALL/token`, so dashq gives it a fresh scratch install holding the read-only token (no HOME, no checkout, folder removed after the run); `taskq status --json` sends only GET requests (issues and their comments), so issues-read access suffices. A 12-task board took about 8 s of the 10 s timeout (one comments request per open task); larger boards read unknown with `taskq timeout` until R2.
 - **R2 (later).** taskq services deliver the same snapshot through enrollment (C2 TaskQ row). Same frame, same question shape.
 
 Question shape per coreq § 3: `{id: issue url, revision, text, choices[{k, text}], recommended, free_text}`.
