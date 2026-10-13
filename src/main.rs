@@ -1,0 +1,335 @@
+//! dashq: one read-only page for the taskqorg tools (dashq.md).
+
+mod data;
+mod page;
+mod source;
+
+use coreq::Tool;
+use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+const ADDR: &str = "127.0.0.1:18882";
+const FIXTURE: &str = include_str!("../fixture/input.json");
+const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | update [--check] | service install|uninstall|run | version";
+
+fn tool() -> Tool {
+    Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
+}
+
+struct Config {
+    langfuse_base: String,
+    langfuse_auth: String,
+    links: Value,
+    github_token: String,
+    projects: Vec<String>,
+    serverq_report: String,
+    serverq_host: String,
+}
+
+fn config_path(t: &Tool) -> PathBuf {
+    std::env::var_os("DASHQ_CONFIG").map(PathBuf::from).unwrap_or_else(|| t.install.join("config.json"))
+}
+
+/// Errors name the bad key, never its value (D2).
+fn load_config(p: &std::path::Path) -> Result<Config, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(p).map_err(|_| "config: file unreadable".to_string())?.permissions().mode();
+        if mode & 0o077 != 0 {
+            return Err("config: mode must be 0600".into());
+        }
+    }
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(p).map_err(|_| "config: file unreadable")?).map_err(|_| "config: invalid JSON")?;
+    let s = |path: &str, ok: &dyn Fn(&str) -> bool| -> Result<String, String> {
+        v.pointer(path).and_then(Value::as_str).filter(|x| ok(x)).map(String::from).ok_or(format!("config: bad key {}", path[1..].replace('/', ".")))
+    };
+    let base = s("/langfuse/base_url", &|x| x.starts_with("https://") && !x.contains('@') && !x.contains('"') && x[8..].trim_end_matches('/').bytes().all(|b| b != b'/'))?;
+    let public = s("/langfuse/public_key", &|x| x.starts_with("pk-lf-") && data::safe_id(x))?;
+    let secret = s("/langfuse/secret_key", &|x| x.starts_with("sk-lf-") && data::safe_id(x))?;
+    let project = s("/langfuse/project_id", &|x| data::safe_id(x))?;
+    let token = s("/github/token", &|x| x.len() >= 20 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))?;
+    let projects: Vec<String> = v["projects"]
+        .as_array()
+        .filter(|a| !a.is_empty())
+        .and_then(|a| a.iter().map(|x| x.as_str().filter(|r| r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)))).map(String::from)).collect())
+        .ok_or("config: bad key projects")?;
+    let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
+    let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
+    let base = base.trim_end_matches('/').to_string();
+    let b64 = base64(format!("{public}:{secret}").as_bytes());
+    let project_url = format!("{base}/project/{project}");
+    Ok(Config {
+        links: json!({"traces": format!("{project_url}/traces"), "dashboards": format!("{project_url}/dashboards")}),
+        langfuse_base: base,
+        langfuse_auth: format!("Basic {b64}"),
+        github_token: token,
+        projects,
+        serverq_report: report,
+        serverq_host: host,
+    })
+}
+
+fn base64(b: &[u8]) -> String {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    b.chunks(3)
+        .flat_map(|c| {
+            let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+            (0..4).map(move |i| if i <= c.len() { A[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' })
+        })
+        .collect()
+}
+
+struct App {
+    cfg: Config,
+    cache: source::Cache,
+}
+
+impl App {
+    /// Reads every source (cached per D4) and builds the document.
+    fn doc(&self, period: u64, filters: Value) -> Value {
+        let c = &self.cfg;
+        let now = source::now();
+        let (lf, boards, releases) = std::thread::scope(|sc| {
+            let lf = sc.spawn(|| self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(&c.langfuse_base, &c.langfuse_auth, now, period)));
+            let gh: Vec<_> = c
+                .projects
+                .iter()
+                .map(|r| {
+                    sc.spawn(move || {
+                        let b = self.cache.get(&format!("board:{r}"), 60, || source::board(r, &c.github_token));
+                        let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, &c.github_token));
+                        (r.clone(), b, l)
+                    })
+                })
+                .collect();
+            let (mut boards, mut releases) = (json!({}), json!({}));
+            for h in gh {
+                if let Ok((r, b, l)) = h.join() {
+                    boards[&r] = b;
+                    releases[&r] = l;
+                }
+            }
+            (lf.join().unwrap_or(Value::Null), boards, releases)
+        });
+        data::build(&json!({
+            "now": source::now(), "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
+            "langfuse": lf, "boards": boards, "releases": releases, "serverq": source::serverq(&c.serverq_report),
+        }))
+    }
+}
+
+fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: same-origin\r\nContent-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = s.write_all(head.as_bytes()).and_then(|_| s.write_all(body));
+}
+
+fn handle(app: &App, mut s: TcpStream) {
+    let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+    let mut r = BufReader::new(s.try_clone().unwrap());
+    let mut line = String::new();
+    if r.read_line(&mut line).is_err() {
+        return;
+    }
+    // drain headers (bounded): the request has no body we use
+    let mut h = String::new();
+    for _ in 0..100 {
+        h.clear();
+        if r.read_line(&mut h).map_or(true, |n| n == 0) || h == "\r\n" || h == "\n" {
+            break;
+        }
+    }
+    let mut parts = line.split_whitespace();
+    let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    let (status, ctype, body) = route(app, method, path, query);
+    respond(&mut s, status, ctype, &body);
+}
+
+fn route(app: &App, method: &str, path: &str, query: &str) -> (&'static str, &'static str, Vec<u8>) {
+    const HTML: &str = "text/html; charset=utf-8";
+    const JSON: &str = "application/json";
+    if !["/", "/app.js", "/style.css", "/data"].contains(&path) {
+        return ("404 Not Found", "text/plain", b"not found".to_vec());
+    }
+    if method != "GET" {
+        return ("405 Method Not Allowed", "text/plain", b"method not allowed".to_vec());
+    }
+    match path {
+        "/app.js" => ("200 OK", "text/javascript; charset=utf-8", include_bytes!("../assets/app.js").to_vec()),
+        "/style.css" => ("200 OK", "text/css; charset=utf-8", include_bytes!("../assets/style.css").to_vec()),
+        _ => {
+            let Ok((period, filters)) = data::query(query) else {
+                return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
+            };
+            let doc = app.doc(period, filters);
+            if path == "/" {
+                return ("200 OK", HTML, page::render(&doc, &app.cfg.links).into_bytes());
+            }
+            if data::all_failed(&doc) {
+                return ("503 Service Unavailable", JSON, br#"{"error":"all sources failed"}"#.to_vec());
+            }
+            ("200 OK", JSON, doc.to_string().into_bytes())
+        }
+    }
+}
+
+fn serve(t: &Tool, service: bool) -> ! {
+    let cfg = load_config(&config_path(t)).unwrap_or_else(|e| t.die(&e));
+    // loopback only (D2): the address is a constant, never configured
+    let l = TcpListener::bind(ADDR).unwrap_or_else(|e| t.die(&format!("bind {ADDR}: {e}")));
+    eprintln!("dashq {} listening on {ADDR}", t.version);
+    if service {
+        let healthy = t.install.join("releases").join(t.version).join("healthy");
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(60));
+            if healthy.parent().is_some_and(|p| p.is_dir()) {
+                let _ = std::fs::write(&healthy, "");
+            }
+        });
+    }
+    let app = Arc::new(App { cfg, cache: source::Cache::default() });
+    for s in l.incoming().flatten() {
+        let app = app.clone();
+        std::thread::spawn(move || handle(&app, s));
+    }
+    std::process::exit(1)
+}
+
+fn fixture_doc() -> Value {
+    data::build(&serde_json::from_str(FIXTURE).expect("fixture JSON"))
+}
+
+fn fixture_html() -> String {
+    let input: Value = serde_json::from_str(FIXTURE).unwrap();
+    page::render(&fixture_doc(), &input["links"])
+}
+
+fn selftest(t: &Tool) -> Result<(), String> {
+    if fixture_html() != FIXTURE_HTML {
+        return Err("fixture: rendering differs from fixture/page.html".into());
+    }
+    println!("fixture: ok");
+    let p = config_path(t);
+    if !p.exists() {
+        println!("config: none at DASHQ_CONFIG or {}; source reads skipped", p.display());
+        return Ok(());
+    }
+    let cfg = load_config(&p)?;
+    println!("config: ok");
+    if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
+        return Ok(());
+    }
+    let doc = App { cfg, cache: source::Cache::default() }.doc(1800, json!({}));
+    for (name, s) in doc["sources"].as_object().unwrap() {
+        println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
+    }
+    Ok(())
+}
+
+fn main() {
+    let t = tool();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // the installed launcher runs the current release (coreq launcher)
+    if std::env::current_exe().ok() == Some(t.install.join(t.exe_name())) && args.first().map(String::as_str) != Some("update") {
+        coreq::launcher::launch(&t, &args);
+    }
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.as_slice() {
+        ["serve"] => serve(&t, false),
+        ["service", "run"] => serve(&t, true),
+        ["report", rest @ ..] => {
+            let q: Vec<String> = rest.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).map(String::from).unwrap_or_else(|| t.die(USAGE))).collect();
+            let (period, filters) = data::query(&q.join("&")).unwrap_or_else(|e| t.die(&e));
+            let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
+            println!("{}", App { cfg, cache: source::Cache::default() }.doc(period, filters));
+        }
+        ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
+        ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => match coreq::update::update(&t, !rest.is_empty()) {
+            Ok(Some(v)) => println!("update: {v}"),
+            Ok(None) => println!("update: up to date"),
+            Err(e) => t.die(&e),
+        },
+        ["service", op @ ("install" | "uninstall")] => {
+            let root = std::env::current_dir().unwrap_or_else(|e| t.die(&e.to_string()));
+            let u = coreq::service::unit(&t, &root, "dashq");
+            let r = if *op == "install" {
+                coreq::update::install_self(&t).and_then(|_| coreq::service::run_all(&u.unload, true)).and_then(|_| coreq::service::write_unit(&u)).and_then(|_| coreq::service::run_all(&u.load, false))
+            } else {
+                coreq::service::run_all(&u.unload, true).and_then(|_| std::fs::remove_file(&u.path).map_err(|e| e.to_string()))
+            };
+            r.unwrap_or_else(|e| t.die(&e));
+            println!("service {op}: ok ({})", u.path.display());
+        }
+        ["version"] => println!("dashq {}", t.version),
+        _ => t.die(USAGE),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixture_rendering_is_pinned() {
+        let html = fixture_html();
+        if std::env::var_os("DASHQ_UPDATE_FIXTURE").is_some() {
+            std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/fixture/page.html"), &html).unwrap();
+            std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/fixture/data.json"), serde_json::to_string_pretty(&fixture_doc()).unwrap() + "\n").unwrap();
+        }
+        assert_eq!(html, FIXTURE_HTML, "rerun with DASHQ_UPDATE_FIXTURE=1 after an intended change");
+        let pinned: Value = serde_json::from_str(include_str!("../fixture/data.json")).unwrap();
+        assert_eq!(fixture_doc(), pinned);
+    }
+
+    #[test]
+    fn routes_and_headers() {
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default() };
+        assert_eq!(route(&app, "GET", "/nope", "").0, "404 Not Found");
+        assert_eq!(route(&app, "POST", "/data", "").0, "405 Method Not Allowed");
+        assert_eq!(route(&app, "GET", "/data", "period=5").0, "400 Bad Request");
+        assert_eq!(route(&app, "GET", "/app.js", "").0, "200 OK");
+    }
+
+    fn load_config_fixture() -> Config {
+        Config { langfuse_base: String::new(), langfuse_auth: String::new(), links: json!({}), github_token: String::new(), projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into() }
+    }
+
+    #[test]
+    fn config_errors_name_the_key_never_the_value() {
+        let d = std::env::temp_dir().join(format!("dashq-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let p = d.join("config.json");
+        let good = json!({"langfuse": {"base_url": "https://lf.example.com", "public_key": "pk-lf-1", "secret_key": "sk-lf-SECRET", "project_id": "p1"},
+            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": "/tmp/report.json", "host": "fra/native"}});
+        let write = |v: &Value| {
+            std::fs::write(&p, v.to_string()).unwrap();
+            #[cfg(unix)]
+            std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+        };
+        write(&good);
+        let c = load_config(&p).unwrap();
+        assert_eq!(c.langfuse_auth, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
+        assert_eq!(c.links["traces"], "https://lf.example.com/project/p1/traces");
+        let mut bad = good.clone();
+        bad["langfuse"]["secret_key"] = json!("SECRET-but-wrong");
+        write(&bad);
+        let e = load_config(&p).err().unwrap();
+        assert_eq!(e, "config: bad key langfuse.secret_key");
+        #[cfg(unix)]
+        {
+            write(&good);
+            std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+            assert_eq!(load_config(&p).err().unwrap(), "config: mode must be 0600");
+        }
+        assert_eq!(base64(b"ab"), "YWI=");
+    }
+}

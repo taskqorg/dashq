@@ -1,0 +1,9 @@
+[package]
+name = "dashq"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.1.0" }
+serde_json = { version = "1", features = ["preserve_order"] }

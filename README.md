@@ -1,3 +1,25 @@
 # dashq
 
 One dashboard for taskqorg tools: hosts and versions, boards, agent activity and compression, server checks. Decisions live in dashq.md.
+
+## Run
+
+```sh
+dashq serve                      # page on http://127.0.0.1:18882 (loopback only)
+dashq report --period=7200       # the /data JSON once; --host=, --agent=, --session= filter
+dashq selftest                   # fixture rendering, config, one read of each source
+dashq service install            # coreq service unit running `dashq service run`
+```
+
+Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
+
+```json
+{
+  "langfuse": {"base_url": "https://langfuse.example.com", "project_id": "…", "public_key": "pk-lf-…", "secret_key": "sk-lf-…"},
+  "github": {"token": "<read-only token>"},
+  "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/serverq", "taskqorg/coreq", "taskqorg/specq", "taskqorg/dashq"],
+  "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"}
+}
+```
+
+Fixture: `fixture/input.json` renders to `fixture/page.html` and `fixture/data.json`; after an intended change rerun `DASHQ_UPDATE_FIXTURE=1 cargo test` and review the diff.
