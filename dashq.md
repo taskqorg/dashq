@@ -106,6 +106,8 @@ Every view of agentq `docs/SERVICEQ.md` maps here:
 
 ## D10. Dashboard redesign target
 
+Integration research: [independent products](docs/design/integration.md). Latest exploratory layout: [review findings](docs/design/overview-review.md). These proposals do not amend D1–D7 or replace the accepted references below.
+
 Approved design; not implemented by this specification change. Apply [shared dashboard and widget rules W1–W15](https://github.com/taskqorg/specq/blob/main/design/dashboards.md). The [accepted reference](docs/design/overview.md) owns layout and preview parameters. D8 documents the existing section inventory; preserve its information while changing hierarchy.
 
 - First viewport: compact Attention and server overview together. Answer which hosts need attention, their current CPU utilization, RAM used/total and disk used/total per filesystem, and how those values are changing. Keep warnings visible alongside the affected host. Board questions and failures join Attention; board totals must not displace the server overview.
