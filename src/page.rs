@@ -5,7 +5,7 @@ use crate::source::{clock, enc};
 use serde_json::{Value, json};
 use std::fmt::Write;
 
-fn esc(s: &str) -> String {
+pub fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
