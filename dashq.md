@@ -127,7 +127,7 @@ Still unresolved: production warning thresholds, collection/retention qualificat
 
 Acceptance: review the first viewport and deeper content with representative live data, missing history, warnings and long labels; verify readable large text, both themes, reduced motion and multiple automatic refreshes. Record which data and UI requirements are implemented, unverified or blocked by a source gap.
 
-## D11. Security
+## D12. Security
 - Follows the [specq security baseline](https://github.com/taskqorg/specq/blob/main/engineering/security.md); reports go to the route in `SECURITY.md`.
 - Every workflow declares top-level `permissions: contents: read`; a publishing job adds only what it writes (`release.yml` `publish`: `contents: write`).
 - Accepted exception (owner @alexkirs): the repository is private on the GitHub free plan, so branch protection, secret scanning with push protection, Dependabot alerts and private vulnerability reporting are unavailable. Reason: the plan does not offer them for private repositories. Compensation: owner-only pushes and tags, reviewed PRs, committed lockfile. Revisit when the repository goes public or the plan changes.
@@ -142,3 +142,7 @@ Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1�
 - D6/D7 apply the authenticated actor's scope server-side, including HTML, history, evidence, exports and local report. Local report is a protected host-administrator capability, never a remote identity bypass. Freshness uses producer observation time; connection and export health remain separate.
 - D8 adds approval, scoped installation overview and explicit revoke. First completion requires the same projection as the browser; resource history needs real samples. Observation grants provide no task-answer or host-command authority.
 - Security exception: C3's owner-accepted non-expiring ingestion credential is revocable, per installation and observation-only; all other credential classes follow the shared security baseline.
+
+## D13. TaskQ answer card
+
+Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Implementation and live qualification remain pending.
