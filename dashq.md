@@ -16,7 +16,8 @@ dashq is one read-only page for the taskqorg tools: hosts and versions, taskq bo
 - `dashq selftest` loads config, renders the fixture snapshot and reads each source once; no writes.
 - Routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. Any other path 404; any other method 405.
 - Headers on every response: `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, CSP `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. No third-party assets.
-- Config: a private JSON file named by env `DASHQ_CONFIG` (mode 0600): Langfuse base URL and keys, a read-only GitHub token, the project list (D4.2), the serverq report path. Secrets never reach the browser, `/data`, logs or `report` output. Invalid config: the service refuses to start and names the bad key, never the value.
+- Config: a private JSON file named by env `DASHQ_CONFIG`, else `<install>/config.json` (coreq service units pass only `PATH`), mode 0600: Langfuse base URL, project id and keys, a read-only GitHub token, the project list (D4.2), the serverq report path and the host id its row joins, the public `dash.` host name. Requests whose `Host` is not the loopback address or that name get 421 (DNS rebinding). Secrets never reach the browser, `/data`, logs or `report` output. Invalid config: the service refuses to start and names the bad key, never the value. `selftest` without any config file skips the source reads and says so.
+- `dashq service install|uninstall|run` and `dashq update [--check]` are the coreq commands; `service run` is `serve` and marks the release healthy after 60 s.
 
 ## D3. Deployment
 - Runs on the production host (FRA), where Langfuse and the serverq report live.
@@ -48,6 +49,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 
 ## D5. Refresh
 - The page fetches `/data` on load, every 60 s and on the Refresh button. No live push.
+- One renderer, on the server: `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
 - The page shows `Updated <time>` and each source's age. A failed fetch keeps the last page and shows the error banner (D6); it never blanks values.
 
 ## D6. Unknown and stale
