@@ -1,0 +1,16 @@
+name: tests
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Cargo.toml arrives with #3; until then the job passes.
+      - name: cargo checks
+        run: |
+          if [ ! -f Cargo.toml ]; then echo "no Cargo.toml yet"; exit 0; fi
+          cargo test --locked
+          cargo run -- selftest
