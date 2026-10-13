@@ -66,3 +66,5 @@ This supersedes conflicting placement/icon/counter instructions in the earlier b
 Implementation: #23 owns composition, #43 answers/board children, #46 node controls. #44 and #48 retain actual action qualification. Observation-only layout does not wait for write authorization; unsupported controls keep their explicit reason and source route.
 
 ServerQ detail and task handoff follow [H1–H4](finding-tasks.md); Attention, finding and Boards share one task editor. The first-screen layout is unchanged.
+
+Connection detail uses [L1–L4](connections.md); source freshness and enrollment state remain distinct in the overview.

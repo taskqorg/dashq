@@ -135,7 +135,7 @@ Acceptance: review the first viewport and deeper content with representative liv
 
 ## D11. Independent product connections
 
-Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1–E10, owns the end-to-end connection contract. Implementation and release qualification remain pending.
+Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1–E10, owns the end-to-end connection contract; [connection interface L1–L4](docs/design/connections.md) owns its accepted presentation. Implementation and release qualification remain pending.
 
 - One process and one SQLite store (WAL/FULL) own grants, membership, revocations, receipts, projections, history and bounded export outbox. No extra daemon or database server.
 - C3 owns browser/device routes and authority; C4 owns durable acceptance and replay; C5 owns limits. Adjust CSP only for reviewed same-origin approval forms. Keep the loopback listener; never expose read APIs through machine-route exceptions.
