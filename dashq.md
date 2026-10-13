@@ -146,3 +146,7 @@ Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1�
 ## D13. TaskQ answer card
 
 Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Implementation and live qualification remain pending.
+
+## D14. TaskQ resource controls
+
+Accepted target: [resource controls](docs/design/resource-controls.md) reuses TaskQ-owned node/runtime, capacity and Work mode components. This separately authorized typed host-policy capability narrowly extends D1; it does not extend `/answer` or observation credentials. TaskQ's host authority owns limits, Auto admission and effective readback. No remote shell or second scheduler. Implementation, concrete adapter contract and live qualification remain gated as specified.
