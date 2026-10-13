@@ -136,7 +136,7 @@ Acceptance: review the first viewport and deeper content with representative liv
 
 ## D11. Independent product connections
 
-Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1–E10, owns the end-to-end connection contract. Implementation and release qualification remain pending.
+Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1–E10, owns the end-to-end connection contract; [connection interface L1–L4](docs/design/connections.md) owns its accepted presentation. Implementation and release qualification remain pending.
 
 - One process and one SQLite store (WAL/FULL) own grants, membership, revocations, receipts, projections, history and bounded export outbox. No extra daemon or database server.
 - C3 owns browser/device routes and authority; C4 owns durable acceptance and replay; C5 owns limits. Adjust CSP only for reviewed same-origin approval forms. Keep the loopback listener; never expose read APIs through machine-route exceptions.
@@ -156,3 +156,7 @@ Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns o
 ## D14. TaskQ resource controls
 
 Accepted target: [resource controls](docs/design/resource-controls.md) reuses TaskQ-owned node/runtime, capacity and Work mode components. This separately authorized typed host-policy capability narrowly extends D1; it does not extend `/answer` or observation credentials. TaskQ's host authority owns limits, Auto admission and effective readback. No remote shell or second scheduler. Implementation, concrete adapter contract and live qualification remain gated as specified.
+
+## D15. ServerQ finding handoff
+
+Accepted target: [finding tasks H1–H4](docs/design/finding-tasks.md) narrowly extends D1 with an explicitly authorized TaskQ create/optional-start adapter and shared TaskQ composer. Observation credentials and `/answer` gain no authority. TaskQ owns board mutation/readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Implementation and live qualification remain pending.

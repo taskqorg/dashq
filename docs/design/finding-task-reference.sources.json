@@ -1,0 +1,25 @@
+{
+  "status": "accepted-design; demo-only, not released",
+  "taskqDesignCommit": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
+  "parentFunctions": {
+    "counts": "066b3ef20a22bf0a7e7129037fbc7a17c96618e72fef9d7c9a7ea45640396ad5",
+    "projectRow": "ef8a0d13d5407df711332101723c0de1a2ed1eb0b6fc866f61541d68033c0317",
+    "task": "a93e751d9a64242821527c185b3411fe586c07f539673296274d9552c020b5d7",
+    "question": "d9a95eb7a6499837c4b94a6b4d8e1da0a40cd84010212f20335d18777e64285e"
+  },
+  "sources": [
+    "docs/design/menu-next-variants.html",
+    "docs/design/plans-and-decisions.html",
+    "docs/design/assets/github.svg"
+  ],
+  "adapters": [
+    "Synthetic task status icon and project identity replace parent fixture status/host; no fabricated live session links",
+    "Source question identity uses chosen project and semantic Ask icon",
+    "New-task form is proposed TaskQ extension using parent composer/review primitives; not a published reusable form"
+  ],
+  "notImplemented": [
+    "Real board creation and operation reconciliation",
+    "Stable installation/rule/episode to task relation",
+    "Live verification and stale policy"
+  ]
+}

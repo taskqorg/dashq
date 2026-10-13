@@ -120,3 +120,5 @@ Canonical adoption boundaries:
 Delivery batches are implementation boundaries, not partial product releases: (1) shared connection contract/client and conformance traces; (2) DashQ authenticated enrollment/store/ingestion/projection; (3) AgentQ integration and migration; (4) full UI/platform/outage/guard qualification and release. Changes can merge behind an inactive capability; user-facing connection ships only when E1–E10 applicable to AgentQ pass. One approved task contract governs its publication and rollout, not a manual approval at each build step.
 
 Use existing coreq #22, dashq #4/#24 and agentq #60 for ownership and split bounded implementation work under this accepted contract. Reuse resource probes/qualification #85/#86 and dashboard #23; do not create another sampler. Production access and credential changes are not authorized by this design document.
+
+Accepted UI: [connection lifecycle L1–L4](connections.md), including the demo reference and conformance gates. This adds no protocol or authority beyond C1–C7.
