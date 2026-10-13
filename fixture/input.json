@@ -67,6 +67,28 @@
         {"id": "i2", "traceId": "tr-i2", "startTime": "2026-10-13T04:00:00Z", "statusMessage": "timeout", "tags": ["host:fra", "runtime:native", "agent:codex"],
          "metadata": {"attributes.agent_context.incident.fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaa", "attributes.agent_context.incident.occurrences": 3}},
         {"id": "i3", "traceId": "tr-i3", "startTime": "2026-10-11T04:00:00Z", "statusMessage": "http_502", "tags": ["host:fra", "runtime:native"], "metadata": {}}
+      ],
+      "agentq.installation": [
+        {"id": "q1", "traceId": "tr-q1", "startTime": "2026-10-13T06:30:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.stage": "heartbeat"}}
+      ],
+      "agentq.run": [
+        {"id": "q2", "traceId": "tr-q2", "startTime": "2026-10-13T06:50:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.exit_code": 0}},
+        {"id": "q3", "traceId": "tr-q3", "startTime": "2026-10-13T06:55:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.exit_code": 1}}
+      ],
+      "agentq.retrieval": [
+        {"id": "q4", "traceId": "tr-q4", "startTime": "2026-10-13T06:56:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.ok": true}},
+        {"id": "q5", "traceId": "tr-q5", "startTime": "2026-10-13T07:00:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-win", "attributes.host.name": "win-1", "attributes.agentq.runtime": "windows", "attributes.agentq.version": "0.4.0", "attributes.agentq.ok": false}}
+      ],
+      "agentq.incident": [
+        {"id": "q6", "traceId": "tr-q6", "startTime": "2026-10-13T05:00:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-win", "attributes.host.name": "win-1", "attributes.agentq.runtime": "windows", "attributes.agentq.version": "0.4.0", "attributes.agentq.stage": "update"}},
+        {"id": "q7", "traceId": "tr-q6", "startTime": "2026-10-13T05:00:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-win", "attributes.host.name": "win-1", "attributes.agentq.runtime": "windows", "attributes.agentq.version": "0.4.0", "attributes.agentq.stage": "update"}}
       ]
     }
   },

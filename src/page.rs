@@ -216,6 +216,19 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let name = |a: &Value| AGENTS.iter().find(|(k, _)| a == *k).map_or(text(a), |(_, n)| n.to_string());
     let _ = writeln!(w, "<section id=\"agents\">\n<h2>Agents</h2>\n{}", unknown_line(src));
     let capped = |k: &str| -> Value { json!({"incomplete": ag["incomplete"][k], "reason": src["reason"]}) };
+    let _ = writeln!(w, "<h3>agentq fleet (one row per installation)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Version</th><th>Last seen</th><th>Heartbeat</th><th>Runs (non-zero exits)</th><th>Retrievals (failed)</th></tr>");
+    let (cn, cv) = (capped("agentq.run"), capped("agentq.retrieval"));
+    for x in ag["fleet"].as_array().into_iter().flatten() {
+        let hb = format!("{}{}", badge(x["state"].as_str().unwrap_or("unknown"), x["state"].as_str().unwrap_or("unknown")), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
+        let ver = format!("{}{}", if x["version"].is_null() { "—".into() } else { text(&x["version"]) }, if x["behind"] == true { " <span class=\"s warn\">behind</span>" } else { "" });
+        let _ = writeln!(
+            w,
+            "<tr><td>{}</td><td>{}</td><td>{ver}</td><td>{}{}</td><td>{hb}</td><td>{} ({} of {})</td><td>{} ({})</td></tr>",
+            text(&x["host"]), text(&x["installation"]), at(&x["last_seen"], now), trace(&x["trace_id"], base),
+            num(&x["runs"], &cn), num(&x["nonzero_exits"], &cn), text(&x["exit_samples"]), num(&x["retrievals"], &cv), num(&x["failed_retrievals"], &cv)
+        );
+    }
+    let _ = writeln!(w, "</table>");
     let _ = writeln!(w, "<h3>Model activity</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>");
     let ca = capped("activity");
     for a in ag["activity"].as_array().into_iter().flatten() {

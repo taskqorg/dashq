@@ -13,6 +13,7 @@ const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
 const SERVERQ_LIMIT: u64 = 7200;
+const AQ_HEARTBEAT_LIMIT: u64 = 7200;
 const SERVICES: [&str; 7] = ["contextq", "serverq", "taskq", "gateway", "hermes-gateway", "langfuse", "updater"];
 const USAGE: [&str; 8] = ["input", "output", "total", "input_cached_tokens", "cache_read_input_tokens", "input_cache_creation_1h", "input_cache_creation_5m", "output_reasoning_tokens"];
 const NATIVE_FAILURE: [&str; 27] = [
@@ -125,6 +126,18 @@ fn identity(row: &Value) -> (Option<String>, Option<&str>) {
     let agent = tag(row, "agent").or(attr(row, "agent").as_str());
     let id = host.filter(|h| safe(h, 64, b"_-") && matches!(runtime, "native" | "wsl")).map(|h| format!("{h}/{runtime}"));
     (id, agent)
+}
+
+fn aq<'a>(row: &'a Value, key: &str) -> &'a Value {
+    &row["metadata"][format!("attributes.{key}")]
+}
+
+/// `(installation, host id)` of an agentq event; the host id joins the legacy `<host>/<runtime>`, so one host is one row.
+fn aq_identity(row: &Value) -> Option<(String, String)> {
+    let inst = aq(row, "agentq.installation").as_str().filter(|i| safe_id(i))?;
+    let host = aq(row, "host.name").as_str().filter(|h| safe(h, 64, b"_.-"))?;
+    let runtime = if aq(row, "agentq.runtime") == "wsl" { "wsl" } else { "native" };
+    Some((inst.into(), format!("{host}/{runtime}")))
 }
 
 fn agent_name(a: &str) -> Option<&'static str> {
@@ -521,6 +534,69 @@ pub fn build(inp: &Value) -> Value {
     }
     history.extend(by_fp.into_values());
 
+    // agentq fleet (D4.1): one row per installation; usage from runs and retrievals, incidents into the history.
+    let aq_latest = inp["releases"]["taskqorg/agentq"]["value"].clone();
+    let scoped = f["agent"].is_null() && f["session"].is_null();
+    let mut fleet: BTreeMap<String, Value> = BTreeMap::new();
+    let mut aq_seen = HashSet::new();
+    for key in ["agentq.installation", "agentq.run", "agentq.retrieval", "agentq.incident"] {
+        for r in rows(key) {
+            let (Some((inst, host)), Some(at)) = (aq_identity(r), row_at(r).filter(|a| *a <= now + 60)) else { continue };
+            if fhost.is_some_and(|x| x != host) {
+                continue;
+            }
+            hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
+            let x = fleet.entry(inst.clone()).or_insert_with(|| {
+                json!({"installation": inst, "host": host, "runtime": null, "version": null, "last_seen": 0, "heartbeat_at": null,
+                       "runs": if scoped { json!(0) } else { Value::Null }, "nonzero_exits": if scoped { json!(0) } else { Value::Null }, "exit_samples": 0,
+                       "retrievals": if scoped { json!(0) } else { Value::Null }, "failed_retrievals": if scoped { json!(0) } else { Value::Null }, "trace_id": null})
+            });
+            // the newest event names the host, runtime and version
+            if x["last_seen"].as_u64().is_some_and(|l| at >= l) {
+                x["last_seen"] = json!(at);
+                x["host"] = json!(host);
+                x["runtime"] = aq(r, "agentq.runtime").as_str().filter(|s| safe(s, 16, b"")).map_or(Value::Null, |s| json!(s));
+                x["version"] = semver(aq(r, "agentq.version"));
+                x["trace_id"] = trace(r);
+            }
+            match key {
+                "agentq.installation" if x["heartbeat_at"].as_u64().is_none_or(|h| at > h) => x["heartbeat_at"] = json!(at),
+                "agentq.run" if scoped && at >= since => {
+                    add(x, "runs", 1.0);
+                    if let Some(e) = aq(r, "agentq.exit_code").as_i64() {
+                        add(x, "exit_samples", 1.0);
+                        add(x, "nonzero_exits", if e != 0 { 1.0 } else { 0.0 });
+                    }
+                }
+                "agentq.retrieval" if scoped && at >= since => {
+                    add(x, "retrievals", 1.0);
+                    add(x, "failed_retrievals", if aq(r, "agentq.ok") == false { 1.0 } else { 0.0 });
+                }
+                "agentq.incident" if at + 86400 >= now && trace(r).as_str().is_some_and(|t| aq_seen.insert(t.to_string())) => {
+                    let stage = aq(r, "agentq.stage").as_str().filter(|s| safe(s, 32, b"_-")).unwrap_or("unknown stage");
+                    history.push(json!({"source": "agentq", "host": host, "what": format!("agentq incident ({stage})"), "since": at, "occurrences": null, "trace_id": trace(r)}));
+                }
+                _ => {}
+            }
+        }
+    }
+    let fleet: Vec<Value> = fleet
+        .into_values()
+        .map(|mut x| {
+            let hb = x["heartbeat_at"].as_u64();
+            let age = hb.map(|h| now.saturating_sub(h));
+            let fresh = age.is_some_and(|a| a <= AQ_HEARTBEAT_LIMIT);
+            x["state"] = json!(if fresh { "ok" } else { "stale" });
+            x["reason"] = if fresh { Value::Null } else { json!(age.map_or("no heartbeat in 24 h".into(), |a| format!("heartbeat {} old (limit {})", dur(a), dur(AQ_HEARTBEAT_LIMIT)))) };
+            x["latest"] = aq_latest.clone();
+            x["behind"] = behind(&aq_latest, &x["version"]);
+            if !fresh {
+                gaps.push(json!({"source": "Langfuse", "host": x["host"], "what": format!("agentq installation {}: stale", x["installation"].as_str().unwrap()), "since": hb, "detail": x["reason"], "trace_id": x["trace_id"]}));
+            }
+            x
+        })
+        .collect();
+
     // Heartbeats and boards (D4.2).
     let releases = &inp["releases"];
     let latest = |repo: &str| releases[repo]["value"].clone();
@@ -640,8 +716,9 @@ pub fn build(inp: &Value) -> Value {
         "attention": {"source": worst([("Langfuse".to_string(), &lf_src), ("GitHub".to_string(), &gh_src), ("serverq".to_string(), &sq_src)].iter().map(|(n, s)| (n.clone(), *s)), now),
                       "current": hostf(&current), "gaps": hostf(&gaps), "incidents": hostf(&history)},
         "boards": boards,
-        "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools")},
-                   "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
+        "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
+                                                      "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
+                   "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
     })
 }
@@ -677,5 +754,21 @@ mod tests {
         assert_eq!(s(json!({"value": 1, "at": 9900, "error": null})), "ok");
         let r = source(&json!({"value": 1, "at": 9000, "error": "timeout"}), now, 600, None);
         assert_eq!(r["reason"], "read failed (timeout), showing 02:30 UTC");
+    }
+
+    #[test]
+    fn agentq_rows_build_the_fleet_and_join_legacy_hosts() {
+        let doc = build(&serde_json::from_str(include_str!("../fixture/input.json")).unwrap());
+        let ids: Vec<&str> = doc["hosts"].as_array().unwrap().iter().filter_map(|h| h["id"].as_str()).collect();
+        assert_eq!(ids.iter().filter(|i| **i == "fra/native").count(), 1, "legacy and agentq name one host once");
+        assert!(ids.contains(&"win-1/native"));
+        let fleet = doc["agents"]["fleet"].as_array().unwrap();
+        let (fra, win) = (&fleet[0], &fleet[1]);
+        assert_eq!((fra["installation"].as_str(), fra["state"].as_str(), fra["version"].as_str()), (Some("inst-fra"), Some("ok"), Some("0.5.0")));
+        assert_eq!((fra["runs"].as_u64(), fra["nonzero_exits"].as_u64(), fra["retrievals"].as_u64()), (Some(2), Some(1), Some(1)));
+        assert_eq!((win["state"].as_str(), win["failed_retrievals"].as_u64()), (Some("stale"), Some(1)));
+        let incidents = doc["attention"]["incidents"].as_array().unwrap();
+        assert_eq!(incidents.iter().filter(|i| i["source"] == "agentq").count(), 1, "one event id is one incident");
+        assert!(doc["attention"]["gaps"].as_array().unwrap().iter().any(|g| g["what"] == "agentq installation inst-win: stale"));
     }
 }
