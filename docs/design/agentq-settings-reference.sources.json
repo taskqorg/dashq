@@ -1,0 +1,18 @@
+{
+  "status": "accepted design; synthetic fixture only",
+  "agentqContractBase": "8dad28826ea108115f673cdc7589f93d7119f882",
+  "contract": "agentq/docs/spec/CONFIGURATION.md A1-A5; dashq/docs/design/agentq-settings.md G1-G4",
+  "referenceSha256": "3df51ef73bcb28756942fec5aefa2d2ad1c6a41d9740a1f24c6aec10b587c8a7",
+  "style": "TaskQ accepted operator palette and Lucide vocabulary; AgentQ-specific interface, not a TaskQ Work mode fork",
+  "qualification": [
+    "1024/16 light",
+    "360/20 dark",
+    "routing review, immutable pending edit, host readback, client activity",
+    "Hermes setup; Desktop Chat unsupported fields; read-only/stale/conflict"
+  ],
+  "limitations": [
+    "No actual config or board changes",
+    "Profile projection and authorized host adapter not yet implemented",
+    "Fixture is not production reconciliation or security evidence"
+  ]
+}
