@@ -24,6 +24,10 @@ const MAX_PENDING: i64 = 1000;
 const BURST: f64 = 10.0;
 /// C5 heartbeat: a snapshot older than this is stale.
 pub const STALE_SECS: u64 = 180;
+/// C5 resources: a trend needs at least this many samples; fewer is history warmup.
+pub const TREND_SAMPLES: i64 = 3;
+/// C5: first-connection progress polls every 2 s for at most 60 s.
+const WAIT_SECS: i64 = 60;
 const MACHINE: [&str; 6] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke"];
 
 pub struct Req<'a> {
@@ -122,7 +126,12 @@ impl Enroll {
     }
 
     fn token(&self, subject: &str, code: &str) -> String {
-        hex(hmac::sign(&self.csrf, format!("{subject}\n{code}").as_bytes()).as_ref())
+        self.token_for(&format!("{subject}\n{code}"))
+    }
+
+    /// CSRF token bound to account and purpose.
+    fn token_for(&self, purpose: &str) -> String {
+        hex(hmac::sign(&self.csrf, purpose.as_bytes()).as_ref())
     }
 
     /// True when another session is allowed for `ip` now; else the seconds to wait.
@@ -205,8 +214,13 @@ fn error(status: &'static str, code: &str) -> Resp {
 }
 
 fn html(status: &'static str, body: &str) -> Resp {
+    html_head(status, "", body)
+}
+
+/// `head`: extra head lines, e.g. the 2 s progress refresh.
+fn html_head(status: &'static str, head: &str, body: &str) -> Resp {
     let page = format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>DashQ · Connect</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n</head>\n<body>\n<main>\n<h1>Connect a product</h1>\n{body}</main>\n</body>\n</html>\n"
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n{head}<title>DashQ · Connect</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n</head>\n<body>\n<main>\n<h1>Connect a product</h1>\n{body}</main>\n</body>\n</html>\n"
     );
     Resp { status, ctype: "text/html; charset=utf-8", body: page.into_bytes(), headers: String::new(), forms: true }
 }
@@ -415,8 +429,19 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
                     (obs, json!({"event_id": s.event_id, "schema": s.schema, "payload": serde_json::from_str::<Value>(&s.payload).unwrap_or(Value::Null)}))
                 }
             };
+            // history warmup and export gaps are separate from connection and data age (C5)
+            let history = if r.samples < TREND_SAMPLES {
+                json!({"samples": r.samples, "state": "warmup", "reason": format!("collecting history: {} of {TREND_SAMPLES} samples", r.samples)})
+            } else {
+                json!({"samples": r.samples, "state": "ok", "reason": null})
+            };
+            let export = if r.export_gap > 0 {
+                json!({"gap_events": r.export_gap, "state": "gap", "reason": format!("events expired before export: {}", r.export_gap)})
+            } else {
+                json!({"gap_events": 0, "state": "ok", "reason": null})
+            };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
-                "generation": r.generation, "connection": r.connection, "observation": obs, "snapshot": snapshot})
+                "generation": r.generation, "connection": r.connection, "observation": obs, "history": history, "export": export, "snapshot": snapshot})
         })
         .collect();
     Some(json!({"source": src("ok", None), "rows": rows}))
@@ -509,6 +534,17 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
         }
         let f = form(r.body);
         let get = |k: &str| f.get(k).map(String::as_str).unwrap_or("");
+        if get("decision") == "revoke" {
+            let (inst, ws) = (get("installation"), get("workspace"));
+            if unhex(get("csrf")).is_none_or(|t| hmac::verify(&e.csrf, revoke_purpose(subject, inst, ws).as_bytes(), &t).is_err()) {
+                return fail("403 Forbidden", "Request refused: the form expired or belongs to another account. Open Revoke again.");
+            }
+            return match e.store.revoke_as(inst, ws, subject, now) {
+                Ok(true) => html("200 OK", &format!("{who}<p>Revoked: installation <code>{}</code> in workspace <strong>{}</strong> can no longer send data. Its history stays; reconnecting needs a new approval.</p>\n<p><a href=\"/#{}\">Back to the overview</a></p>\n", esc(inst), esc(ws), anchor(inst, ws))),
+                Ok(false) => fail("404 Not Found", "Nothing to revoke: the connection is already revoked or not visible to this account."),
+                Err(_) => fail("503 Service Unavailable", "The connection store is unavailable; nothing was revoked."),
+            };
+        }
         let Some(code) = user_code(get("code")) else { return fail("400 Bad Request", "That code is not valid.") };
         if unhex(get("csrf")).is_none_or(|t| hmac::verify(&e.csrf, format!("{subject}\n{code}").as_bytes(), &t).is_err()) {
             return fail("403 Forbidden", "Request refused: the form expired or belongs to another account. Open the code again.");
@@ -521,7 +557,15 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
         let credential = b64url(&e.random(32));
         let sealer = |device: &[u8]| seal(e, device, &credential);
         return match e.store.decide(&code, approve, get("workspace"), subject, &sha256(&credential), &sealer, now) {
-            Ok(Decision::Approved(g)) => html("200 OK", &format!("{who}<p>Approved: installation <code>{}</code> is connected to workspace <strong>{}</strong>. Return to the command; it finishes on its own.</p>\n", esc(&g.installation), esc(&g.workspace))),
+            Ok(Decision::Approved(g)) => {
+                // C1.5: this page follows the first projected snapshot of this generation to the overview
+                let wait = format!("/connect?wait={}&workspace={}&generation={}&since={now}", g.installation, g.workspace, g.generation);
+                html_head(
+                    "200 OK",
+                    &format!("<meta http-equiv=\"refresh\" content=\"2; url={}\">\n", esc(&wait)),
+                    &format!("{who}<p>Approved: installation <code>{}</code> is connected to workspace <strong>{}</strong>. Return to the command; it finishes on its own.</p>\n<p><a href=\"{}\">Waiting for its first snapshot…</a></p>\n", esc(&g.installation), esc(&g.workspace), esc(&wait)),
+                )
+            }
             Ok(Decision::Already) => fail("200 OK", "This code is already approved; nothing new was granted."),
             Ok(Decision::Denied) => fail("200 OK", "Denied: no access was granted."),
             Ok(Decision::Invalid) => fail("400 Bad Request", "This code is unknown, expired or already used. Start the connection again on the host."),
@@ -530,7 +574,12 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
             Err(_) => fail("503 Service Unavailable", "The connection store is unavailable; nothing was granted."),
         };
     }
-    let code = form(r.query.as_bytes()).get("code").cloned().unwrap_or_default();
+    let q = form(r.query.as_bytes());
+    let qget = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
+    if !qget("wait").is_empty() || !qget("revoke").is_empty() {
+        return lifecycle(e, subject, &who, &q, now);
+    }
+    let code = qget("code").to_string();
     let entry = format!("{who}<form method=\"get\" action=\"/connect\">\n<label>Code shown by the command <input name=\"code\" autocomplete=\"off\" autofocus required></label>\n<button>Continue</button>\n</form>\n");
     if code.is_empty() {
         return html("200 OK", &entry);
@@ -563,6 +612,61 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
             e.token(subject, &code)
         ),
     )
+}
+
+/// Overview row id of an installation in a workspace; both are identifiers (`id`).
+pub fn anchor(installation: &str, workspace: &str) -> String {
+    format!("inst-{installation}-{workspace}")
+}
+
+fn revoke_purpose(subject: &str, installation: &str, workspace: &str) -> String {
+    format!("{subject}\nrevoke\n{installation}\n{workspace}")
+}
+
+/// `GET /connect?wait=` (first-connection progress) and `?revoke=` (confirmation) for the signed-in subject; both
+/// read through the same scoped projection as the overview, so an account sees only its own installations.
+fn lifecycle(e: &Enroll, subject: &str, who: &str, q: &HashMap<String, String>, now: i64) -> Resp {
+    let esc = crate::page::esc;
+    let get = |k: &str| q.get(k).map(String::as_str).unwrap_or("");
+    let fail = |status, msg: &str| html(status, &format!("{who}<p>{}</p>\n<p><a href=\"/\">Open the overview</a></p>\n", esc(msg)));
+    let (inst, ws) = (if get("wait").is_empty() { get("revoke") } else { get("wait") }, get("workspace"));
+    let Ok(rows) = e.project(Scope::Subject(subject)) else { return fail("503 Service Unavailable", "The connection store is unavailable.") };
+    let Some(row) = rows.into_iter().find(|r| r.installation == inst && r.workspace == ws) else {
+        return fail("404 Not Found", "This installation is not visible to this account.");
+    };
+    let to = anchor(&row.installation, &row.workspace);
+    if !get("revoke").is_empty() {
+        if row.connection == "revoked" {
+            return fail("200 OK", "This connection is already revoked; its history stays on the overview.");
+        }
+        return html(
+            "200 OK",
+            &format!(
+                "{who}<form method=\"post\" action=\"/connect\">\n<p>Revoke <strong>{} ({})</strong>, {} installation <code>{}</code>, in workspace <strong>{}</strong>?</p>\n<p>Its credential stops working at once; the host stops sending on its next request. Accepted history stays. Reconnecting needs a new approval on the host.</p>\n<input type=\"hidden\" name=\"installation\" value=\"{}\">\n<input type=\"hidden\" name=\"workspace\" value=\"{}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"revoke\">Revoke</button>\n<a href=\"/#{to}\">Cancel</a>\n</form>\n",
+                esc(&row.label), esc(&row.runtime), esc(&row.product), esc(inst), esc(ws), esc(inst), esc(ws), e.token_for(&revoke_purpose(subject, inst, ws))
+            ),
+        );
+    }
+    let generation: i64 = get("generation").parse().unwrap_or(-1);
+    if row.generation != generation || row.connection == "revoked" {
+        return fail("200 OK", "This connection was replaced or revoked; the overview shows its current state.");
+    }
+    // the projection above read this generation's snapshot as current: its receipt is `projected` now
+    if row.snapshot.as_ref().is_some_and(|s| s.generation == generation) {
+        let mut x = html("303 See Other", &format!("<p><a href=\"/#{to}\">Open the overview</a></p>\n"));
+        x.headers = format!("Location: /#{to}\r\n");
+        return x;
+    }
+    let since: i64 = get("since").parse().unwrap_or(0);
+    if (0..WAIT_SECS).contains(&(now - since)) {
+        let again = format!("/connect?wait={inst}&workspace={ws}&generation={generation}&since={since}");
+        return html_head(
+            "200 OK",
+            &format!("<meta http-equiv=\"refresh\" content=\"2; url={}\">\n", esc(&again)),
+            &format!("{who}<p role=\"status\">Approved. Waiting for the first snapshot from <strong>{} ({})</strong>; checked every 2 s for up to 60 s.</p>\n<p><a href=\"/#{to}\">Open the overview now</a></p>\n", esc(&row.label), esc(&row.runtime)),
+        );
+    }
+    fail("200 OK", "No snapshot arrived within 60 s. The connection is approved; the overview shows the installation as \"no snapshot yet\" until its host sends one.")
 }
 
 #[cfg(test)]
@@ -1079,5 +1183,96 @@ mod tests {
         ingest(e, &cred, vec![rec("s-2", now, json!({"v": 2}))], now + 4);
         let o = obs("");
         assert_eq!((o["snapshot"]["event_id"].as_str(), o["observation"]["state"].as_str()), (Some("s-2"), Some("ok")));
+    }
+
+    fn get(e: &Result<Enroll, String>, subject: &str, path: &str, now: i64) -> (String, String, String) {
+        let (s, h, v) = call(e, "GET", path, &[(SUBJECT, subject)], "", now);
+        (s, h, v.as_str().unwrap_or_default().to_string())
+    }
+
+    fn revoke(e: &Result<Enroll, String>, subject: &str, token_subject: &str, inst: &str, ws: &str, now: i64) -> (String, String) {
+        let csrf = e.as_ref().unwrap().token_for(&revoke_purpose(token_subject, inst, ws));
+        let h = [(SUBJECT, subject), ("origin", "https://dash.example.com"), ("content-type", "application/x-www-form-urlencoded")];
+        let (s, _, v) = call(e, "POST", "/connect", &h, &format!("decision=revoke&installation={inst}&workspace={ws}&csrf={csrf}"), now);
+        (s, v.as_str().unwrap().to_string())
+    }
+
+    #[test]
+    fn approval_follows_projection_to_overview_and_lifecycle_reads_stay_scoped() {
+        let now = crate::source::now() as i64;
+        let (d, e) = setup("life");
+        Enroll::admin(&d, "ws-2", "github|2").unwrap();
+        e.as_ref().unwrap().store.add_member("ws-1", "github|3", "member").unwrap();
+        // approval page follows this generation to the overview at 2 s
+        let (device, code) = start(&e, "inst-1", now);
+        let (_, body) = decide(&e, "github|1", &code, "approve", "ws-1", now);
+        let wait = format!("/connect?wait=inst-1&workspace=ws-1&generation=1&since={now}");
+        assert!(body.contains(&format!("content=\"2; url={}\"", wait.replace('&', "&amp;"))), "{body}");
+        let cred = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        let (s, _, b) = get(&e, "github|1", &wait, now + 2);
+        assert!(s == "200 OK" && b.contains("Waiting for the first snapshot") && b.contains("http-equiv=\"refresh\""), "{b}");
+        // another account cannot follow or even see it
+        assert_eq!(get(&e, "github|2", &wait, now + 2).0, "404 Not Found");
+        assert_eq!(states(&ingest(&e, &cred, vec![rec("s-1", now, json!({"v": 1}))], now + 3).1), ["accepted"]);
+        let (s, h, _) = get(&e, "github|1", &wait, now + 4);
+        assert_eq!((s.as_str(), h.as_str()), ("303 See Other", "Location: /#inst-inst-1-ws-1\r\n"));
+        assert_eq!(machine(&e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 4).1["state"], "projected");
+        assert!(get(&e, "github|1", &wait.replace("generation=1", "generation=7"), now + 4).2.contains("replaced or revoked"));
+        // a host that never sends: progress ends after 60 s with an honest state
+        let other = connect(&e, "inst-2", "github|2", "ws-2", now);
+        let w2 = format!("/connect?wait=inst-2&workspace=ws-2&generation=1&since={now}");
+        assert!(get(&e, "github|2", &w2, now + 30).2.contains("Waiting for the first snapshot"));
+        assert!(get(&e, "github|2", &w2, now + 61).2.contains("No snapshot arrived within 60 s"));
+        // history warmup until 3 samples; export gaps per workspace; data age apart from both
+        let app = app(e, None);
+        let e = &app.enroll;
+        let row = |scope, inst: &str| data(&app, "", scope).1["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).cloned();
+        let r1 = row(Some(Scope::All), "inst-1").unwrap();
+        assert_eq!((r1["history"].clone(), r1["observation"]["state"].clone()), (json!({"samples": 1, "state": "warmup", "reason": "collecting history: 1 of 3 samples"}), json!("ok")));
+        ingest(e, &cred, vec![rec("s-2", now + 1, json!({"v": 2})), rec("s-3", now + 2, json!({"v": 3}))], now + 5);
+        assert_eq!(row(Some(Scope::All), "inst-1").unwrap()["history"], json!({"samples": 3, "state": "ok", "reason": null}));
+        let s = &e.as_ref().unwrap().store;
+        s.accept(&sha256(&cred), &[Event { id: "x-1", schema: "agentq-snapshot/1", observed: now, kind: Kind::Export, payload: "{}" }], now).unwrap();
+        s.accept(&sha256(&other), &[Event { id: "x-2", schema: "agentq-snapshot/1", observed: now, kind: Kind::Export, payload: "{}" }, Event { id: "x-3", schema: "agentq-snapshot/1", observed: now, kind: Kind::Export, payload: "{}" }], now).unwrap();
+        s.prune(now + 7 * 86400 + 1).unwrap();
+        assert_eq!(row(Some(Scope::All), "inst-1").unwrap()["export"], json!({"gap_events": 1, "state": "gap", "reason": "events expired before export: 1"}));
+        assert_eq!(row(Some(Scope::All), "inst-2").unwrap()["export"]["gap_events"], 2);
+        // scoped JSON and HTML: no other workspace's rows, evidence IDs or gaps; no subject: nothing
+        let (_, doc) = data(&app, "", Some(Scope::Subject("github|2")));
+        let text = doc["installations"].to_string();
+        assert!(!text.contains("inst-1") && !text.contains("s-3") && text.contains("inst-2"), "{text}");
+        let html = |scope| String::from_utf8(crate::route(&app, "GET", "/", "", scope).2).unwrap();
+        let h2 = html(Some(Scope::Subject("github|2")));
+        assert!(h2.contains("id=\"inst-inst-2-ws-2\"") && !h2.contains("inst-1") && !h2.contains("s-3"));
+        let h1 = html(Some(Scope::Subject("github|1")));
+        assert!(h1.contains("<code>s-3</code>") && h1.contains("gap · events expired before export: 1") && !h1.contains("inst-2"));
+        assert!(h1.contains("href=\"/connect?revoke=inst-1&amp;workspace=ws-1\""));
+        assert!(!html(None).contains("inst-"));
+        let all = html(Some(Scope::All));
+        assert!(all.contains("inst-inst-1-ws-1") && all.contains("inst-inst-2-ws-2"));
+        // revoke: confirmation names the installation and effect; only the workspace admin or its approver
+        assert_eq!(get(e, "github|2", "/connect?revoke=inst-1&workspace=ws-1", now).0, "404 Not Found");
+        let (s1, _, b) = get(e, "github|1", "/connect?revoke=inst-1&workspace=ws-1", now);
+        assert!(s1 == "200 OK" && b.contains("Revoke <strong>mac-1 (native)</strong>") && b.contains("Accepted history stays"), "{b}");
+        assert_eq!(revoke(e, "github|2", "github|1", "inst-1", "ws-1", now).0, "403 Forbidden");
+        assert!(revoke(e, "github|2", "github|2", "inst-1", "ws-1", now).1.contains("Nothing to revoke"));
+        assert!(revoke(e, "github|3", "github|3", "inst-1", "ws-1", now).1.contains("Nothing to revoke"), "a member revokes only its own approvals");
+        let (_, _, wrong_origin) = call(e, "POST", "/connect", &[(SUBJECT, "github|1"), ("origin", "https://evil.example"), ("content-type", "application/x-www-form-urlencoded")], "decision=revoke&installation=inst-1&workspace=ws-1", now);
+        assert!(wrong_origin.as_str().unwrap().contains("did not come from"));
+        assert!(revoke(e, "github|1", "github|1", "inst-1", "ws-1", now).1.contains("Revoked: installation <code>inst-1</code>"));
+        assert_eq!(ingest(e, &cred, vec![rec("s-4", now, json!({}))], now + 6), (401, json!({"protocol": 1, "error": "revoked"})));
+        let r1 = row(Some(Scope::All), "inst-1").unwrap();
+        assert_eq!((r1["connection"].as_str(), r1["snapshot"]["event_id"].as_str()), (Some("revoked"), Some("s-3")));
+        let h1 = html(Some(Scope::Subject("github|1")));
+        assert!(h1.contains("history kept") && !h1.contains("revoke=inst-1"));
+        assert!(get(e, "github|1", "/connect?revoke=inst-1&workspace=ws-1", now).2.contains("already revoked"));
+        assert!(revoke(e, "github|1", "github|1", "inst-1", "ws-1", now).1.contains("Nothing to revoke"));
+        // the local report reads the store only with the host administrator's private key
+        #[cfg(unix)]
+        {
+            std::fs::set_permissions(d.join("dashq.key"), std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+            assert_eq!(Enroll::open(&d, HOST).err().unwrap(), "dashq.key: mode must be 0600");
+        }
     }
 }

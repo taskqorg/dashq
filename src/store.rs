@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS snapshots(installation TEXT NOT NULL, workspace TEXT 
 CREATE TABLE IF NOT EXISTS history(installation TEXT NOT NULL, workspace TEXT NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS history_by_time ON history(installation, observed);
 CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, queued INTEGER NOT NULL, payload TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL, workspace TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, product TEXT NOT NULL, installation TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, schemas TEXT NOT NULL, expires INTEGER NOT NULL, interval INTEGER NOT NULL, polled INTEGER NOT NULL, failures INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied', 'invalid', 'acked')), workspace TEXT, generation INTEGER, sealed BLOB);
 CREATE TABLE IF NOT EXISTS activations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
 ";
@@ -151,6 +151,10 @@ pub struct Row {
     /// `active`, `pending` (approved, not acknowledged) or `revoked`.
     pub connection: &'static str,
     pub snapshot: Option<Snapshot>,
+    /// Retained history samples of this installation and workspace with a trusted clock.
+    pub samples: i64,
+    /// Export events of this installation and workspace removed unsent (C5 export gap).
+    pub export_gap: i64,
 }
 
 /// A pairing session as the approval page shows it.
@@ -203,6 +207,8 @@ const MAX_FAILURES: i64 = 5;
 
 #[derive(Debug, PartialEq)]
 pub struct Snapshot {
+    /// Connection generation that sent it.
+    pub generation: i64,
     pub event_id: String,
     pub schema: String,
     pub observed: i64,
@@ -332,6 +338,10 @@ impl Store {
             limits.store_bytes / page as u64
         ))?;
         c.execute_batch(&format!("BEGIN IMMEDIATE; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"))?;
+        // additive: gaps recorded before the column existed keep workspace '' and show in no scoped view
+        if c.query_row("SELECT COUNT(*) FROM pragma_table_info('export_gaps') WHERE name = 'workspace'", [], |r| r.get::<_, i64>(0))? == 0 {
+            c.execute_batch("ALTER TABLE export_gaps ADD COLUMN workspace TEXT NOT NULL DEFAULT ''")?;
+        }
         Ok(Store { conn: Mutex::new(c), waiting: AtomicUsize::new(0), limits })
     }
 
@@ -376,6 +386,18 @@ impl Store {
     pub fn revoke(&self, installation: &str, now: i64) -> Result<bool, Error> {
         self.write(|tx| {
             Ok(tx.execute("INSERT OR IGNORE INTO revocations SELECT installation, generation, ?2 FROM grants WHERE installation = ?1", params![installation, now])? > 0)
+        })
+    }
+
+    /// Browser revoke (C1): revokes the live grant of `installation` in `workspace` when `subject` administers that
+    /// workspace or approved the grant; false when nothing live is visible to it.
+    pub fn revoke_as(&self, installation: &str, workspace: &str, subject: &str, now: i64) -> Result<bool, Error> {
+        self.write(|tx| {
+            Ok(tx.execute(
+                "INSERT OR IGNORE INTO revocations SELECT g.installation, g.generation, ?4 FROM grants g WHERE g.installation = ?1 AND g.workspace = ?2
+                   AND EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?3 AND (m.role = 'admin' OR g.account = ?3))",
+                params![installation, workspace, subject, now],
+            )? > 0)
         })
     }
 
@@ -595,8 +617,8 @@ impl Store {
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
             .lock()?
-            .query_row("SELECT event_id, schema, observed, clock_uncertain, payload FROM snapshots WHERE installation = ?1 ORDER BY observed DESC LIMIT 1", [installation], |r| {
-                Ok(Snapshot { event_id: r.get(0)?, schema: r.get(1)?, observed: r.get(2)?, clock_uncertain: r.get(3)?, payload: r.get(4)? })
+            .query_row("SELECT event_id, schema, observed, clock_uncertain, payload, generation FROM snapshots WHERE installation = ?1 ORDER BY observed DESC LIMIT 1", [installation], |r| {
+                Ok(Snapshot { event_id: r.get(0)?, schema: r.get(1)?, observed: r.get(2)?, clock_uncertain: r.get(3)?, payload: r.get(4)?, generation: r.get(5)? })
             })
             .optional()?)
     }
@@ -614,18 +636,20 @@ impl Store {
                 "SELECT i.id, i.product, i.runtime, i.label, g.workspace, g.generation,
                    EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation),
                    EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation),
-                   s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation
+                   s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation,
+                   (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
+                   (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace)
                  FROM grants g JOIN installations i ON i.id = g.installation
                  LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
                  WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
                    AND (?1 IS NULL OR EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?1 AND (m.role = 'admin' OR g.account = ?1)))
                  ORDER BY i.label, i.id, g.workspace",
             )?;
-            let rows: Vec<(Row, Option<i64>)> = q
+            let rows: Vec<Row> = q
                 .query_map([subject], |r| {
                     let (revoked, active): (bool, bool) = (r.get(6)?, r.get(7)?);
                     let snapshot = match r.get::<_, Option<String>>(8)? {
-                        Some(event_id) => Some(Snapshot { event_id, schema: r.get(9)?, observed: r.get(10)?, clock_uncertain: r.get(11)?, payload: r.get(12)? }),
+                        Some(event_id) => Some(Snapshot { event_id, schema: r.get(9)?, observed: r.get(10)?, clock_uncertain: r.get(11)?, payload: r.get(12)?, generation: r.get(13)? }),
                         None => None,
                     };
                     let row = Row {
@@ -637,20 +661,22 @@ impl Store {
                         generation: r.get(5)?,
                         connection: if revoked { "revoked" } else if active { "active" } else { "pending" },
                         snapshot,
+                        samples: r.get(14)?,
+                        export_gap: r.get(15)?,
                     };
-                    Ok((row, r.get(13)?))
+                    Ok(row)
                 })?
                 .collect::<Result<_, _>>()?;
             drop(q);
-            for (row, generation) in &rows {
-                if let (Some(s), Some(generation)) = (&row.snapshot, generation) {
+            for row in &rows {
+                if let Some(s) = &row.snapshot {
                     tx.execute(
                         "UPDATE receipts SET outcome = 'projected' WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
-                        params![row.installation, generation, s.event_id],
+                        params![row.installation, s.generation, s.event_id],
                     )?;
                 }
             }
-            Ok(rows.into_iter().map(|(r, _)| r).collect())
+            Ok(rows)
         })
     }
 
@@ -681,8 +707,11 @@ impl Store {
         let l = self.limits;
         self.write(|tx| {
             let cut = now - l.outbox_secs;
+            // a gap belongs to the workspace of the grant that sent its events
             tx.execute(
-                "INSERT INTO export_gaps SELECT installation, COUNT(*), MIN(observed), MAX(observed), ?2 FROM outbox WHERE queued < ?1 GROUP BY installation",
+                "INSERT INTO export_gaps (installation, events, first_observed, last_observed, at, workspace)
+                 SELECT o.installation, COUNT(*), MIN(o.observed), MAX(o.observed), ?2, g.workspace FROM outbox o
+                 JOIN grants g ON g.installation = o.installation AND g.generation = o.generation WHERE o.queued < ?1 GROUP BY o.installation, g.workspace",
                 params![cut, now],
             )?;
             tx.execute("DELETE FROM outbox WHERE queued < ?1", [cut])?;
@@ -831,6 +860,17 @@ mod tests {
         let huge = "x".repeat(4 << 20);
         assert_eq!(s.accept(b"v1", &[snap("h", NOW, &huge)], NOW), Err(Error::Full));
         assert_eq!(s.receipt(b"v1", "h").unwrap(), None);
+    }
+
+    #[test]
+    fn older_export_gaps_gain_a_workspace_column() {
+        let p = dir("migrate").join("dashq.db");
+        Connection::open(&p).unwrap().execute_batch("CREATE TABLE export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL); INSERT INTO export_gaps VALUES ('inst-1', 4, 0, 0, 0);").unwrap();
+        let s = Store::open(&p, LIMITS).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        // an old gap has no workspace and shows in no scoped row
+        assert_eq!(s.project(Scope::All).unwrap()[0].export_gap, 0);
+        assert_eq!(s.export_gaps().unwrap(), [("inst-1".to_string(), 4)]);
     }
 
     #[test]
