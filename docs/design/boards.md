@@ -4,7 +4,7 @@ Accepted block under [D10](../../dashq.md#d10-dashboard-redesign-target); apply 
 
 Historical interaction fixture, not the current TaskQ visual authority. Reference SHA-256: `99c9b50c62e2bc059cfa08a1e65732b1648fb9e96f1055e964bdd3015bc32816`.
 
-- Place the block beside the server overview under [combined first screen](first-screen.md); stack on narrow views. Its heading summarizes in-work, owner-answer and failed counts plus unavailable-source coverage. Important questions and failures also feed top-level Attention without repeating full task lists there.
+- Place the block beside the server overview under [combined first screen](first-screen.md); stack on narrow views. Its aggregate strip inherits the same TaskQ state order and coverage rules as project strips. Important questions and failures also feed top-level Attention without repeating full task lists there.
 - Project summary, provider Board link, task rows and counters are compact children of [TaskQ shared blocks B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md). Reuse the parent's assets, tokens, state order and counter interactions. The earlier `panels-top-left`, five-counter order and visible zero slots are superseded.
 - Keep the configured board URL beside project identity; never invent a GitHub Projects URL. Use TaskQ's canonical counters, including separate Doing/Review, nonzero Later and quiet Closed; unknown remains explicit. The parent owns aggregate coverage and accessible state names.
 - A small composition bar is a DashQ supplement, not a replacement counter strip: reflect canonical open states in the same order on one labelled common scale. Closed is a separate quiet total, not part of the open-queue bar. Incomplete input stays marked; do not guess missing states. It is composition, never completion progress.
@@ -14,6 +14,6 @@ Historical interaction fixture, not the current TaskQ visual authority. Referenc
 
 ## Acceptance
 
-Match the reference's rows, counter alignment and in-place task disclosure. Verify board links reach the configured Issues pages, icon links have keyboard focus and accessible names, and real issue links preserve identity. Cover doing/review, unanswered questions, failed tasks, dependency blocking, zero counts, unknown/stale sources and long titles in both themes and narrow/large-text layouts. Fetch real question text/options from the authoritative task log; do not infer choices from labels or manufacture missing details.
+Match the combined composition and current TaskQ parent blocks; use the historical reference only for in-place disclosure behavior. Verify board links reach the configured Issues pages, icon links have keyboard focus and accessible names, and real issue links preserve identity. Cover doing/review, unanswered questions, failed tasks, dependency blocking, zero counts, unknown/stale sources and long titles in both themes and narrow/large-text layouts. Fetch real question text/options from the authoritative task log; do not infer choices from labels or manufacture missing details.
 
 Reference opening one example question is demonstrative, not a requirement to reopen it on every refresh. Combined placement is accepted in first-screen.md; this does not approve shrinking server charts or changing TaskQ block interiors to fit a viewport.
