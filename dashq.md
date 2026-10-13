@@ -125,3 +125,8 @@ Approved design; not implemented by this specification change. Apply [shared das
 Still unresolved: production warning thresholds, collection/retention qualification and Attention grouping depth for multiple real incidents. Demo host capacities, filesystem names, freshness and 85/90% thresholds are invented examples, not approved inventory or policy. Do not fabricate data while these remain unavailable.
 
 Acceptance: review the first viewport and deeper content with representative live data, missing history, warnings and long labels; verify readable large text, both themes, reduced motion and multiple automatic refreshes. Record which data and UI requirements are implemented, unverified or blocked by a source gap.
+
+## D11. Security
+- Follows the [specq security baseline](https://github.com/taskqorg/specq/blob/main/engineering/security.md); reports go to the route in `SECURITY.md`.
+- Every workflow declares top-level `permissions: contents: read`; a publishing job adds only what it writes (`release.yml` `publish`: `contents: write`).
+- Accepted exception (owner @alexkirs): the repository is private on the GitHub free plan, so branch protection, secret scanning with push protection, Dependabot alerts and private vulnerability reporting are unavailable. Reason: the plan does not offer them for private repositories. Compensation: owner-only pushes and tags, reviewed PRs, committed lockfile. Revisit when the repository goes public or the plan changes.
