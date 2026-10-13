@@ -24,4 +24,23 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
 }
 ```
 
+## Deployment (D3)
+
+FRA, user service `dashq-dashq.service`, config in `<install>/config.json`. Caddy site, after the Langfuse UI Access guard:
+
+```caddy
+dash.ufobe.com {
+    route {
+        forward_auth 127.0.0.1:9121 {
+            uri /verify
+            header_up -Upgrade
+            header_up -Connection
+        }
+        reverse_proxy 127.0.0.1:18882
+    }
+}
+```
+
+Cloudflare: proxied DNS record for `dash.ufobe.com`, the host added to the Langfuse Access application, a public bypass for `/.well-known/acme-challenge/*`. Rollback: remove the site block, `systemctl reload caddy`, `dashq service uninstall`.
+
 Fixture: `fixture/input.json` renders to `fixture/page.html` and `fixture/data.json`; after an intended change rerun `DASHQ_UPDATE_FIXTURE=1 cargo test` and review the diff.
