@@ -75,7 +75,7 @@ The owner accepted reuse of the TaskQ card and ordinary real answers. [D13](../.
 
 - An `accepted` receipt proves one board entry. A worker resume shows only as a later observation (state `doing`, heartbeat attempt). A repair shows only as a later passing check.
 - Close, requeue, later, failed, start, capacity, permissions, serverq remediation and agentq configuration each need their own reviewed contract with actor, effects and readback. This route does not grow into them.
-- A serverq warning or manual rule is a recommendation. "Create task" from a finding is an explicit owner click and only with TaskQ connected; it is not part of this proposal.
+- A serverq warning or manual rule is a recommendation. "Create task" now follows accepted D15 and [finding tasks](finding-tasks.md), using a separate TaskQ action capability.
 
 ## S6. Read paths and credentials (A5)
 

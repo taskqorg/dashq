@@ -154,3 +154,7 @@ Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns o
 ## D14. TaskQ resource controls
 
 Accepted target: [resource controls](docs/design/resource-controls.md) reuses TaskQ-owned node/runtime, capacity and Work mode components. This separately authorized typed host-policy capability narrowly extends D1; it does not extend `/answer` or observation credentials. TaskQ's host authority owns limits, Auto admission and effective readback. No remote shell or second scheduler. Implementation, concrete adapter contract and live qualification remain gated as specified.
+
+## D15. ServerQ finding handoff
+
+Accepted target: [finding tasks H1–H4](docs/design/finding-tasks.md) narrowly extends D1 with an explicitly authorized TaskQ create/optional-start adapter and shared TaskQ composer. Observation credentials and `/answer` gain no authority. TaskQ owns board mutation/readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Implementation and live qualification remain pending.
