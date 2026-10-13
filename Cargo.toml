@@ -6,4 +6,5 @@ publish = false
 
 [dependencies]
 coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.6.0" }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde_json = { version = "1", features = ["preserve_order"] }
