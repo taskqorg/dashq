@@ -32,6 +32,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 
 ### D4.1 Langfuse API
 - Public API with the project keys, server side only. Reads the same event names as ServiceQ: monitor snapshots, activity and compression traces, `agent-context.native-tool` observations.
+- Agents sources: the agentq observations (agentq.md § 6), one span per event, span name = event name: `agentq.run` (RTK runs), `agentq.retrieval` (MCP tool calls), `agentq.installation` (hourly heartbeat) and `agentq.incident`. Each carries `agentq.installation` (fleet key: one installation, one row), `agentq.version`, `agentq.runtime`, `host.name` and `agentq.stage`; the Agents view takes fleet, versions, last seen and health from them, usage from `agentq.run`/`agentq.retrieval`, incidents from `agentq.incident`. Last seen is the newest event time per installation; an installation without an `agentq.installation` heartbeat in 7200 s is stale (D6). The legacy Node names above stay until the last Node host is gone (agentq#50).
 - Periods: 30 min, 2 h, 24 h (1800, 7200, 86400 s; default 1800). Health and incident history always read 24 h.
 - Cursor pagination, at most 10,000 rows per event name and period. Hitting the cap marks that source `incomplete` (D6).
 - Cache 30 s per period: page loads inside 30 s share one read.
