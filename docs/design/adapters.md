@@ -67,17 +67,9 @@ Question shape per coreq § 3: `{id: issue url, revision, text, choices[{k, text
 - `review` cards (result decisions) use the same shape; their state remains `review`.
 - `revision` is the task revision from the same snapshot; it is the expected revision of any answer (S4).
 
-## S4. Proposed answer action (amendments)
+## S4. Accepted answer action
 
-Until approved, dashq links each question to its issue (coreq decision 4 ★). The text below is a candidate amendment for D1–D4/D7, not a change to them.
-
-- **D1.** Replace "Read-only" with: read-only except one route, `POST /answer`, that delivers an owner's `answer K` or `answer --text` to an open taskq card. No other effect on any source.
-- **D2.** `POST /answer` is a browser route behind the guard. Allowed actor: the guard's verified identity mapped to a workspace administrator (C3); an unmapped identity gets 403. Body: board, task, `revision`, `op_id`, then `k` or `text` (taskq § 5 limits: 4 lines, 240 characters each). Protection: same-origin `Origin` and `Sec-Fetch-Site`, a session-bound CSRF token, `form-action 'self'`, 4 KiB body, 10 answers per minute per actor. The server re-reads the snapshot and refuses when the card text or revision differs.
-- **D2, effects.** The server runs `taskq answer N.K` or `taskq answer N --text` with `--revision R --op-id dashq.<task>.<revision>.<nonce> --json`. The op id is minted when the card renders: a double click repeats it and gets the first receipt. An option whose text starts with `close` is not offered (it runs publication, taskq § 2); it links to the board. `requeue`, `later`, `failed`, `start`, `close` and capacity are not offered.
-- **D3.** A separate write token, scoped to issue comments on the configured repositories, lives server-side in the 0600 config beside the read token. Its account must be a trusted board author, or `fold` ignores the entry. Guard, proxy and listener stay unchanged.
-- **D4.** Add the `taskq-snapshot` source (S3) with its own state.
-- **D7.** `boards[].questions[]` carries the S3 shape plus `answerable` (bool, with reason when false). `POST /answer` returns the taskq receipt `{task, op_id, outcome, state, revision, reason, next}` verbatim, and dashq records it with the actor in its store (C4).
-- **Readback.** `accepted` is taskq's own readback. The page then shows the next snapshot: the card leaves `ask`. `stale`: re-read and re-show the new card, keep the draft. `rejected`: show `reason` and `next`. `unknown`: show "Delivery not confirmed" with the issue link; retry once with the same op id, else `taskq inbox N` reconciles. Never show "answered" from a request alone.
+The owner accepted reuse of the TaskQ card and ordinary real answers. [D13](../../dashq.md#d13-taskq-answer-card) and [answers](answers.md) now own this contract; the former S4 proposal is superseded. Shared presentation belongs to TaskQ. Observation enrollment remains separate. Other proposals on this research page are not implicitly approved.
 
 ## S5. Consequential operations (A4)
 
@@ -120,4 +112,4 @@ Cross-repository approvals (coreq decisions 1, 2, 4; serverq follow-ups) gate th
 2. dashq: `serverq-findings` adapter over the local projection and the owner mapping. After serverq P2.
 3. dashq: answer route per S4, after D1–D4/D7 approval. Depends on task 1.
 
-Open decisions: R1 versus R2 for snapshots; the S4 amendment as written; write-token account and scope.
+Remaining deployment input: the authorized forge account and concrete minimum supported scope. S4 is accepted through D13/answers.md; R1/R2 source qualification remains separate.
