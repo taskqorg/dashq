@@ -2,6 +2,23 @@
 
 Accepted composition under [D10](../../dashq.md#d10-dashboard-redesign-target): Attention above servers and project boards side by side, with TaskQ resource controls reached from each node. Approval covers placement; the demo's approximated TaskQ styling and simplified controls are not a replacement design.
 
+## Published reference
+
+Use [the accepted fragment](first-screen-reference.html) or [the standalone preview](first-screen-preview.html). [Source manifest](first-screen-reference.sources.json) pins TaskQ design commit `75757d5d843159726a2ea44ca1615f9cf7fd18fd`, component source paths and SHA-256 hashes. This is a design revision, not a claim that shared production assets are released.
+
+| Block | Exact parent at the pinned revision |
+|---|---|
+| Aggregate/project counters | `docs/design/menu-next-variants.html`: `counts`, parent counter CSS; K-A8 right alignment, including wrapped lines |
+| Work mode | Same source: `resourceEditor`, `work`, `scopeReview`; full review content, not the old two-field form |
+| Answer card | `docs/design/plans-and-decisions.html`: `question` and its CSS; source-numbered choices, Other answer and Checked & context |
+| Board identity and appearance | `docs/design/assets/github.svg`, `visual-style.md`; icon names supplied by parent functions |
+
+The five parent render functions are included unchanged. The manifest names the fixture/placement adapters. All counters align right; capsule gaps and source order stay unchanged. Supersedes prior combined chat demos and the old board/answer mocks as the visual integration reference. Earlier resource files remain only chart/data examples. Implementers must use the pinned reference and qualify later parent revisions explicitly.
+
+The preview keeps simulated actions and parent-fixture limitations visible: fixed selected projects, example scope interpretation and receipts do not establish working production controls. Preserve B1-B4 and D13/D14 live-action gates. A missing capability is not permission to copy the simulation into production.
+
+Verification: browser rendering and right-edge checks at 1024 px/16 px light and 360 px/20 px dark, plus TaskQ parent counter navigation/zero/unknown checks. Natural-size images inspected. Native tray and real source/action integration are not qualified by this publication.
+
 ## Layout
 
 ```text

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "kind": "accepted-design-reference",
+  "taskq_repository": "https://github.com/taskqorg/taskq",
+  "taskq_design_commit": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
+  "taskq_design_pr": "https://github.com/taskqorg/taskq/pull/943",
+  "production_component_release": null,
+  "source_files": {
+    "docs/design/menu-next-variants.html": "2205510067e4d906e5d4fd9cf3c981575813e9a48cc0a6134682a3e9df928dfa",
+    "docs/design/plans-and-decisions.html": "af709b707368a55d3053db3d4c5c2da9ac2c14e842586526fdd5d4a1f41bb7b0",
+    "docs/design/assets/github.svg": "3bf8cceead820aec50d4ee825a3fd02c5a1cd6665cc9cf4cbf3d9c8861a204bb",
+    "docs/design/visual-style.md": "de25079933c4201e5a32619201111778678eade057c263a0882d4c37237f4dfb",
+    "docs/design/task-counters.md": "757fcd396c3b78b1bc8cc2ca0487b74366eb66aa7f3ef6e23098cef481583828",
+    "docs/design/shared-blocks.md": "f8f9c6c53319ad63ea4f9d35bd1aefe10b8b69d72c74fdb6ae1bf0505c296c0d",
+    "docs/design/workspace-prototype.html": "4b833d193c5bfbd0cb4d6c1d0e4c3c995e610d43c7d862082c0a1f919de01fb0"
+  },
+  "components": {
+    "counters": {
+      "source": "docs/design/menu-next-variants.html",
+      "function": "counts",
+      "rules": "K-A1-K-A8"
+    },
+    "resource_editor": {
+      "source": "docs/design/menu-next-variants.html",
+      "functions": [
+        "resourceEditor",
+        "work",
+        "scopeReview"
+      ]
+    },
+    "answer_card": {
+      "source": "docs/design/plans-and-decisions.html",
+      "function": "question"
+    },
+    "board_provider": "docs/design/assets/github.svg"
+  },
+  "reference_sha256": "a074f1722b6b4a7cae7295ae83bf56034b240b24f3396bd6aa6abbbafb1ddd42",
+  "preview_sha256": "36f4f02cbe2d55cfc281e5a09ed1a8965aaa13eaf4d74af81ba015fd12e497e3",
+  "adaptations": [
+    "DashQ shell, server charts and synthetic fixture values",
+    "Provider Board asset instead of the exploratory detach icon",
+    "Question identity/icon adapters; no live synthetic issue link",
+    "Host names and managed-session count bound to selected fixture node"
+  ],
+  "limits": [
+    "All actions simulated; not a release asset or live admission/answer adapter",
+    "Parent fixture retains fixed selected projects and example scope interpretation",
+    "Later/Closed are unknown in the earlier fixture; never invented zero",
+    "Demo answer receipts do not change authoritative counters"
+  ]
+}

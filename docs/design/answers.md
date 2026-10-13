@@ -1,5 +1,7 @@
 # TaskQ answers in DashQ
 
+Current combined visual authority: [published first-screen reference and pinned TaskQ sources](first-screen.md#published-reference). Older previews do not override it.
+
 Accepted under [D13](../../dashq.md#d13-taskq-answer-card). [TaskQ shared answer card](https://github.com/taskqorg/taskq/blob/main/docs/design/answer-card.md) owns presentation, interaction, assets and fixtures. Reuse it; do not fork it. [Enrollment](enrollment.md) continues to authorize observation only.
 
 Composition follows [first-screen F-A1–F-A5](first-screen.md); compact blocks inherit [TaskQ B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md). The dashboard shell may place or disclose the shared component, never fork its internal layout/icons or remove required controls.

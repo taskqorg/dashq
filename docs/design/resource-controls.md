@@ -1,5 +1,7 @@
 # TaskQ resource controls in DashQ
 
+Current combined visual authority: [published first-screen reference and pinned TaskQ sources](first-screen.md#published-reference). Older previews do not override it.
+
 Accepted under [D14](../../dashq.md#d14-taskq-resource-controls). The [TaskQ shared-resource contract](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-resource-controls.md) owns component behavior, policy semantics and target-host adapter. Reuse the versioned static assets from the shared-card delivery mechanism; no independently maintained renderer or copied Auto rules.
 
 Composition follows [first-screen F-A1–F-A5](first-screen.md); compact blocks inherit [TaskQ B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md). The dashboard shell may place or disclose the shared component, never fork its internal layout/icons or remove required controls.
