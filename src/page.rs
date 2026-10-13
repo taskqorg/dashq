@@ -94,6 +94,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
             let name = match n.as_str() {
                 "langfuse" => "Langfuse",
                 "github" => "GitHub",
+                "enrollment" => "Connections",
                 _ => "serverq",
             };
             format!("<li>{} {name}: {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")))
@@ -134,6 +135,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
         let _ = writeln!(w, "</ul>");
     }
     let _ = writeln!(w, "</section>");
+
+    installations(w, &doc["installations"], now);
 
     // 2. Hosts
     let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
@@ -287,4 +290,52 @@ pub fn render(doc: &Value, links: &Value) -> String {
     }
     let _ = writeln!(w, "</section>\n</main>\n</body>\n</html>");
     h
+}
+
+/// Connected installations (D11, enrollment C1): connection, data age, history warmup and export gaps are separate
+/// states; a revoked installation keeps its history and is not an active failure. Absent until enrollment is set up.
+fn installations(w: &mut String, inst: &Value, now: u64) {
+    if inst.is_null() {
+        return;
+    }
+    let _ = writeln!(w, "<section id=\"installations\">\n<h2>Installations</h2>\n{}", unknown_line(&inst["source"]));
+    let rows = inst["rows"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">No installation connected yet. Run the product's enroll command on its host.</p>\n</section>");
+        return;
+    }
+    let _ = writeln!(w, "<table>\n<tr><th>Installation</th><th>Connection</th><th>Data</th><th>History</th><th>Export</th><th>Evidence</th><th></th></tr>");
+    for r in rows {
+        let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
+        let id = crate::enroll::anchor(inst_id, ws);
+        let revoked = r["connection"] == "revoked";
+        let connection = match r["connection"].as_str() {
+            Some("active") => badge("ok", "active"),
+            Some("pending") => format!("{} <span class=\"detail\">approved, waiting for the host</span>", badge("unknown", "pending")),
+            _ => format!("{} <span class=\"detail\">history kept</span>", badge("unknown", "revoked")),
+        };
+        let o = &r["observation"];
+        let data = match (o["state"].as_str(), o["age_s"].as_u64()) {
+            (Some(st), Some(age)) if !revoked => format!("{}{}", badge(st, &format!("{} old", dur(age))), o["reason"].as_str().filter(|x| !x.is_empty()).map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default()),
+            // a revoked installation's last data is history, not a stale failure
+            (_, Some(_)) => format!("<span class=\"detail\">last {}</span>", at(&o["at"], now)),
+            _ => badge("unknown", o["reason"].as_str().unwrap_or("unknown")),
+        };
+        let h = &r["history"];
+        // a revoked installation sends no more samples: no warmup cue
+        let history = if h["state"] == "warmup" && !revoked { badge("unknown", h["reason"].as_str().unwrap_or("")) } else { format!("{} sample{}", text(&h["samples"]), if h["samples"] == 1 { "" } else { "s" }) };
+        let x = &r["export"];
+        let export = if x["state"] == "gap" { badge("warn", &format!("gap · {}", x["reason"].as_str().unwrap_or(""))) } else { "<span class=\"detail\">no gap recorded</span>".into() };
+        let evidence = match r["snapshot"]["event_id"].as_str() {
+            Some(ev) => format!("<code>{}</code><br><span class=\"detail\">{}</span>", esc(ev), text(&r["snapshot"]["schema"])),
+            None => "—".into(),
+        };
+        let action = if revoked { String::new() } else { format!("<a id=\"revoke-{id}\" href=\"/connect?revoke={}&amp;workspace={}\">Revoke…</a>", enc(inst_id), enc(ws)) };
+        let _ = writeln!(
+            w,
+            "<tr id=\"{id}\"><td><b>{} ({})</b> · {}<br><span class=\"detail\">{} · workspace {} · generation {}</span></td><td>{connection}</td><td>{data}</td><td>{history}</td><td>{export}</td><td>{evidence}</td><td>{action}</td></tr>",
+            text(&r["host_label"]), text(&r["runtime"]), text(&r["product"]), esc(inst_id), esc(ws), text(&r["generation"])
+        );
+    }
+    let _ = writeln!(w, "</table>\n</section>");
 }

@@ -19,6 +19,7 @@ a { color: #0a58ca; }
 .s.unknown { background: #e6e8eb; color: #3d4650; }
 .unknown { color: #6b7580; }
 details { margin-top: 12px; }
+tr:target td { background: #eef4ff; }
 @media (prefers-color-scheme: dark) {
   body { color: #e3e6ea; background: #15181c; }
   header, th, td { border-color: #2c3238; }
@@ -26,4 +27,5 @@ details { margin-top: 12px; }
   a { color: #7fb0ff; }
   .banner { background: #3a2e10; border-color: #7a5d1c; }
   .summary { background: #1e2227; border-color: #2c3238; }
+  tr:target td { background: #1c2a40; }
 }
