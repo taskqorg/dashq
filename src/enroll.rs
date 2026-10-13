@@ -1,8 +1,8 @@
-//! Pairing and device grants (docs/design/enrollment.md C3, coreq wire `coreq-enrollment/1`).
+//! Pairing, device grants, ingestion and receipts (docs/design/enrollment.md C3/C4, coreq wire `coreq-enrollment/1`).
 //! Machine routes take JSON and authorize by pairing or device credential only; the browser route `/connect`
 //! takes the provider subject from the trusted proxy header and checks workspace membership, origin and CSRF.
 
-use crate::store::{self, Decision, Installation, Poll, Store};
+use crate::store::{self, Decision, Event, Installation, Kind, Outcome, Poll, Scope, Store};
 use ring::{aead, hmac, rand::SecureRandom, rand::SystemRandom};
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -13,12 +13,18 @@ use std::sync::Mutex;
 pub const SUBJECT: &str = "x-dashq-subject";
 /// Client address set by the reverse proxy; loopback callers have none.
 pub const CLIENT: &str = "x-dashq-client";
-pub const MAX_BODY: usize = 64 << 10;
+/// C5: one ingest request is at most 1 MiB.
+pub const MAX_BODY: usize = coreq::enroll::MAX_BODY;
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PRODUCTS: [&str; 3] = ["agentq", "serverq", "taskq"];
 /// C3: new pairing sessions per source address per minute, and live sessions overall.
 const PER_MINUTE: usize = 10;
 const MAX_PENDING: i64 = 1000;
+/// C5 per-device bucket: 60 requests a minute, burst 10.
+const BURST: f64 = 10.0;
+/// C5 heartbeat: a snapshot older than this is stale.
+pub const STALE_SECS: u64 = 180;
+const MACHINE: [&str; 6] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke"];
 
 pub struct Req<'a> {
     pub method: &'a str,
@@ -52,6 +58,8 @@ pub struct Enroll {
     public_host: String,
     rng: SystemRandom,
     recent: Mutex<HashMap<String, Vec<i64>>>,
+    /// Per-device token buckets: (tokens, last refill).
+    buckets: Mutex<HashMap<(String, i64), (f64, i64)>>,
 }
 
 /// The deployment unit: `dashq.db` and its key `dashq.key` (0600) in the config folder (C4).
@@ -83,6 +91,7 @@ impl Enroll {
             public_host: public_host.into(),
             rng: SystemRandom::new(),
             recent: Mutex::new(HashMap::new()),
+            buckets: Mutex::new(HashMap::new()),
         })
     }
 
@@ -133,6 +142,30 @@ impl Enroll {
     }
 }
 
+impl Enroll {
+    /// One request from a device; else the seconds until the next token.
+    // ponytail: in-memory buckets, reset by a restart; qualify under the C5 load hold
+    fn spend(&self, g: &store::Grant, now: i64) -> Result<(), i64> {
+        let mut m = self.buckets.lock().unwrap_or_else(|p| p.into_inner());
+        if m.len() > 10_000 {
+            m.retain(|_, (_, t)| now - *t < 60);
+        }
+        let (tokens, last) = m.entry((g.installation.clone(), g.generation)).or_insert((BURST, now));
+        *tokens = (*tokens + (now - *last).max(0) as f64).min(BURST);
+        *last = now;
+        if *tokens < 1.0 {
+            return Err(1);
+        }
+        *tokens -= 1.0;
+        Ok(())
+    }
+
+    /// The scoped dashboard projection; also run by the service pass so receipts become `projected` (C1.5).
+    pub fn project(&self, scope: Scope) -> Result<Vec<store::Row>, store::Error> {
+        self.store.project(scope)
+    }
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -180,7 +213,7 @@ fn html(status: &'static str, body: &str) -> Resp {
 
 /// Enrollment routes; `None` for every other path. `e` is `Err` when enrollment is not set up or unavailable.
 pub fn route(e: &Result<Enroll, String>, r: &Req, now: i64) -> Option<Resp> {
-    let machine = ["/connect/device", "/connect/token", "/connect/ack", "/connection/revoke"].contains(&r.path);
+    let machine = MACHINE.contains(&r.path);
     if !machine && r.path != "/connect" {
         return None;
     }
@@ -228,6 +261,9 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                 return error("401 Unauthorized", "invalid_credential");
             };
             let v = sha256(cred);
+            if ["/ingest", "/connection/receipt"].contains(&r.path) {
+                return device_data(e, r.path, &v, &body, now);
+            }
             let res = if r.path == "/connect/ack" { e.store.ack(&v, now) } else { e.store.revoke_credential(&v, now) };
             match res {
                 Ok(None) => error("401 Unauthorized", "invalid_credential"),
@@ -238,6 +274,152 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
             }
         }
     }
+}
+
+/// `/ingest` and `/connection/receipt` for an authenticated device; every call rechecks revocation.
+fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp {
+    let c = match e.store.credential(v) {
+        Ok(Some(c)) => c,
+        Ok(None) => return error("401 Unauthorized", "invalid_credential"),
+        Err(_) => return error("503 Service Unavailable", "unavailable"),
+    };
+    if c.revoked {
+        return error("401 Unauthorized", "revoked");
+    }
+    if !c.active {
+        return error("403 Forbidden", "not_active");
+    }
+    if let Err(wait) = e.spend(&c.grant, now) {
+        let mut x = error("429 Too Many Requests", "rate_limited");
+        x.headers = format!("Retry-After: {wait}\r\n");
+        return x;
+    }
+    let g = &c.grant;
+    if path == "/connection/receipt" {
+        let Some(id) = body["event_id"].as_str() else { return error("400 Bad Request", "invalid_request") };
+        return match e.store.receipt(v, id) {
+            Ok(Some((schema, o))) => json(
+                "200 OK",
+                json!({"protocol": 1, "installation": g.installation, "generation": g.generation, "schema": schema, "event_id": id,
+                    "state": if o == Outcome::Projected { "projected" } else { "accepted" }}),
+            ),
+            Ok(None) => error("404 Not Found", "unknown_event"),
+            Err(store::Error::Denied) => error("401 Unauthorized", "revoked"),
+            Err(_) => error("503 Service Unavailable", "unavailable"),
+        };
+    }
+    let Some(records) = body["records"].as_array().filter(|a| a.len() <= coreq::enroll::MAX_RECORDS) else { return error("400 Bad Request", "invalid_request") };
+    let Some(ids) = records.iter().map(|r| r["event_id"].as_str().filter(|x| id(x, 128))).collect::<Option<Vec<&str>>>() else {
+        return error("400 Bad Request", "invalid_request");
+    };
+    // the grant supplies ownership; authority fields in a payload are data, and only allowlisted metadata is stored
+    let payloads: Vec<String> = records.iter().map(|r| r["payload"].to_string()).collect();
+    let mut out: Vec<Option<&'static str>> = vec![None; records.len()];
+    let mut events = Vec::new();
+    let mut index = Vec::new();
+    for (i, r) in records.iter().enumerate() {
+        match (r["schema"].as_str(), r["observed_at"].as_i64()) {
+            (Some(schema), Some(observed)) if metadata(&r["payload"], 0) => {
+                // ponytail: every schema is a snapshot until export schemas and forwarding exist (C2)
+                events.push(Event { id: ids[i], schema, observed, kind: Kind::Snapshot, payload: &payloads[i] });
+                index.push(i);
+            }
+            (Some(_), Some(_)) => out[i] = Some("payload"),
+            (None, _) => out[i] = Some("scope"),
+            _ => out[i] = Some("payload"),
+        }
+    }
+    let stored = match e.store.accept(v, &events, now) {
+        Ok(s) => s,
+        Err(store::Error::Denied) => return error("401 Unauthorized", "revoked"),
+        Err(store::Error::Full) => return error("503 Service Unavailable", "store_full"),
+        Err(_) => return error("503 Service Unavailable", "unavailable"),
+    };
+    let mut receipts = Vec::with_capacity(records.len());
+    let mut stored = index.into_iter().zip(stored).collect::<HashMap<_, _>>();
+    for (i, id) in ids.iter().enumerate() {
+        let reason = match (out[i], stored.remove(&i)) {
+            (Some(reason), _) | (None, Some(Outcome::Rejected(reason))) => reason,
+            _ => {
+                receipts.push(json!({"event_id": id, "state": "accepted"}));
+                continue;
+            }
+        };
+        // nothing is acknowledged into a full store: the client retries the same records later, replays stay exact
+        if ["store_full", "outbox_full"].contains(&reason) {
+            return error("503 Service Unavailable", reason);
+        }
+        receipts.push(json!({"event_id": id, "state": "rejected", "reason": reason}));
+    }
+    json("200 OK", json!({"protocol": 1, "receipts": receipts}))
+}
+
+/// Metadata only (C4): objects of short identifier keys, numbers, booleans and short single-line strings;
+/// no field named like content, commands, output, paths or secrets, and no path-like value.
+// ponytail: one shape allowlist for every schema; per-schema field catalogs when producers publish them
+fn metadata(v: &Value, depth: usize) -> bool {
+    const DENY: [&str; 18] = [
+        "prompt", "command", "cmd", "args", "stdout", "stderr", "output", "input", "content", "text", "message", "path", "cwd", "env", "token", "secret",
+        "password", "credential",
+    ];
+    match v {
+        Value::Null | Value::Bool(_) | Value::Number(_) => depth > 0,
+        Value::String(s) => {
+            depth > 0 && s.chars().count() <= 256 && !s.chars().any(char::is_control) && !s.starts_with(['/', '~', '\\']) && !s.get(1..3).is_some_and(|x| x == ":\\" || x == ":/")
+        }
+        Value::Array(a) => depth > 0 && depth < 5 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
+        Value::Object(o) => {
+            depth < 5
+                && o.len() <= 256
+                && o.iter().all(|(k, x)| {
+                    let k = k.to_ascii_lowercase();
+                    id(&k, 64) && !DENY.iter().any(|d| k == *d || k.ends_with(&format!("_{d}"))) && metadata(x, depth + 1)
+                })
+        }
+    }
+}
+
+/// `/data` `installations` (D11): expected installations of the actor's scope with producer-time freshness;
+/// `None` while enrollment is not set up. `scope` `None`: a remote request without a verified subject sees none.
+pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option<&str>, now: u64) -> Option<Value> {
+    let e = e.as_ref().ok()?;
+    let src = |state: &str, reason: Option<&str>| json!({"state": state, "at": now, "age_s": 0, "reason": reason, "incomplete": false});
+    let Some(scope) = scope else { return Some(json!({"source": src("unknown", Some("no signed-in subject")), "rows": []})) };
+    let rows = match e.project(scope) {
+        Ok(r) => r,
+        Err(x) => {
+            let why = match x {
+                store::Error::Busy => "busy",
+                store::Error::Full => "full",
+                store::Error::Corrupt => "corrupt",
+                _ => "unavailable",
+            };
+            let mut s = src("unknown", Some(&format!("read failed (store {why})")));
+            s["at"] = Value::Null;
+            s["age_s"] = Value::Null;
+            return Some(json!({"source": s, "rows": []}));
+        }
+    };
+    let rows: Vec<Value> = rows
+        .into_iter()
+        .filter(|r| host.is_none_or(|h| h == format!("{}/{}", r.label, r.runtime)))
+        .map(|r| {
+            let (obs, snapshot) = match &r.snapshot {
+                None => (json!({"state": "unknown", "at": null, "age_s": null, "reason": "no snapshot yet", "incomplete": false}), Value::Null),
+                Some(s) => {
+                    let obs = if s.clock_uncertain {
+                        json!({"state": "unknown", "at": s.observed, "age_s": null, "reason": "clock uncertain: observed in the future", "incomplete": false})
+                    } else {
+                        crate::data::source(&json!({"value": true, "at": s.observed.max(0)}), now, STALE_SECS, None)
+                    };
+                    (obs, json!({"event_id": s.event_id, "schema": s.schema, "payload": serde_json::from_str::<Value>(&s.payload).unwrap_or(Value::Null)}))
+                }
+            };
+            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
+                "generation": r.generation, "connection": r.connection, "observation": obs, "snapshot": snapshot})
+        })
+        .collect();
+    Some(json!({"source": src("ok", None), "rows": rows}))
 }
 
 fn open_sealed(e: &Enroll, device: &[u8], mut sealed: Vec<u8>) -> Option<String> {
@@ -427,7 +609,7 @@ mod tests {
 
     /// Browser decision as the approval page posts it.
     fn decide(e: &Result<Enroll, String>, subject: &str, code: &str, decision: &str, workspace: &str, now: i64) -> (String, String) {
-        let csrf = e.as_ref().unwrap().token(subject, &user_code(code).unwrap());
+        let csrf = e.as_ref().unwrap().token(subject, &user_code(code).unwrap_or_default());
         let body = format!("code={code}&workspace={workspace}&decision={decision}&csrf={csrf}");
         let h = [(SUBJECT, subject), ("origin", "https://dash.example.com"), ("content-type", "application/x-www-form-urlencoded")];
         let (s, _, v) = call(e, "POST", "/connect", &h, &body, now);
@@ -618,8 +800,284 @@ mod tests {
         // client copies of the trusted headers are stripped before anything else
         assert!(head.contains("request_header -X-Dashq-Subject") && head.contains("request_header -X-Dashq-Client"));
         let paths: Vec<&str> = head.lines().filter_map(|l| l.trim().strip_prefix("path ")).flat_map(str::split_whitespace).collect();
-        assert_eq!(paths, ["/connect/device", "/connect/token", "/connect/ack", "/connection/revoke"]);
+        assert_eq!(paths, MACHINE);
         assert!(head.contains("method POST") && !head.contains("/data") && !head.contains('*'));
         assert!(guarded.contains("copy_headers") && guarded.contains(">X-Dashq-Subject") && guarded.contains("reverse_proxy 127.0.0.1:18882"));
+    }
+
+    /// Approved and acknowledged connection of `inst` in `ws` as `subject`; returns the credential.
+    fn connect(e: &Result<Enroll, String>, inst: &str, subject: &str, ws: &str, now: i64) -> String {
+        let (device, code) = start(e, inst, now);
+        assert!(decide(e, subject, &code, "approve", ws, now).1.contains("Approved"));
+        let cred = machine(e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        cred
+    }
+
+    fn rec(id: &str, observed: i64, payload: Value) -> Value {
+        json!({"schema": "agentq-snapshot/1", "event_id": id, "observed_at": observed, "payload": payload})
+    }
+
+    fn ingest(e: &Result<Enroll, String>, cred: &str, records: Vec<Value>, now: i64) -> (u16, Value) {
+        machine(e, "/ingest", Some(cred), json!({"protocol": 1, "records": records}), now)
+    }
+
+    fn states(v: &Value) -> Vec<String> {
+        v["receipts"].as_array().unwrap().iter().map(|r| format!("{}{}", r["state"].as_str().unwrap(), r["reason"].as_str().map(|x| format!(":{x}")).unwrap_or_default())).collect()
+    }
+
+    /// Exact match where `"$name"` binds on first use and a new binding never repeats another's value (coreq traces).
+    fn matches(want: &Value, got: &Value, vars: &mut HashMap<String, Value>, at: &str) {
+        match (want, got) {
+            (Value::String(s), _) if s.starts_with('$') => match vars.get(s) {
+                Some(v) => assert_eq!(v, got, "{at}: {s}"),
+                None => {
+                    assert!(!vars.values().any(|v| v == got), "{at}: {s} repeats a bound value");
+                    vars.insert(s.clone(), got.clone());
+                }
+            },
+            (Value::Object(w), Value::Object(g)) => {
+                assert_eq!(w.keys().collect::<std::collections::BTreeSet<_>>(), g.keys().collect(), "{at}: keys");
+                w.iter().for_each(|(k, v)| matches(v, &g[k], vars, &format!("{at}.{k}")));
+            }
+            (Value::Array(w), Value::Array(g)) => {
+                assert_eq!(w.len(), g.len(), "{at}: length");
+                w.iter().zip(g).enumerate().for_each(|(i, (w, g))| matches(w, g, vars, &format!("{at}[{i}]")));
+            }
+            _ => assert_eq!(want, got, "{at}"),
+        }
+    }
+
+    fn subst(v: &Value, vars: &HashMap<String, Value>) -> Value {
+        match v {
+            Value::String(s) if s.starts_with('$') => vars.get(s).cloned().unwrap_or_else(|| panic!("unbound {s}")),
+            Value::Object(m) => Value::Object(m.iter().map(|(k, v)| (k.clone(), subst(v, vars))).collect()),
+            Value::Array(a) => Value::Array(a.iter().map(|v| subst(v, vars)).collect()),
+            _ => v.clone(),
+        }
+    }
+
+    /// coreq wire v1 conformance traces (fixture/enrollment: coreq v0.7.0 tests/enrollment, unchanged) run against
+    /// these handlers; `{"server": "project"}` is the dashboard projection pass.
+    #[test]
+    fn coreq_conformance_traces() {
+        let traces = [
+            include_str!("../fixture/enrollment/agentq-connect.json"),
+            include_str!("../fixture/enrollment/agentq-pairing.json"),
+            include_str!("../fixture/enrollment/agentq-reject.json"),
+            include_str!("../fixture/enrollment/serverq-connect.json"),
+        ];
+        for (n, text) in traces.iter().enumerate() {
+            let trace: Value = serde_json::from_str(text).unwrap();
+            assert_eq!(trace["contract"], coreq::enroll::CONTRACT);
+            let d = dir(&format!("trace-{n}"));
+            for ws in ["ws-1", "ws-2"] {
+                Enroll::admin(&d, ws, "acct-1").unwrap();
+            }
+            let e = Enroll::open(&d, HOST);
+            let mut vars = HashMap::new();
+            for (i, step) in trace["steps"].as_array().unwrap().iter().enumerate() {
+                let at_s = format!("{} step {i}", trace["about"]);
+                let now = step["at"].as_i64().unwrap_or(0);
+                if step["server"] == "project" {
+                    e.as_ref().unwrap().project(Scope::All).unwrap();
+                } else if let Some(action) = step["browser"].as_str() {
+                    let s = subst(step, &vars);
+                    let (_, body) = decide(&e, s["account"].as_str().unwrap(), s["user_code"].as_str().unwrap(), action, s["workspace"].as_str().unwrap(), now);
+                    let got = if body.contains("Approved:") {
+                        "approved"
+                    } else if body.contains("already approved") {
+                        "already approved"
+                    } else if body.contains("Denied:") {
+                        "denied"
+                    } else {
+                        "invalid"
+                    };
+                    assert_eq!(got, step["result"], "{at_s}: {body}");
+                } else {
+                    let auth = step.get("auth").map(|a| subst(a, &vars));
+                    let (status, resp) = machine(&e, step["route"].as_str().unwrap(), auth.as_ref().and_then(Value::as_str), subst(&step["request"], &vars), now);
+                    assert_eq!(status, step["status"], "{at_s}: {resp}");
+                    matches(&step["response"], &resp, &mut vars, &at_s);
+                    assert_eq!(coreq::enroll::check(&resp), Ok(()), "{at_s}");
+                    if let Some(v) = step.get("verify") {
+                        let got = coreq::enroll::verify(&resp, v["installation"].as_str().unwrap(), v["generation"].as_u64().unwrap(), v["schema"].as_str().unwrap(), v["event_id"].as_str().unwrap());
+                        assert_eq!(got.err().unwrap_or("connected".into()), step["client"], "{at_s}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ingest_takes_ownership_from_the_grant_and_allowlists_payloads() {
+        let (_d, e) = setup("ingest");
+        let cred = connect(&e, "inst-1", "github|1", "ws-1", T0);
+        // authority fields in a payload are data: the grant decides installation and workspace
+        let forged = json!({"installation": "inst-9", "workspace": "ws-9", "version": "1.2.0", "cpu": {"percent": 12.5}, "input_tokens": 10});
+        let bad = [
+            json!({"prompt": "hi"}),
+            json!({"nested": {"stdout": "x"}}),
+            json!({"log_path": "x"}),
+            json!({"where": "/Users/me"}),
+            json!({"where": "C:\\Users"}),
+            json!({"note": "a\nb"}),
+            json!({"long": "x".repeat(257)}),
+            json!("not an object"),
+            json!({"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}}),
+        ];
+        let mut records = vec![rec("ev-1", T0, forged.clone())];
+        records.extend(bad.iter().enumerate().map(|(i, p)| rec(&format!("bad-{i}"), T0, p.clone())));
+        records.push(json!({"schema": "serverq-report/1", "event_id": "other", "observed_at": T0, "payload": {}}));
+        records.push(json!({"schema": "agentq-snapshot/1", "event_id": "no-time", "payload": {}}));
+        let (s, v) = ingest(&e, &cred, records, T0);
+        assert_eq!(s, 200, "{v}");
+        let mut want = vec!["accepted".to_string()];
+        want.extend(std::iter::repeat_n("rejected:payload".to_string(), bad.len()));
+        want.extend(["rejected:scope".into(), "rejected:payload".into()]);
+        assert_eq!(states(&v), want);
+        let rows = e.as_ref().unwrap().project(Scope::All).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].installation.as_str(), rows[0].workspace.as_str()), ("inst-1", "ws-1"));
+        assert_eq!(serde_json::from_str::<Value>(&rows[0].snapshot.as_ref().unwrap().payload).unwrap(), forged);
+        // stable IDs: a replay repeats the receipt, changed content under the same ID fails
+        assert_eq!(states(&ingest(&e, &cred, vec![rec("ev-1", T0, forged.clone())], T0 + 1).1), ["accepted"]);
+        assert_eq!(states(&ingest(&e, &cred, vec![rec("ev-1", T0, json!({"version": "9"}))], T0 + 2).1), ["rejected:replay_mismatch"]);
+        assert_eq!(states(&ingest(&e, &cred, vec![rec("old", T0 - 9 * 86400, json!({}))], T0 + 3).1), ["rejected:expired"]);
+        assert_eq!(e.as_ref().unwrap().store.history("inst-1").unwrap().len(), 1);
+        // malformed batches are refused whole
+        assert_eq!(ingest(&e, &cred, vec![json!({"schema": "agentq-snapshot/1"})], T0 + 4), (400, json!({"protocol": 1, "error": "invalid_request"})));
+        assert_eq!(ingest(&e, &cred, (0..101).map(|i| rec(&format!("m{i}"), T0, json!({}))).collect(), T0 + 5).0, 400);
+        assert_eq!(machine(&e, "/connection/receipt", Some(&cred), json!({"protocol": 1}), T0 + 6).0, 400);
+        // per-device rate: burst 10, then 429 with Retry-After
+        let codes: Vec<u16> = (0..12).map(|_| ingest(&e, &cred, vec![], T0 + 100).0).collect();
+        assert_eq!(codes, [[200; 10].as_slice(), &[429, 429]].concat());
+        let (s, h, _) = call(&e, "POST", "/ingest", &[("authorization", &format!("Bearer {cred}"))], r#"{"protocol": 1, "records": []}"#, T0 + 100);
+        assert_eq!((s.as_str(), h.as_str()), ("429 Too Many Requests", "Retry-After: 1\r\n"));
+        assert_eq!(ingest(&e, &cred, vec![], T0 + 101).0, 200);
+    }
+
+    #[test]
+    fn projection_isolates_workspaces_and_members_and_keeps_expected_installations() {
+        let (d, e) = setup("scope");
+        Enroll::admin(&d, "ws-2", "github|2").unwrap();
+        let s = &e.as_ref().unwrap().store;
+        s.add_member("ws-1", "github|3", "member").unwrap();
+        let admin = connect(&e, "inst-a", "github|1", "ws-1", T0);
+        let member = connect(&e, "inst-m", "github|3", "ws-1", T0);
+        let other = connect(&e, "inst-o", "github|2", "ws-2", T0);
+        // approved, never acknowledged: expected, pending, no data
+        let (device, code) = start(&e, "inst-p", T0);
+        decide(&e, "github|1", &code, "approve", "ws-1", T0);
+        for (c, id) in [(&admin, "a-1"), (&member, "m-1"), (&other, "o-1")] {
+            assert_eq!(states(&ingest(&e, c, vec![rec(id, T0, json!({"v": 1}))], T0).1), ["accepted"]);
+        }
+        let seen = |scope| -> Vec<(String, &'static str, Option<String>)> {
+            e.as_ref().unwrap().project(scope).unwrap().into_iter().map(|r| (r.installation, r.connection, r.snapshot.map(|s| s.event_id))).collect()
+        };
+        let a = |i: &str, c, ev: Option<&str>| (i.to_string(), c, ev.map(String::from));
+        assert_eq!(seen(Scope::Subject("github|1")), [a("inst-a", "active", Some("a-1")), a("inst-m", "active", Some("m-1")), a("inst-p", "pending", None)]);
+        assert_eq!(seen(Scope::Subject("github|3")), [a("inst-m", "active", Some("m-1"))]);
+        assert_eq!(seen(Scope::Subject("github|2")), [a("inst-o", "active", Some("o-1"))]);
+        assert!(seen(Scope::Subject("github|9")).is_empty());
+        assert_eq!(seen(Scope::All).len(), 4);
+        // a device reads only its own receipts
+        assert_eq!(machine(&e, "/connection/receipt", Some(&other), json!({"protocol": 1, "event_id": "a-1"}), T0).0, 404);
+        assert_eq!(machine(&e, "/connection/receipt", Some(&admin), json!({"protocol": 1, "event_id": "a-1"}), T0).1["state"], "projected");
+        // revoked: kept as revoked, not dropped; a new approval into another workspace starts empty there
+        assert_eq!(machine(&e, "/connection/revoke", Some(&admin), json!({"protocol": 1}), T0).0, 200);
+        assert_eq!(ingest(&e, &admin, vec![rec("a-2", T0, json!({}))], T0 + 1), (401, json!({"protocol": 1, "error": "revoked"})));
+        s.add_member("ws-2", "github|1", "member").unwrap();
+        let moved = connect(&e, "inst-a", "github|1", "ws-2", T0 + 2);
+        assert_eq!(seen(Scope::Subject("github|2")), [a("inst-a", "active", None), a("inst-o", "active", Some("o-1"))]);
+        assert_eq!(states(&ingest(&e, &moved, vec![rec("a-1", T0 + 3, json!({"v": 2}))], T0 + 3).1), ["accepted"]);
+        let ws1: Vec<_> = seen(Scope::Subject("github|1")).into_iter().filter(|r| r.0 == "inst-a").collect();
+        assert_eq!(ws1, [a("inst-a", "revoked", Some("a-1")), a("inst-a", "active", Some("a-1"))]);
+        let rows = e.as_ref().unwrap().project(Scope::Subject("github|1")).unwrap();
+        let payloads: Vec<(&str, &str)> = rows.iter().filter(|r| r.installation == "inst-a").map(|r| (r.workspace.as_str(), r.snapshot.as_ref().unwrap().payload.as_str())).collect();
+        assert_eq!(payloads, [("ws-1", r#"{"v":1}"#), ("ws-2", r#"{"v":2}"#)]);
+        // a live grant is never moved to another workspace silently
+        let (_, code) = start(&e, "inst-o", T0 + 4);
+        assert_eq!(decide(&e, "github|1", &code, "approve", "ws-1", T0 + 4).0, "409 Conflict");
+        drop(device);
+    }
+
+    /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
+    fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
+        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into() };
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e }
+    }
+
+    fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {
+        let (s, _, body) = crate::route(app, "GET", "/data", query, scope);
+        (s, serde_json::from_slice(&body).unwrap())
+    }
+
+    #[test]
+    fn client_receipt_and_scoped_data_project_the_same_snapshot_through_outages() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("e2e");
+        let host = dir("e2e-host");
+        let req = coreq::enroll::Request { product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"] };
+        let mut w = Wire { e: &e, now, code: None, calls: vec![] };
+        let conn = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let payload = json!({"version": "1.2.0", "cpu": {"percent": 7}});
+        let r = coreq::enroll::stamp(&host, "agentq-snapshot/1", "snap-1", now as u64, payload.clone()).unwrap();
+        let got = coreq::enroll::deliver(&host, std::slice::from_ref(&r), &mut Default::default(), &mut w).unwrap();
+        assert_eq!(got, [json!({"event_id": "snap-1", "state": "accepted"})]);
+        assert_eq!(coreq::enroll::receipt(&host, &r, &mut w), Ok("accepted"));
+        // Langfuse unreachable, GitHub and serverq missing: the snapshot still projects and /data answers 200
+        let app = app(e, Some(("https://127.0.0.1:9".into(), "Basic x".into())));
+        let (s, doc) = data(&app, "", Some(Scope::Subject("github|1")));
+        assert_eq!(s, "200 OK", "{doc}");
+        assert_eq!((doc["sources"]["langfuse"]["state"].as_str(), doc["sources"]["github"]["reason"].as_str()), (Some("unknown"), Some("not configured")));
+        assert_eq!(doc["sources"]["enrollment"]["state"], "ok");
+        let row = &doc["installations"]["rows"][0];
+        assert_eq!((&row["installation"], &row["generation"], &row["connection"]), (&conn["installation"], &json!(1), &json!("active")));
+        assert_eq!(row["snapshot"], json!({"event_id": "snap-1", "schema": "agentq-snapshot/1", "payload": payload}));
+        assert_eq!(row["observation"]["state"], "ok");
+        // the client's verified receipt now names the snapshot that /data showed
+        let mut w = Wire { e: &app.enroll, now, code: None, calls: vec![] };
+        assert_eq!(coreq::enroll::receipt(&host, &r, &mut w), Ok("projected"));
+        // scope: another account, a remote request without a subject, a host filter
+        assert_eq!(data(&app, "", Some(Scope::Subject("github|2"))).1["installations"]["rows"], json!([]));
+        let (_, anon) = data(&app, "", None);
+        assert_eq!((anon["installations"]["rows"].clone(), anon["sources"]["enrollment"]["reason"].as_str()), (json!([]), Some("no signed-in subject")));
+        assert_eq!(data(&app, "host=fra%2Fnative", Some(Scope::All)).1["installations"]["rows"], json!([]));
+        assert_eq!(data(&app, "host=mac-1%2Fnative", Some(Scope::All)).1["installations"]["rows"].as_array().unwrap().len(), 1);
+        assert!(crate::actor(Some(HOST), HOST, None).is_none());
+        assert!(matches!(crate::actor(Some(HOST), HOST, Some("github|1")), Some(Scope::Subject("github|1"))));
+        assert!(matches!(crate::actor(Some("127.0.0.1:18882"), HOST, None), Some(Scope::All)));
+        // enrollment not set up: the capability stays inactive, no installations section or source
+        let (_, doc) = data(&self::app(Err("not set up".into()), None), "", Some(Scope::All));
+        assert!(doc.get("installations").is_none() && doc["sources"].get("enrollment").is_none());
+    }
+
+    #[test]
+    fn late_stale_and_future_observations_keep_truthful_freshness() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("fresh");
+        let cred = connect(&e, "inst-1", "github|1", "ws-1", now);
+        let app = app(e, None);
+        let e = &app.enroll;
+        let obs = |q: &str| data(&app, q, Some(Scope::All)).1["installations"]["rows"][0].clone();
+        // expected installation without any event
+        assert_eq!(obs("")["observation"], json!({"state": "unknown", "at": null, "age_s": null, "reason": "no snapshot yet", "incomplete": false}));
+        // observed 400 s ago: stale by producer time, whatever the arrival time
+        assert_eq!(states(&ingest(e, &cred, vec![rec("s-1", now - 400, json!({"v": 1}))], now).1), ["accepted"]);
+        let o = obs("");
+        assert_eq!((o["observation"]["state"].as_str(), o["observation"]["at"].as_i64()), (Some("stale"), Some(now - 400)));
+        // a late sample joins history only and is never projected as current
+        assert_eq!(states(&ingest(e, &cred, vec![rec("s-0", now - 900, json!({"v": 0}))], now + 1).1), ["accepted"]);
+        assert_eq!(obs("")["snapshot"]["event_id"], "s-1");
+        assert_eq!(machine(e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-0"}), now + 2).1["state"], "accepted");
+        assert_eq!(machine(e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 2).1["state"], "projected");
+        // future time: shown as clock-uncertain, never fresh, and the next real sample replaces it
+        ingest(e, &cred, vec![rec("s-f", now + 3600, json!({"v": 9}))], now + 3);
+        let o = obs("");
+        assert_eq!((o["snapshot"]["event_id"].as_str(), o["observation"]["state"].as_str(), o["observation"]["age_s"].clone()), (Some("s-f"), Some("unknown"), Value::Null));
+        ingest(e, &cred, vec![rec("s-2", now, json!({"v": 2}))], now + 4);
+        let o = obs("");
+        assert_eq!((o["snapshot"]["event_id"].as_str(), o["observation"]["state"].as_str()), (Some("s-2"), Some("ok")));
     }
 }

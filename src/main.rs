@@ -4,7 +4,7 @@ mod data;
 mod enroll;
 mod page;
 mod source;
-#[allow(dead_code)] // ingestion and projection use the rest (#35)
+#[allow(dead_code)] // export forwarding, backup and restore use the rest
 mod store;
 
 use coreq::Tool;
@@ -25,10 +25,11 @@ fn tool() -> Tool {
 }
 
 struct Config {
-    langfuse_base: String,
-    langfuse_auth: String,
+    /// `(base, auth)`; `None`: Langfuse not configured, its sections read unknown (D11: optional source).
+    langfuse: Option<(String, String)>,
     links: Value,
-    github_token: String,
+    /// `None`: GitHub not configured, boards read unknown.
+    github_token: Option<String>,
     projects: Vec<String>,
     serverq_report: String,
     serverq_host: String,
@@ -53,26 +54,39 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     let s = |path: &str, ok: &dyn Fn(&str) -> bool| -> Result<String, String> {
         v.pointer(path).and_then(Value::as_str).filter(|x| ok(x)).map(String::from).ok_or(format!("config: bad key {}", path[1..].replace('/', ".")))
     };
-    let base = s("/langfuse/base_url", &|x| x.starts_with("https://") && !x.contains('@') && !x.contains('"') && x[8..].trim_end_matches('/').bytes().all(|b| b != b'/'))?;
-    let public = s("/langfuse/public_key", &|x| x.starts_with("pk-lf-") && data::safe_id(x))?;
-    let secret = s("/langfuse/secret_key", &|x| x.starts_with("sk-lf-") && data::safe_id(x))?;
-    let project = s("/langfuse/project_id", &|x| data::safe_id(x))?;
-    let token = s("/github/token", &|x| x.len() >= 20 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))?;
-    let projects: Vec<String> = v["projects"]
-        .as_array()
-        .filter(|a| !a.is_empty())
-        .and_then(|a| a.iter().map(|x| x.as_str().filter(|r| r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)))).map(String::from)).collect())
-        .ok_or("config: bad key projects")?;
+    // Langfuse and GitHub are optional (D11): absent sections read `not configured`; a present one must be valid
+    let mut links = json!({});
+    let langfuse = match v.get("langfuse") {
+        None => None,
+        Some(_) => {
+            let base = s("/langfuse/base_url", &|x| x.starts_with("https://") && !x.contains('@') && !x.contains('"') && x[8..].trim_end_matches('/').bytes().all(|b| b != b'/'))?;
+            let public = s("/langfuse/public_key", &|x| x.starts_with("pk-lf-") && data::safe_id(x))?;
+            let secret = s("/langfuse/secret_key", &|x| x.starts_with("sk-lf-") && data::safe_id(x))?;
+            let project = s("/langfuse/project_id", &|x| data::safe_id(x))?;
+            let base = base.trim_end_matches('/').to_string();
+            let project_url = format!("{base}/project/{project}");
+            links = json!({"traces": format!("{project_url}/traces"), "dashboards": format!("{project_url}/dashboards")});
+            Some((base, format!("Basic {}", base64(format!("{public}:{secret}").as_bytes()))))
+        }
+    };
+    let (token, projects) = match v.get("github") {
+        None => (None, vec![]),
+        Some(_) => {
+            let token = s("/github/token", &|x| x.len() >= 20 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))?;
+            let projects: Vec<String> = v["projects"]
+                .as_array()
+                .filter(|a| !a.is_empty())
+                .and_then(|a| a.iter().map(|x| x.as_str().filter(|r| r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b)))).map(String::from)).collect())
+                .ok_or("config: bad key projects")?;
+            (Some(token), projects)
+        }
+    };
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
-    let base = base.trim_end_matches('/').to_string();
-    let b64 = base64(format!("{public}:{secret}").as_bytes());
-    let project_url = format!("{base}/project/{project}");
     Ok(Config {
-        links: json!({"traces": format!("{project_url}/traces"), "dashboards": format!("{project_url}/dashboards")}),
-        langfuse_base: base,
-        langfuse_auth: format!("Basic {b64}"),
+        links,
+        langfuse,
         github_token: token,
         projects,
         serverq_report: report,
@@ -103,19 +117,24 @@ struct App {
 }
 
 impl App {
-    /// Reads every source (cached per D4) and builds the document.
-    fn doc(&self, period: u64, filters: Value) -> Value {
+    /// Reads every source (cached per D4) and builds the document; `scope` selects the enrolled installations
+    /// the actor may see (D11), `None` for none.
+    fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
         let c = &self.cfg;
         let now = source::now();
         let (lf, boards, releases) = std::thread::scope(|sc| {
-            let lf = sc.spawn(|| self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(&c.langfuse_base, &c.langfuse_auth, now, period)));
+            let lf = sc.spawn(|| match &c.langfuse {
+                Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
+                None => Value::Null,
+            });
             let gh: Vec<_> = c
                 .projects
                 .iter()
-                .map(|r| {
+                .filter_map(|r| Some((r, c.github_token.as_deref()?)))
+                .map(|(r, token)| {
                     sc.spawn(move || {
-                        let b = self.cache.get(&format!("board:{r}"), 60, || source::board(r, &c.github_token));
-                        let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, &c.github_token));
+                        let b = self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
+                        let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, token));
                         (r.clone(), b, l)
                     })
                 })
@@ -129,10 +148,17 @@ impl App {
             }
             (lf.join().unwrap_or(Value::Null), boards, releases)
         });
-        data::build(&json!({
+        let host = filters["host"].as_str().map(String::from);
+        let mut doc = data::build(&json!({
             "now": source::now(), "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "releases": releases, "serverq": source::serverq(&c.serverq_report),
-        }))
+        }));
+        // committed snapshots never wait for or depend on the optional sources above (D11)
+        if let Some(p) = enroll::projection(&self.enroll, scope, host.as_deref(), source::now()) {
+            doc["sources"]["enrollment"] = p["source"].clone();
+            doc["installations"] = p;
+        }
+        doc
     }
 }
 
@@ -188,18 +214,27 @@ fn handle(app: &App, mut s: TcpStream) {
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     // DNS rebinding: only the loopback address and the configured public name
-    if !host.is_some_and(|h| [ADDR, "localhost:18882", app.cfg.public_host.as_str()].contains(&h.as_str())) {
+    if !host.as_deref().is_some_and(|h| [ADDR, "localhost:18882", app.cfg.public_host.as_str()].contains(&h)) {
         return respond(&mut s, "421 Misdirected Request", "text/plain", b"unknown host");
     }
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
     if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
         return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
     }
-    let (status, ctype, body) = route(app, method, path, query);
+    let (status, ctype, body) = route(app, method, path, query, actor(host.as_deref(), &app.cfg.public_host, get(enroll::SUBJECT)));
     respond(&mut s, status, ctype, &body);
 }
 
-fn route(app: &App, method: &str, path: &str, query: &str) -> (&'static str, &'static str, Vec<u8>) {
+/// Whose installations a page request sees (D11): a request through the public name only its verified subject's
+/// (none without one); a loopback request is host-local and trusted like `dashq report`.
+fn actor<'a>(host: Option<&str>, public_host: &str, subject: Option<&'a str>) -> Option<store::Scope<'a>> {
+    if host != Some(public_host) {
+        return Some(store::Scope::All);
+    }
+    subject.filter(|s| !s.is_empty() && s.len() <= 256 && !s.chars().any(char::is_control)).map(store::Scope::Subject)
+}
+
+fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::Scope>) -> (&'static str, &'static str, Vec<u8>) {
     const HTML: &str = "text/html; charset=utf-8";
     const JSON: &str = "application/json";
     if !["/", "/app.js", "/style.css", "/data"].contains(&path) {
@@ -215,7 +250,7 @@ fn route(app: &App, method: &str, path: &str, query: &str) -> (&'static str, &'s
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
             };
-            let doc = app.doc(period, filters);
+            let doc = app.doc(period, filters, scope);
             if path == "/" {
                 return ("200 OK", HTML, page::render(&doc, &app.cfg.links).into_bytes());
             }
@@ -247,6 +282,16 @@ fn serve(t: &Tool, service: bool) -> ! {
         eprintln!("enrollment: {e}");
     }
     let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll });
+    // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
+    let pass = app.clone();
+    std::thread::spawn(move || {
+        while let Ok(e) = &pass.enroll {
+            if let Err(x) = e.project(store::Scope::All) {
+                eprintln!("projection: {x:?}");
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
     let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for mut s in l.incoming().flatten() {
         use std::sync::atomic::Ordering::SeqCst;
@@ -329,7 +374,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(1800, json!({}));
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -351,7 +396,10 @@ fn main() {
             let q: Vec<String> = rest.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).map(String::from).unwrap_or_else(|| t.die(USAGE))).collect();
             let (period, filters) = data::query(&q.join("&")).unwrap_or_else(|e| t.die(&e));
             let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(period, filters));
+            // the host administrator's local report sees every installation (D11), like a loopback page request
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -417,14 +465,14 @@ mod tests {
     #[test]
     fn routes_and_headers() {
         let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()) };
-        assert_eq!(route(&app, "GET", "/nope", "").0, "404 Not Found");
-        assert_eq!(route(&app, "POST", "/data", "").0, "405 Method Not Allowed");
-        assert_eq!(route(&app, "GET", "/data", "period=5").0, "400 Bad Request");
-        assert_eq!(route(&app, "GET", "/app.js", "").0, "200 OK");
+        assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
+        assert_eq!(route(&app, "POST", "/data", "", None).0, "405 Method Not Allowed");
+        assert_eq!(route(&app, "GET", "/data", "period=5", None).0, "400 Bad Request");
+        assert_eq!(route(&app, "GET", "/app.js", "", None).0, "200 OK");
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse_base: String::new(), langfuse_auth: String::new(), links: json!({}), github_token: String::new(), projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
+        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
     }
 
     #[test]
@@ -441,7 +489,7 @@ mod tests {
         };
         write(&good);
         let c = load_config(&p).unwrap();
-        assert_eq!(c.langfuse_auth, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
+        assert_eq!(c.langfuse.unwrap().1, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
         assert_eq!(c.links["traces"], "https://lf.example.com/project/p1/traces");
         let mut bad = good.clone();
         bad["langfuse"]["secret_key"] = json!("SECRET-but-wrong");
