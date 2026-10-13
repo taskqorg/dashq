@@ -1,9 +1,10 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
 mod data;
+mod enroll;
 mod page;
 mod source;
-#[allow(dead_code)] // inactive until the enrollment routes use it (D11)
+#[allow(dead_code)] // ingestion and projection use the rest (#35)
 mod store;
 
 use coreq::Tool;
@@ -17,7 +18,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | admin WORKSPACE SUBJECT | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -84,7 +85,7 @@ fn safe_host(x: &str) -> bool {
     x.contains('.') && x.len() <= 253 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
 }
 
-fn base64(b: &[u8]) -> String {
+pub(crate) fn base64(b: &[u8]) -> String {
     const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     b.chunks(3)
         .flat_map(|c| {
@@ -97,6 +98,8 @@ fn base64(b: &[u8]) -> String {
 struct App {
     cfg: Config,
     cache: source::Cache,
+    /// `Err` until `dashq admin` sets enrollment up, or when its store is unavailable.
+    enroll: Result<enroll::Enroll, String>,
 }
 
 impl App {
@@ -134,8 +137,14 @@ impl App {
 }
 
 fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) {
+    respond_with(s, status, ctype, body, "", false)
+}
+
+/// `extra` header lines end in CRLF; `forms` allows same-origin form posts (the approval page only, D11).
+fn respond_with(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8], extra: &str, forms: bool) {
+    let form = if forms { "'self'" } else { "'none'" };
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: same-origin\r\nContent-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\n{extra}Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: same-origin\r\nContent-Security-Policy: default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action {form}\r\nConnection: close\r\n\r\n",
         body.len()
     );
     let _ = s.write_all(head.as_bytes()).and_then(|_| s.write_all(body));
@@ -143,14 +152,14 @@ fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) {
 
 fn handle(app: &App, mut s: TcpStream) {
     let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
-    // request line and headers together at most 16 KiB; no body is read
+    // request line and headers together at most 16 KiB, then a body of at most enroll::MAX_BODY
     let Ok(clone) = s.try_clone() else { return };
-    let mut r = BufReader::new(std::io::Read::take(clone, 16 * 1024));
+    let mut r = BufReader::new(std::io::Read::take(clone, (16 << 10) + enroll::MAX_BODY as u64));
     let mut line = String::new();
     if r.read_line(&mut line).is_err() {
         return;
     }
-    let (mut h, mut host, start) = (String::new(), None, std::time::Instant::now());
+    let (mut h, mut headers, start) = (String::new(), Vec::new(), std::time::Instant::now());
     for _ in 0..100 {
         h.clear();
         if r.read_line(&mut h).map_or(true, |n| n == 0) || h.trim().is_empty() {
@@ -160,21 +169,33 @@ fn handle(app: &App, mut s: TcpStream) {
         if start.elapsed() > Duration::from_secs(10) {
             return;
         }
-        if let Some((k, v)) = h.split_once(':')
-            && k.eq_ignore_ascii_case("host")
-        {
-            host = Some(v.trim().to_ascii_lowercase());
+        if let Some((k, v)) = h.split_once(':') {
+            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
         }
+    }
+    let get = |k: &str| headers.iter().find(|(n, _)| n == k).map(|(_, v)| v.as_str());
+    let host = get("host").map(str::to_ascii_lowercase);
+    let len: usize = match get("content-length").map(str::parse) {
+        None => 0,
+        Some(Ok(n)) if n <= enroll::MAX_BODY => n,
+        _ => return respond(&mut s, "413 Content Too Large", "text/plain", b"body too large"),
+    };
+    let mut body = vec![0; len];
+    if std::io::Read::read_exact(&mut r, &mut body).is_err() {
+        return;
     }
     let mut parts = line.split_whitespace();
     let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     // DNS rebinding: only the loopback address and the configured public name
-    let (status, ctype, body) = if host.is_some_and(|h| [ADDR, "localhost:18882", app.cfg.public_host.as_str()].contains(&h.as_str())) {
-        route(app, method, path, query)
-    } else {
-        ("421 Misdirected Request", "text/plain", b"unknown host".to_vec())
-    };
+    if !host.is_some_and(|h| [ADDR, "localhost:18882", app.cfg.public_host.as_str()].contains(&h.as_str())) {
+        return respond(&mut s, "421 Misdirected Request", "text/plain", b"unknown host");
+    }
+    let req = enroll::Req { method, path, query, headers: &headers, body: &body };
+    if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
+        return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+    }
+    let (status, ctype, body) = route(app, method, path, query);
     respond(&mut s, status, ctype, &body);
 }
 
@@ -220,7 +241,12 @@ fn serve(t: &Tool, service: bool) -> ! {
             }
         });
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default() });
+    let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
+    let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
+    if let Err(e) = &enroll {
+        eprintln!("enrollment: {e}");
+    }
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll });
     let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     for mut s in l.incoming().flatten() {
         use std::sync::atomic::Ordering::SeqCst;
@@ -303,7 +329,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default() }.doc(1800, json!({}));
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(1800, json!({}));
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -325,7 +351,12 @@ fn main() {
             let q: Vec<String> = rest.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).map(String::from).unwrap_or_else(|| t.die(USAGE))).collect();
             let (period, filters) = data::query(&q.join("&")).unwrap_or_else(|e| t.die(&e));
             let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
-            println!("{}", App { cfg, cache: source::Cache::default() }.doc(period, filters));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(period, filters));
+        }
+        ["admin", workspace, subject] => {
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            enroll::Enroll::admin(&dir, workspace, subject).unwrap_or_else(|e| t.die(&e));
+            println!("admin: {subject} administers {workspace}");
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
         ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
@@ -385,7 +416,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()) };
         assert_eq!(route(&app, "GET", "/nope", "").0, "404 Not Found");
         assert_eq!(route(&app, "POST", "/data", "").0, "405 Method Not Allowed");
         assert_eq!(route(&app, "GET", "/data", "period=5").0, "400 Bad Request");
