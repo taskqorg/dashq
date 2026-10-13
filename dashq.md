@@ -50,6 +50,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 - Stale after 7200 s (hourly timer plus margin). Manual rules are listed as not verified, never as passed.
 
 ## D5. Refresh
+- Redesign target: [shared dashboard rules W4–W6](https://github.com/taskqorg/specq/blob/main/design/dashboards.md) and D10. The mechanism below is the current baseline, not proof of stable in-place updates.
 - The page fetches `/data` on load, every 60 s and on the Refresh button. No live push.
 - One renderer, on the server: `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
 - The page shows `Updated <time>` and each source's age. A failed fetch keeps the last page and shows the error banner (D6); it never blanks values.
@@ -74,7 +75,7 @@ Every value carries the state of its source. The page never turns missing data i
 - Agents read it with `dashq report` on the host, or through the guard with the owner's session.
 
 ## D8. Page
-English, one column, sections in this order. Header links: Langfuse traces, Langfuse dashboards.
+English. The existing one-column layout below remains the implementation baseline; D10 is the approved redesign direction, pending implementation and verification. Header links: Langfuse traces, Langfuse dashboards.
 
 1. **Attention**: current problems from all sources, then observation gaps (stale or unknown checks), then incident history (24 h, deduplicated). Each item: source, host, what, since when.
 2. **Hosts**: one row per host seen in any source. Columns: freshness, taskq version (heartbeat), agentq monitor and proxy versions (running, selected, latest stable, updater state), serverq report age and status, services from the latest snapshot (proxy, gateway, Langfuse health). A running version older than the latest release says `behind`.
@@ -102,3 +103,22 @@ Every view of agentq `docs/SERVICEQ.md` maps here:
 | TaskQ status report (`checkedAt`, `state`) through the monitor | Dropped: never implemented; D4.2 reads heartbeats from the board, the source of truth |
 | Langfuse dashboard `ServiceQ` (provisioned widgets) | Dropped: a write to Langfuse (D1); the header links to Langfuse dashboards |
 | Retry/recovery durations at snapshot time | D8.1 Attention, labelled with the snapshot time, not a countdown |
+
+## D10. Dashboard redesign target
+
+Approved design; not implemented by this specification change. Apply [shared dashboard and widget rules W1–W12](https://github.com/taskqorg/specq/blob/main/design/dashboards.md). The [accepted reference](docs/design/overview.md) owns layout and preview parameters. D8 documents the existing section inventory; preserve its information while changing hierarchy.
+
+- First viewport: compact Attention and server overview together. Answer which hosts need attention, their current CPU utilization, RAM used/total and disk used/total per filesystem, and how those values are changing. Keep warnings visible alongside the affected host. Board questions and failures join Attention; board totals must not displace the server overview.
+- Next content: detailed project boards, agent activity and compression, host versions and individual server checks. Last: incident history, process counters and diagnostic evidence. Do not create a third screen merely to fill it; preserve access to every existing view.
+- Server trends require timestamped samples and visible time windows. D4 does not yet guarantee CPU/RAM/disk history: qualify existing sources before selecting a collector or retention mechanism. Missing metrics or history remain explicitly unavailable; never fabricate charts from fixtures or a single reading.
+- Automatic refresh is required. Retain the current 60 s cadence until separately changed; manual Refresh is optional recovery, never the normal workflow. Apply new values without losing open details or reading position. Freshness describes source observations, not just the last page fetch.
+- Use readable moderate density, aligned groups and concise semantic Unicode/icons. Select exact glyphs and verify rendering in the design iteration. Group repeated Attention observations by source or host without claiming an unproven common cause; keep raw records and linked tasks accessible.
+- Compact refinement: remove repeated missing-value prose and excess cell padding before reducing text size. Use a visible shared missing-data legend and accessible per-cell reasons; retain host freshness and warning meaning in the overview. Animation demonstrations belong in the design preview, not the production first viewport.
+- Changes to CPU, RAM or disk usage do not automatically imply failure or recovery. Persistent status follows explicit thresholds; a transient change cue cannot override unknown/stale state or hide a warning.
+
+- Layout: compact Attention above a shared host grid. Each host has identity/freshness, CPU percentage and trend, RAM used/total with utilization bar and trend, then one used/total bar per filesystem. Keep the host rows aligned and put warnings beside affected resources. History and diagnostics follow below.
+- Reference defaults: 30 min trends on a shared 0–100% scale, 16 px main text, brief local value tint and direction/delta where useful. Production remains automatic at 60 s; the preview's sample button is not a product control. Source retention/cadence must qualify the chosen window.
+
+Still unresolved: production warning thresholds, collection/retention qualification and Attention grouping depth for multiple real incidents. Demo host capacities, filesystem names, freshness and 85/90% thresholds are invented examples, not approved inventory or policy. Do not fabricate data while these remain unavailable.
+
+Acceptance: review the first viewport and deeper content with representative live data, missing history, warnings and long labels; verify readable large text, both themes, reduced motion and multiple automatic refreshes. Record which data and UI requirements are implemented, unverified or blocked by a source gap.
