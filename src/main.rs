@@ -15,7 +15,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -247,6 +247,45 @@ fn fixture_html() -> String {
     page::render(&fixture_doc(), &input["links"])
 }
 
+/// The fixture page as one file: stylesheet inlined, script dropped (D2 --snapshot).
+fn snapshot_html() -> String {
+    let css = format!("<style>\n{}</style>", include_str!("../assets/style.css"));
+    fixture_html().replace("<link rel=\"stylesheet\" href=\"/style.css\">", &css).replace("<script src=\"/app.js\" defer></script>\n", "")
+}
+
+fn chrome() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("DASHQ_CHROME") {
+        return Some(p.into());
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    ["google-chrome", "chromium", "chromium-browser"]
+        .iter()
+        .flat_map(|n| std::env::split_paths(&path).map(move |d| d.join(n)))
+        .chain([PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")])
+        .find(|p| p.is_file())
+}
+
+fn snapshot(dir: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("snapshot: {e}"))?;
+    let dir = dir.canonicalize().map_err(|e| format!("snapshot: {e}"))?;
+    let (html, png) = (dir.join("page.html"), dir.join("page.png"));
+    std::fs::write(&html, snapshot_html()).map_err(|e| format!("snapshot: {e}"))?;
+    let _ = std::fs::remove_file(&png);
+    let c = chrome().ok_or("snapshot: PNG renderer not found (headless Chrome; set DASHQ_CHROME)")?;
+    // ponytail: fixed 1280x4000 window; measure the page height if the fixture outgrows it
+    let out = std::process::Command::new(&c)
+        .args(["--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars", "--window-size=1280,4000"])
+        .arg(format!("--screenshot={}", png.display()))
+        .arg(format!("file://{}", html.display()))
+        .output()
+        .map_err(|e| format!("snapshot: run {}: {e}", c.display()))?;
+    if !png.is_file() {
+        return Err(format!("snapshot: no page.png ({})", out.status));
+    }
+    println!("snapshot: {} {}", html.display(), png.display());
+    Ok(())
+}
+
 fn selftest(t: &Tool) -> Result<(), String> {
     if fixture_html() != FIXTURE_HTML {
         return Err("fixture: rendering differs from fixture/page.html".into());
@@ -287,6 +326,7 @@ fn main() {
             println!("{}", App { cfg, cache: source::Cache::default() }.doc(period, filters));
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
+        ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
         ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => match coreq::update::update(&t, !rest.is_empty()) {
             Ok(Some(v)) => println!("update: {v}"),
             Ok(None) => println!("update: up to date"),
@@ -322,6 +362,23 @@ mod tests {
         assert_eq!(html, FIXTURE_HTML, "rerun with DASHQ_UPDATE_FIXTURE=1 after an intended change");
         let pinned: Value = serde_json::from_str(include_str!("../fixture/data.json")).unwrap();
         assert_eq!(fixture_doc(), pinned);
+    }
+
+    #[test]
+    fn snapshot_writes_html_and_png() {
+        let d = std::env::temp_dir().join(format!("dashq-snap-{}", std::process::id()));
+        let r = snapshot(&d);
+        let html = std::fs::read_to_string(d.join("page.html")).unwrap();
+        // pinned: fixture/page.html with the stylesheet inlined and the script dropped
+        let css = format!("<style>\n{}</style>", include_str!("../assets/style.css"));
+        assert_eq!(html, FIXTURE_HTML.replace("<link rel=\"stylesheet\" href=\"/style.css\">", &css).replace("<script src=\"/app.js\" defer></script>\n", ""));
+        assert!(html.contains(&css) && !html.contains("/style.css") && !html.contains("/app.js"));
+        // CI (ubuntu-latest) ships Chrome; a local run without it only checks the HTML
+        if chrome().is_none() && std::env::var_os("CI").is_none() {
+            return eprintln!("snapshot: no Chrome, PNG not checked");
+        }
+        r.unwrap();
+        assert!(std::fs::read(d.join("page.png")).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
     }
 
     #[test]
