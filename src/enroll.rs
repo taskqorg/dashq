@@ -40,7 +40,7 @@ pub struct Req<'a> {
 }
 
 impl Req<'_> {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
     }
 }
@@ -130,8 +130,26 @@ impl Enroll {
     }
 
     /// CSRF token bound to account and purpose.
-    fn token_for(&self, purpose: &str) -> String {
+    pub fn token_for(&self, purpose: &str) -> String {
         hex(hmac::sign(&self.csrf, purpose.as_bytes()).as_ref())
+    }
+
+    pub fn token_ok(&self, purpose: &str, token: &str) -> bool {
+        unhex(token).is_some_and(|t| hmac::verify(&self.csrf, purpose.as_bytes(), &t).is_ok())
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// The host administrator grants or removes the explicit answer capability of `subject` in `workspace`
+    /// (answers.md); answering also needs the workspace administrator role.
+    pub fn answerer(dir: &Path, workspace: &str, subject: &str, allow: bool) -> Result<(), String> {
+        if !id(workspace, 64) || !valid_subject(subject) {
+            return Err("answerer: bad workspace or subject".into());
+        }
+        let e = Enroll::open(dir, "")?;
+        e.store.set_answerer(workspace, subject, allow).map_err(|e| format!("dashq.db: {e:?}"))
     }
 
     /// True when another session is allowed for `ip` now; else the seconds to wait.
@@ -187,15 +205,15 @@ fn b64url(b: &[u8]) -> String {
     crate::base64(b).trim_end_matches('=').replace('+', "-").replace('/', "_")
 }
 
-fn sha256(s: &str) -> Vec<u8> {
+pub fn sha256(s: &str) -> Vec<u8> {
     ring::digest::digest(&ring::digest::SHA256, s.as_bytes()).as_ref().to_vec()
 }
 
-fn id(s: &str, max: usize) -> bool {
+pub fn id(s: &str, max: usize) -> bool {
     !s.is_empty() && s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
-fn valid_subject(s: &str) -> bool {
+pub fn valid_subject(s: &str) -> bool {
     !s.is_empty() && s.len() <= 256 && s.chars().all(|c| !c.is_control())
 }
 
@@ -506,7 +524,7 @@ fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
     error("503 Service Unavailable", "unavailable")
 }
 
-fn form(body: &[u8]) -> HashMap<String, String> {
+pub fn form(body: &[u8]) -> HashMap<String, String> {
     std::str::from_utf8(body)
         .unwrap_or("")
         .split('&')
@@ -1108,8 +1126,8 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into() };
-        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e }
+        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None };
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default() }
     }
 
     fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {

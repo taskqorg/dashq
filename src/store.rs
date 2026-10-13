@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT 
 CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL, workspace TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, product TEXT NOT NULL, installation TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, schemas TEXT NOT NULL, expires INTEGER NOT NULL, interval INTEGER NOT NULL, polled INTEGER NOT NULL, failures INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied', 'invalid', 'acked')), workspace TEXT, generation INTEGER, sealed BLOB);
 CREATE TABLE IF NOT EXISTS activations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
+CREATE TABLE IF NOT EXISTS answerers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
+CREATE TABLE IF NOT EXISTS answers(op_id TEXT PRIMARY KEY, subject TEXT NOT NULL, workspace TEXT NOT NULL, board TEXT NOT NULL, task INTEGER NOT NULL, revision INTEGER NOT NULL, payload BLOB NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'stale', 'unknown')), receipt TEXT, at INTEGER NOT NULL);
 ";
 
 /// C5 bounds; tests shrink them.
@@ -200,6 +202,22 @@ pub struct Credential {
     pub grant: Grant,
     pub revoked: bool,
     pub active: bool,
+}
+
+/// One owner answer operation (answers.md): verified actor, scoped target, immutable payload digest and the
+/// sanitized TaskQ receipt once known. Never pruned: an unresolved operation stays for reconciliation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnswerOp {
+    pub op_id: String,
+    pub subject: String,
+    pub workspace: String,
+    pub board: String,
+    pub task: i64,
+    pub revision: i64,
+    pub payload: Vec<u8>,
+    /// `pending` (dispatched, no receipt yet), `accepted`, `rejected`, `stale` or `unknown`.
+    pub state: String,
+    pub receipt: Option<String>,
 }
 
 /// Failed approvals per code before it is invalidated (C3).
@@ -404,6 +422,50 @@ impl Store {
     /// Checked on every request: no cache can extend a revoked grant.
     pub fn authorize(&self, verifier: &[u8]) -> Result<Option<Grant>, Error> {
         authorize(&*self.lock()?, verifier)
+    }
+
+    /// Grants or removes the explicit answer capability (answers.md); separate from membership and every grant.
+    pub fn set_answerer(&self, workspace: &str, subject: &str, allow: bool) -> Result<(), Error> {
+        self.write(|tx| {
+            if allow {
+                tx.execute("INSERT OR IGNORE INTO answerers VALUES (?1, ?2)", [workspace, subject])?;
+            } else {
+                tx.execute("DELETE FROM answerers WHERE workspace = ?1 AND subject = ?2", [workspace, subject])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// True when `subject` administers `workspace` and holds its answer capability; read on every request.
+    pub fn can_answer(&self, workspace: &str, subject: &str) -> Result<bool, Error> {
+        Ok(self.lock()?.query_row(
+            "SELECT EXISTS (SELECT 1 FROM members m JOIN answerers a ON a.workspace = m.workspace AND a.subject = m.subject WHERE m.workspace = ?1 AND m.subject = ?2 AND m.role = 'admin')",
+            [workspace, subject],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Records `op` as `pending` unless its op ID exists; returns the existing record instead.
+    pub fn begin_answer(&self, op: &AnswerOp, now: i64) -> Result<Option<AnswerOp>, Error> {
+        self.write(|tx| {
+            let seen = tx
+                .query_row("SELECT op_id, subject, workspace, board, task, revision, payload, state, receipt FROM answers WHERE op_id = ?1", [&op.op_id], |r| {
+                    Ok(AnswerOp { op_id: r.get(0)?, subject: r.get(1)?, workspace: r.get(2)?, board: r.get(3)?, task: r.get(4)?, revision: r.get(5)?, payload: r.get(6)?, state: r.get(7)?, receipt: r.get(8)? })
+                })
+                .optional()?;
+            if seen.is_none() {
+                tx.execute(
+                    "INSERT INTO answers VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'pending', NULL, ?8)",
+                    params![op.op_id, op.subject, op.workspace, op.board, op.task, op.revision, op.payload, now],
+                )?;
+            }
+            Ok(seen)
+        })
+    }
+
+    /// Stores the outcome and sanitized receipt of an operation.
+    pub fn finish_answer(&self, op_id: &str, state: &str, receipt: &str, now: i64) -> Result<(), Error> {
+        self.write(|tx| Ok(tx.execute("UPDATE answers SET state = ?2, receipt = ?3, at = ?4 WHERE op_id = ?1", params![op_id, state, receipt, now]).map(|_| ())?))
     }
 
     /// Workspaces where `subject` is a member, with its role.

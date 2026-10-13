@@ -151,7 +151,7 @@ Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1�
 
 ## D13. TaskQ answer card
 
-Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Implementation and live qualification remain pending.
+Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Transport and authority are implemented ([#41](https://github.com/taskqorg/dashq/issues/41), [answers § Route](docs/design/answers.md#route-41)); the route stays off until a deployment configures `answer`, and production writes wait for live qualification ([#44](https://github.com/taskqorg/dashq/issues/44)). The card embedding is [#43](https://github.com/taskqorg/dashq/issues/43).
 
 ## D14. TaskQ resource controls
 

@@ -749,11 +749,11 @@ pub fn build(inp: &Value) -> Value {
 }
 
 /// One open question in the S3 shape: source choice ids, order and text kept; a card that does not parse
-/// keeps its verbatim text and no choices. Read-only: no answer control (D1).
+/// keeps its verbatim text and no choices. A choice the answer route refuses names why (D13).
 fn question(t: &Value) -> Value {
     let q = &t["question"];
     let parsed = q["parsed"] == true;
-    let choices: Vec<Value> = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).map(|c| json!({"k": c["id"], "text": c["text"]})).collect();
+    let choices: Vec<Value> = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).map(|c| json!({"k": c["id"], "text": c["text"], "unavailable": crate::answer::unavailable(&c["text"])})).collect();
     let recommended = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).find(|c| c["recommended"] == true).map_or(Value::Null, |c| c["id"].clone());
     let text = if parsed { q["problem"].clone() } else { q["text"].clone() };
     json!({"id": t["url"], "number": t["n"], "title": t["title"], "url": t["url"], "state": t["state"], "revision": t["revision"],
@@ -787,7 +787,7 @@ mod tests {
         let q = &b["questions"];
         // parsed card: source k, order and text kept, ★ as recommended; unparsed review card: verbatim, no choices
         assert_eq!(q[1], json!({"id": "https://github.com/taskqorg/taskq/issues/12", "number": 12, "title": "Which option? <b>", "url": "https://github.com/taskqorg/taskq/issues/12", "state": "ask",
-            "revision": 6139994000u64, "parsed": true, "done": "checked", "text": "pick a store <i>", "choices": [{"k": 1, "text": "SQLite"}, {"k": 3, "text": "Files"}], "recommended": 3, "free_text": true}));
+            "revision": 6139994000u64, "parsed": true, "done": "checked", "text": "pick a store <i>", "choices": [{"k": 1, "text": "SQLite", "unavailable": null}, {"k": 3, "text": "Files", "unavailable": null}], "recommended": 3, "free_text": true}));
         assert_eq!((q[0]["state"].as_str(), q[0]["text"].as_str(), q[0]["choices"].as_array().map(Vec::len)), (Some("review"), Some("Merge now or wait?"), Some(0)));
         assert_eq!(b["failed"][0]["reason"], "Reason: CI <red> on every runner");
         assert!(doc["attention"]["current"].as_array().unwrap().iter().any(|i| i["what"] == "taskqorg/taskq#14: failed" && i["detail"] == "Reason: CI <red> on every runner"));

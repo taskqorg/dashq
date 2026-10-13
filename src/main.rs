@@ -1,5 +1,6 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
+mod answer;
 mod data;
 mod enroll;
 mod page;
@@ -18,7 +19,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | admin WORKSPACE SUBJECT | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -36,6 +37,8 @@ struct Config {
     serverq_report: String,
     serverq_host: String,
     public_host: String,
+    /// `None`: no answer route (D13); writes need the dedicated credential and the pinned binary.
+    answer: Option<answer::Config>,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -87,6 +90,21 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => None,
         Some(_) => Some(s("/taskq/binary", &|x| std::path::Path::new(x).is_absolute())?),
     };
+    let answer = match v.get("answer") {
+        None => None,
+        Some(_) => {
+            let token = s("/answer/token", &|x| std::path::Path::new(x).is_absolute())?;
+            let boards = v["answer"]["boards"]
+                .as_object()
+                .filter(|o| !o.is_empty())
+                .and_then(|o| o.iter().map(|(b, w)| w.as_str().filter(|w| enroll::id(w, 64) && projects.contains(b)).map(|w| (b.clone(), w.to_string()))).collect())
+                .ok_or("config: bad key answer.boards")?;
+            if taskq_bin.is_none() {
+                return Err("config: bad key taskq.binary".into());
+            }
+            Some(answer::Config { token: token.into(), boards })
+        }
+    };
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
@@ -99,6 +117,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         serverq_report: report,
         serverq_host: host,
         public_host,
+        answer,
     })
 }
 
@@ -121,6 +140,7 @@ struct App {
     cache: source::Cache,
     /// `Err` until `dashq admin` sets enrollment up, or when its store is unavailable.
     enroll: Result<enroll::Enroll, String>,
+    answers: answer::Answers,
 }
 
 impl App {
@@ -230,6 +250,11 @@ fn handle(app: &App, mut s: TcpStream) {
         return respond(&mut s, "421 Misdirected Request", "text/plain", b"unknown host");
     }
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
+    let c = &app.cfg;
+    let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
+    if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
+        return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+    }
     if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
         return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
     }
@@ -293,7 +318,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default() });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -386,7 +411,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()) }.doc(1800, json!({}), None);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -411,12 +436,17 @@ fn main() {
             // the host administrator's local report sees every installation (D11), like a loopback page request
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             enroll::Enroll::admin(&dir, workspace, subject).unwrap_or_else(|e| t.die(&e));
             println!("admin: {subject} administers {workspace}");
+        }
+        ["answerer", workspace, subject, op @ ("on" | "off")] => {
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            enroll::Enroll::answerer(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
+            println!("answerer: {subject} {op} in {workspace}");
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
         ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
@@ -476,7 +506,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()) };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         assert_eq!(route(&app, "POST", "/data", "", None).0, "405 Method Not Allowed");
         assert_eq!(route(&app, "GET", "/data", "period=5", None).0, "400 Bad Request");
@@ -484,7 +514,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into() }
+        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None }
     }
 
     #[test]
@@ -518,7 +548,19 @@ mod tests {
         t["taskq"] = json!({"binary": "/opt/taskq"});
         write(&t);
         assert_eq!(load_config(&p).unwrap().taskq_bin.as_deref(), Some("/opt/taskq"));
+        t["answer"] = json!({"token": "/etc/dashq/answer-token", "boards": {"taskqorg/dashq": "ws-1"}});
+        write(&t);
+        let a = load_config(&p).unwrap().answer.unwrap();
+        assert_eq!((a.token.to_str(), a.boards["taskqorg/dashq"].as_str()), (Some("/etc/dashq/answer-token"), "ws-1"));
+        // only configured projects are answerable, and answers need the pinned binary
+        t["answer"]["boards"] = json!({"other/repo": "ws-1"});
+        write(&t);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key answer.boards");
+        t["answer"]["boards"] = json!({"taskqorg/dashq": "ws-1"});
         t["taskq"]["binary"] = json!("taskq");
+        write(&t);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq.binary");
+        t.as_object_mut().unwrap().remove("taskq");
         write(&t);
         assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq.binary");
         assert_eq!(base64(b"ab"), "YWI=");
