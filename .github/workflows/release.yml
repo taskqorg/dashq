@@ -29,7 +29,10 @@ jobs:
           ver="${GITHUB_REF_NAME#v}"
           grep -q "^version = \"$ver\"" Cargo.toml
           echo "VER=$ver" >> "$GITHUB_ENV"
-      - run: cargo test --locked
+      # Tests need headless Chrome (snapshot PNG): ubuntu-latest ships it, the arm runner does not.
+      # The arm artifact is still gated by its own selftest below.
+      - if: matrix.name == 'linux-x86_64'
+        run: cargo test --locked
       - run: cargo build --locked --release --target "$TARGET"
       - name: Selftest and stage
         run: |
