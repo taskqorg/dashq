@@ -56,7 +56,7 @@ The [complete connection proposal](enrollment.md) starts from AgentQ PRODUCT R5/
 
 - [coreq #22](https://github.com/taskqorg/coreq/issues/22): reusable contract proposal, two-consumer proof, independent operation and compatibility. Shared semantics go to specq; Rust helpers stay in coreq.
 - [serverq #21](https://github.com/taskqorg/serverq/issues/21): report projection, recommendation references and resource identity without requiring AgentQ or TaskQ.
-- [dashq #24](https://github.com/taskqorg/dashq/issues/24): connection/adapters, capability-based views and proposed action authority; consumer composition belongs here.
+- [dashq #24](https://github.com/taskqorg/dashq/issues/24): connection/adapters, capability-based views and proposed action authority; consumer composition belongs here. Proposal: [adapters](adapters.md).
 - Existing delivery work: [dashq #4](https://github.com/taskqorg/dashq/issues/4), [agentq #60](https://github.com/taskqorg/agentq/issues/60). Neither is an approved generic transport merely because an issue exists.
 - Resource qualification stays in [agentq #85](https://github.com/taskqorg/agentq/issues/85) and [#86](https://github.com/taskqorg/agentq/issues/86). Reuse TaskQ #886/#887; do not rebuild its state machine in DashQ.
 
