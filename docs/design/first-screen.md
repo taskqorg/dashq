@@ -74,3 +74,5 @@ AgentQ integration detail follows [G1–G4](agentq-settings.md); configuration, 
 Supporting AgentQ activity view: [optimization results P1–P3](optimization-results.md); it does not displace first-screen resources, Attention or Boards.
 
 Service versions and diagnostics are a supporting view under [D18 / V1–V4](service-versions.md), preserving the first-screen operational layout.
+
+First launch and unavailable-source composition follows [U1–U4](startup-outages.md). The [coverage review](prototype-coverage.md) identifies remaining prototype gaps without changing accepted component ownership.

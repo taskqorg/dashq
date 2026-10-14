@@ -1,0 +1,21 @@
+{
+  "status": "accepted synthetic composition; not production",
+  "contract": "D19 / U1-U4",
+  "referenceSha256": "a583e978b6e4c05bdffbddfecbf2416e7c2e328fffba7649e8655761d0c0792a",
+  "parent": "first-screen-reference.html",
+  "parentSha256": "a074f1722b6b4a7cae7295ae83bf56034b240b24f3396bd6aa6abbbafb1ddd42",
+  "taskqDesign": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
+  "adaptation": "Append-only scenario controls and availability gating; parent functions unchanged",
+  "checks": [
+    "1024/16 light",
+    "360/20 dark",
+    "first launch, pending, TaskQ-only",
+    "partial and all-source outage",
+    "draft retention and recovery"
+  ],
+  "limits": [
+    "Fixed demo ages are not stale thresholds",
+    "Enrollment shortcut is not L2 implementation",
+    "No live data or write qualification"
+  ]
+}
