@@ -31,7 +31,10 @@ pub const STALE_SECS: u64 = 180;
 pub const TREND_SAMPLES: i64 = 3;
 /// C5: first-connection progress polls every 2 s for at most 60 s.
 const WAIT_SECS: i64 = 60;
-const MACHINE: [&str; 6] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke"];
+const MACHINE: [&str; 8] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke", "/operations", "/operations/result"];
+/// AgentQ configure fields and values (agentq CONFIGURATION.md A3 request `changes`); no removal value exists.
+#[allow(dead_code)] // the guarded browser adapter (#63) calls it
+const CHANGES: [(&str, &[&str]); 5] = [("routing", &["routed", "direct"]), ("optimization", &["enabled", "disabled"]), ("mcp", &["registered"]), ("hooks", &["registered"]), ("plugin", &["enabled"])];
 
 pub struct Req<'a> {
     pub method: &'a str,
@@ -194,6 +197,117 @@ impl Enroll {
     pub fn project(&self, scope: Scope) -> Result<Vec<store::Row>, store::Error> {
         self.store.project(scope)
     }
+
+    /// Typed AgentQ configure enqueue for the guarded browser adapter (#63; D16). The server sets everything with
+    /// authority: actor from the verified `subject`, workspace and generation from the installation's live grant,
+    /// profiles from its current snapshot; the caller names only the operation ID, the changes and, for an apply,
+    /// the confirmed plan. Returns the immutable queued operation; the same ID and content again returns it
+    /// unchanged. Errors are safe codes; nothing is queued.
+    #[allow(dead_code)] // the guarded browser adapter (#63) calls it
+    pub fn configure(&self, subject: &str, installation: &str, operation: &str, plan: Option<Plan>, changes: &[Change], now: i64) -> Result<Value, &'static str> {
+        let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
+        let mut seen = std::collections::HashSet::new();
+        let valid = hex(operation, 32)
+            && (1..=64).contains(&changes.len())
+            && changes.iter().all(|c| id(c.profile, 64) && CHANGES.iter().any(|(f, vs)| *f == c.field && vs.contains(&c.value)) && seen.insert((c.profile, c.field)))
+            && plan.as_ref().is_none_or(|p| id(p.revision, 64) && hex(p.digest, 64));
+        if !valid {
+            return Err("invalid");
+        }
+        let kind = if plan.is_some() { "apply" } else { "plan" };
+        let wanted = |op: &Value| {
+            let p = &op["payload"];
+            op["installation"] == installation && p["kind"] == kind && p["actor"] == actor_id(subject).as_str() && p["changes"] == json!(changes.iter().map(Change::wire).collect::<Vec<_>>())
+                && plan.as_ref().is_none_or(|x| p["plan"] == json!({"revision": x.revision, "digest": x.digest}))
+        };
+        let unavailable = |x| if x == store::Error::Busy { "busy" } else { "unavailable" };
+        if let Some(rec) = self.store.operation(operation).map_err(unavailable)? {
+            return if wanted(&rec.op) { Ok(rec.op) } else { Err("replay_mismatch") };
+        }
+        let Some((g, snapshot)) = self.store.live(installation).map_err(unavailable)? else { return Err("no_grant") };
+        let role = self.store.role(&g.workspace, subject).map_err(unavailable)?;
+        if !(role.as_deref() == Some("admin") || (role.is_some() && g.account == subject)) {
+            return Err("authority");
+        }
+        // every profile of the current snapshot, as AgentQ reports it; no snapshot yet authorizes none
+        let snapshot: Value = snapshot.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let mut profiles: Vec<&str> = vec![];
+        for p in snapshot["configuration"]["profiles"].as_array().into_iter().flatten().filter_map(|p| p["id"].as_str()).filter(|p| id(p, 64)) {
+            if !profiles.contains(&p) {
+                profiles.push(p);
+            }
+        }
+        if profiles.is_empty() || profiles.len() > 64 {
+            return Err("no_profiles");
+        }
+        if !changes.iter().all(|c| profiles.contains(&c.profile)) {
+            return Err("profile_out_of_scope");
+        }
+        let mut payload = json!({"schema": 1, "operation": operation, "kind": kind, "actor": actor_id(subject), "workspace": g.workspace, "installation": installation,
+            "generation": g.generation, "issued_at": now, "expires_at": now + store::OPERATION_SECS, "changes": changes.iter().map(Change::wire).collect::<Vec<_>>()});
+        if let Some(p) = plan {
+            payload["plan"] = json!({"revision": p.revision, "digest": p.digest});
+        }
+        let op = json!({"operation": operation, "capability": "agentq.configure", "installation": installation, "generation": g.generation, "expires_at": now + store::OPERATION_SECS,
+            "digest": coreq::enroll::digest(&payload), "payload": payload, "authority": {"actor": actor_id(subject), "workspace": g.workspace, "profiles": profiles}});
+        match self.store.queue(subject, &op, now).map_err(unavailable)? {
+            store::Queued::Queued | store::Queued::Same => Ok(op),
+            store::Queued::Refused(why) => Err(why),
+        }
+    }
+
+    /// Readback of one queued operation for its actor or the workspace administrator; `None` for anyone else.
+    /// `state`: `queued`, `delivered` (pulled, no result yet), `resulted` (with the host's result), `expired` or
+    /// `revoked` (never delivered, so never run), `unknown` (delivered, then revoked before a result).
+    #[allow(dead_code)] // the guarded browser adapter (#63) calls it
+    pub fn readback(&self, subject: &str, operation: &str, now: i64) -> Result<Option<Value>, store::Error> {
+        let Some(rec) = self.store.operation(operation)? else { return Ok(None) };
+        if rec.actor != actor_id(subject) && self.store.role(&rec.workspace, subject)?.as_deref() != Some("admin") {
+            return Ok(None);
+        }
+        let state = match (&rec.result, rec.delivered, rec.revoked) {
+            (Some(_), _, _) => "resulted",
+            (None, true, true) => "unknown",
+            (None, true, false) => "delivered",
+            (None, false, true) => "revoked",
+            (None, false, false) if rec.op["expires_at"].as_i64().is_none_or(|x| now >= x) => "expired",
+            (None, false, false) => "queued",
+        };
+        let op = &rec.op;
+        Ok(Some(json!({"operation": op["operation"], "installation": op["installation"], "generation": op["generation"], "kind": op["payload"]["kind"],
+            "expires_at": op["expires_at"], "digest": op["digest"], "authority": op["authority"], "state": state, "result": rec.result})))
+    }
+}
+
+/// One AgentQ configure change: `profile` (its stable ID), `field` and `value` from `CHANGES`.
+#[allow(dead_code)] // the guarded browser adapter (#63) calls it
+pub struct Change<'a> {
+    pub profile: &'a str,
+    pub field: &'a str,
+    pub value: &'a str,
+}
+
+#[allow(dead_code)] // the guarded browser adapter (#63) calls it
+impl Change<'_> {
+    fn wire(&self) -> Value {
+        json!({"profile": self.profile, "field": self.field, "value": self.value})
+    }
+}
+
+/// The confirmed AgentQ plan an apply carries.
+#[allow(dead_code)] // the guarded browser adapter (#63) calls it
+pub struct Plan<'a> {
+    pub revision: &'a str,
+    pub digest: &'a str,
+}
+
+/// Opaque operation actor of a verified subject (coreq authority IDs are `[A-Za-z0-9._:-]`, 1-64): the subject
+/// itself when it already is one, else `actor-` and 24 hex of its SHA-256.
+pub fn actor_id(subject: &str) -> String {
+    if subject.len() <= 64 && !subject.is_empty() && subject.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b)) {
+        return subject.into();
+    }
+    format!("actor-{}", hex(&sha256(subject)[..12]))
 }
 
 fn hex(b: &[u8]) -> String {
@@ -308,7 +422,7 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                 Err(x) => return unavailable(x),
                 _ => {}
             }
-            if ["/ingest", "/connection/receipt"].contains(&r.path) {
+            if ["/ingest", "/connection/receipt", "/operations", "/operations/result"].contains(&r.path) {
                 return device_data(e, r.path, &v, &body, now);
             }
             let res = if r.path == "/connect/ack" { e.store.ack(&v, now) } else { e.store.revoke_credential(&v, now) };
@@ -346,6 +460,31 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         return x;
     }
     let g = &c.grant;
+    let refused = |x| match x {
+        store::Error::Denied => error("401 Unauthorized", "revoked"),
+        _ => error("503 Service Unavailable", "unavailable"),
+    };
+    if path == "/operations" {
+        let Some(cap) = body["capability"].as_str() else { return error("400 Bad Request", "invalid_request") };
+        return match e.store.pull(v, cap, now) {
+            Ok(Some(ops)) => json("200 OK", json!({"protocol": 1, "operations": ops})),
+            Ok(None) => error("403 Forbidden", "scope"),
+            Err(x) => refused(x),
+        };
+    }
+    if path == "/operations/result" {
+        let (Some(op), Some(digest)) = (body["operation"].as_str(), body["digest"].as_str()) else { return error("400 Bad Request", "invalid_request") };
+        // a result is metadata (C4), at most 16 KiB
+        let result = body["result"].to_string();
+        if result.len() > coreq::enroll::MAX_PAYLOAD || !result_metadata(&body["result"]) {
+            return error("400 Bad Request", "invalid_request");
+        }
+        return match e.store.post_result(v, op, digest, &result, now) {
+            Ok(None) => json("200 OK", json!({"protocol": 1, "operation": op, "state": "accepted"})),
+            Ok(Some(reason)) => json("200 OK", json!({"protocol": 1, "operation": op, "state": "rejected", "reason": reason})),
+            Err(x) => refused(x),
+        };
+    }
     if path == "/connection/receipt" {
         let Some(id) = body["event_id"].as_str() else { return error("400 Bad Request", "invalid_request") };
         return match e.store.receipt(v, id) {
@@ -411,25 +550,29 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
 /// an array of scalars may sit in the fifth (AgentQ `configuration.profiles[].writes.reasons`).
 // ponytail: one shape allowlist for every schema; per-schema field catalogs when producers publish them
 fn metadata(v: &Value, depth: usize) -> bool {
-    const DENY: [&str; 18] = [
-        "prompt", "command", "cmd", "args", "stdout", "stderr", "output", "input", "content", "text", "message", "path", "cwd", "env", "token", "secret",
-        "password", "credential",
-    ];
     match v {
         Value::Null | Value::Bool(_) | Value::Number(_) => depth > 0,
         Value::String(s) => {
             depth > 0 && s.chars().count() <= 256 && !s.chars().any(char::is_control) && !s.starts_with(['/', '~', '\\']) && !s.get(1..3).is_some_and(|x| x == ":\\" || x == ":/")
         }
         Value::Array(a) => depth > 0 && depth < 6 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
-        Value::Object(o) => {
-            depth < 5
-                && o.len() <= 256
-                && o.iter().all(|(k, x)| {
-                    let k = k.to_ascii_lowercase();
-                    id(&k, 64) && !DENY.iter().any(|d| k == *d || k.ends_with(&format!("_{d}"))) && metadata(x, depth + 1)
-                })
-        }
+        Value::Object(o) => depth < 5 && o.len() <= 256 && o.iter().all(|(k, x)| field(k) && metadata(x, depth + 1)),
     }
+}
+
+fn field(k: &str) -> bool {
+    const DENY: [&str; 18] = [
+        "prompt", "command", "cmd", "args", "stdout", "stderr", "output", "input", "content", "text", "message", "path", "cwd", "env", "token", "secret",
+        "password", "credential",
+    ];
+    let k = k.to_ascii_lowercase();
+    id(&k, 64) && !DENY.iter().any(|d| k == *d || k.ends_with(&format!("_{d}")))
+}
+
+/// An operation result (D16) is metadata one level deeper than a snapshot: AgentQ posts `{result, readback}`, and a
+/// plan nests per-profile `changes` objects under `result`.
+fn result_metadata(v: &Value) -> bool {
+    v.as_object().is_some_and(|o| o.len() <= 256 && o.iter().all(|(k, x)| field(k) && metadata(x, if x.is_object() { 0 } else { 1 })))
 }
 
 /// `/data` `installations` (D11): expected installations of the actor's scope with producer-time freshness;
@@ -862,6 +1005,8 @@ mod tests {
         now: i64,
         code: Option<String>,
         calls: Vec<String>,
+        /// Also ticks every requested operation capability at approval.
+        tick: bool,
     }
 
     impl coreq::enroll::Wire for Wire<'_> {
@@ -876,7 +1021,8 @@ mod tests {
         fn sleep(&mut self, secs: u64) {
             self.now += secs as i64;
             if let Some(code) = self.code.take() {
-                assert!(decide(self.e, "github|1", &code, "approve", "ws-1", self.now).1.contains("Approved"));
+                let decision = if self.tick { "approve&capability.agentq.configure=grant" } else { "approve" };
+                assert!(decide(self.e, "github|1", &code, decision, "ws-1", self.now).1.contains("Approved"));
             }
         }
         fn show(&mut self, uri: &str, code: &str) {
@@ -890,7 +1036,7 @@ mod tests {
         let (d, e) = setup("client");
         let host = dir("client-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
-        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
         let a = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         assert_eq!((&a["generation"], &a["workspace"], &a["product"]), (&json!(1), &json!("ws-1"), &json!("agentq")));
         assert_eq!(w.calls, ["/connect/device", "/connect/token", "/connect/token", "/connect/ack"]);
@@ -976,7 +1122,7 @@ mod tests {
         // the shared client: approval without the tick leaves the active grant without the capability
         let host = dir("capability-host");
         let r = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &["agentq.configure"] };
-        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
         assert_eq!(coreq::enroll::pair(&host, "https://dash.example.com", &r, &mut w).unwrap()["capabilities"], json!([]));
     }
 
@@ -1154,8 +1300,9 @@ mod tests {
         }
     }
 
-    /// coreq wire v1 conformance traces (fixture/enrollment: coreq v0.7.0 tests/enrollment, unchanged) run against
-    /// these handlers; `{"server": "project"}` is the dashboard projection pass.
+    /// coreq wire v1 conformance traces (fixture/enrollment: coreq v0.7.0 tests/enrollment, unchanged; agentq-operations
+    /// from v0.11.0) run against these handlers; `{"server": "project"}` is the dashboard projection pass and
+    /// `{"server": "queue"}` queues through the store's own authority check.
     #[test]
     fn coreq_conformance_traces() {
         let traces = [
@@ -1163,6 +1310,7 @@ mod tests {
             include_str!("../fixture/enrollment/agentq-pairing.json"),
             include_str!("../fixture/enrollment/agentq-reject.json"),
             include_str!("../fixture/enrollment/serverq-connect.json"),
+            include_str!("../fixture/enrollment/agentq-operations.json"),
         ];
         for (n, text) in traces.iter().enumerate() {
             let trace: Value = serde_json::from_str(text).unwrap();
@@ -1173,13 +1321,21 @@ mod tests {
             }
             let e = Enroll::open(&d, HOST);
             let mut vars = HashMap::new();
+            let mut now = 0;
             for (i, step) in trace["steps"].as_array().unwrap().iter().enumerate() {
                 let at_s = format!("{} step {i}", trace["about"]);
-                let now = step["at"].as_i64().unwrap_or(0);
+                now = step["at"].as_i64().unwrap_or(now);
                 if step["server"] == "project" {
                     e.as_ref().unwrap().project(Scope::All).unwrap();
+                } else if step["server"] == "queue" {
+                    // the queuing account is the authority's actor; DashQ checks it against its own grants and members
+                    let op = &step["operation"];
+                    let got = e.as_ref().unwrap().store.queue(op["authority"]["actor"].as_str().unwrap(), op, now).unwrap();
+                    assert_eq!(if got == store::Queued::Queued { "queued" } else { "refused" }, step["result"], "{at_s}: {got:?}");
                 } else if let Some(action) = step["browser"].as_str() {
                     let s = subst(step, &vars);
+                    // a trace approval approves what the device requested: here that is ticking each capability
+                    let action = if action == "approve" { "approve&capability.agentq.configure=grant" } else { action };
                     let (_, body) = decide(&e, s["account"].as_str().unwrap(), s["user_code"].as_str().unwrap(), action, s["workspace"].as_str().unwrap(), now);
                     let got = if body.contains("Approved:") {
                         "approved"
@@ -1329,7 +1485,7 @@ mod tests {
         let (_d, e) = setup("e2e");
         let host = dir("e2e-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
-        let mut w = Wire { e: &e, now, code: None, calls: vec![] };
+        let mut w = Wire { e: &e, now, code: None, calls: vec![], tick: false };
         let conn = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         let payload = json!({"version": "1.2.0", "cpu": {"percent": 7}});
         let r = coreq::enroll::stamp(&host, "agentq-snapshot/1", "snap-1", now as u64, payload.clone()).unwrap();
@@ -1347,7 +1503,7 @@ mod tests {
         assert_eq!(row["snapshot"], json!({"event_id": "snap-1", "schema": "agentq-snapshot/1", "payload": payload}));
         assert_eq!(row["observation"]["state"], "ok");
         // the client's verified receipt now names the snapshot that /data showed
-        let mut w = Wire { e: &app.enroll, now, code: None, calls: vec![] };
+        let mut w = Wire { e: &app.enroll, now, code: None, calls: vec![], tick: false };
         assert_eq!(coreq::enroll::receipt(&host, &r, &mut w), Ok("projected"));
         // scope: another account, a remote request without a subject, a host filter
         assert_eq!(data(&app, "", Some(Scope::Subject("github|2"))).1["installations"]["rows"], json!([]));
@@ -1600,7 +1756,7 @@ mod tests {
         let (d, e) = setup("offline-life");
         let host = dir("offline-life-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "same-host", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
-        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
         let grant = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         assert_eq!(coreq::enroll::disconnect(&host, &mut Offline), Err("1 revoke pending".into()));
         assert!(coreq::enroll::active(&host).unwrap().is_none());
@@ -1612,11 +1768,183 @@ mod tests {
         drop(e);
         let e = Enroll::open(&d, HOST);
         assert_eq!(projection(&e, Some(Scope::All), None, T0 as u64).unwrap()["rows"][0]["connection"], "revoked");
-        let mut w = Wire { e: &e, now: T0 + 60, code: None, calls: vec![] };
+        let mut w = Wire { e: &e, now: T0 + 60, code: None, calls: vec![], tick: false };
         let new = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         assert_eq!(new["installation"], grant["installation"]);
         assert_eq!(new["generation"], 2);
         assert_eq!(e.as_ref().unwrap().project(Scope::All).unwrap().len(), 1);
     }
 
+    /// An AgentQ host paired through the coreq client with `agentq.configure` ticked and one profile snapshot
+    /// (profiles 0123456789abcdef, 1111111111111111, 3333333333333333); returns its client folder.
+    fn configurable(e: &Result<Enroll, String>, inst: &str, now: i64) -> PathBuf {
+        let host = dir(&format!("{inst}-host"));
+        let req = coreq::enroll::Request { installation: Some(inst), product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &["agentq.configure"] };
+        let mut w = Wire { e, now, code: None, calls: vec![], tick: true };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        assert_eq!(a["capabilities"], json!(["agentq.configure"]));
+        let snap: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
+        assert_eq!(states(&ingest(e, a["credential"].as_str().unwrap(), vec![rec("s1", now, snap["cases"]["profile_projection"].clone())], now).1), ["accepted"]);
+        host
+    }
+
+    fn op_id(n: u8) -> String {
+        format!("{n:032x}")
+    }
+
+    const ROUTING: Change = Change { profile: "0123456789abcdef", field: "routing", value: "direct" };
+    const PLAN: Plan = Plan { revision: "00112233445566ff", digest: "9d029e2b923a7a5b63e1b3e2c306898c454f27df8026fd6e061b3421b274d937" };
+
+    // chain: D16 A1/A2, a typed configure request is queued only under server-set authority (actor, workspace,
+    // profiles), reaches the AgentQ host through the shared coreq client, and its result commits before the receipt
+    // and repeats after a lost reply; AgentQ's published envelopes fit the transport
+    #[test]
+    fn configure_operations_carry_server_authority_to_the_host() {
+        let (d, e) = setup("configure");
+        let x = e.as_ref().unwrap();
+        let host = configurable(&e, "inst-c1", T0);
+        let fx: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration-fixtures.json")).unwrap();
+        let c = |profile, field, value| Change { profile, field, value };
+        // malformed requests never queue: id, empty, unknown value, duplicate target, bad plan
+        let bad_plan = Plan { revision: "r1", digest: "nothex" };
+        for (op, plan, changes) in [("XYZ".to_string(), None, vec![ROUTING]), (op_id(1), None, vec![]), (op_id(1), None, vec![c("0123456789abcdef", "routing", "uninstall")]),
+            (op_id(1), None, vec![ROUTING, ROUTING]), (op_id(1), Some(bad_plan), vec![ROUTING])] {
+            assert_eq!(x.configure("github|1", "inst-c1", &op, plan, &changes, T0), Err("invalid"));
+        }
+        // authority is the server's: no grant, a non-member, a member who did not approve, a profile not in the snapshot
+        x.store.add_member("ws-1", "github|2", "member").unwrap();
+        assert_eq!(x.configure("github|1", "inst-none", &op_id(1), None, &[ROUTING], T0), Err("no_grant"));
+        assert_eq!(x.configure("github|9", "inst-c1", &op_id(1), None, &[ROUTING], T0), Err("authority"));
+        assert_eq!(x.configure("github|2", "inst-c1", &op_id(1), None, &[ROUTING], T0), Err("authority"));
+        assert_eq!(x.configure("github|1", "inst-c1", &op_id(1), None, &[c("9999999999999999", "routing", "direct")], T0), Err("profile_out_of_scope"));
+        // an observation grant carries no configure authority, with or without a snapshot
+        let observe = connect(&e, "inst-o1", "github|1", "ws-1", T0);
+        assert_eq!(x.configure("github|1", "inst-o1", &op_id(1), None, &[ROUTING], T0), Err("no_profiles"));
+        let snap: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
+        ingest(&e, &observe, vec![rec("o1", T0, snap["cases"]["profile_projection"].clone())], T0);
+        assert_eq!(x.configure("github|1", "inst-o1", &op_id(1), None, &[ROUTING], T0), Err("scope"));
+        // the plan: AgentQ's request envelope with authority from the grant and snapshot, digest per coreq
+        let plan = x.configure("github|1", "inst-c1", &op_id(1), None, &[ROUTING], T0).unwrap();
+        let actor = actor_id("github|1");
+        assert!(actor.starts_with("actor-") && actor.len() == 30 && actor_id("acct-1") == "acct-1");
+        assert_eq!(plan["authority"], json!({"actor": actor, "workspace": "ws-1", "profiles": ["0123456789abcdef", "1111111111111111", "3333333333333333"]}));
+        let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(keys(&plan["payload"]), keys(&fx["requests"]["plan"]));
+        assert_eq!((&plan["payload"]["expires_at"], &plan["digest"]), (&json!(T0 + 300), &json!(coreq::enroll::digest(&plan["payload"]))));
+        // immutable identity: a retry returns the stored operation, changed content or another actor is refused
+        assert_eq!(x.configure("github|1", "inst-c1", &op_id(1), None, &[ROUTING], T0 + 5), Ok(plan.clone()));
+        assert_eq!(x.configure("github|1", "inst-c1", &op_id(1), None, &[c("0123456789abcdef", "routing", "routed")], T0 + 5), Err("replay_mismatch"));
+        assert_eq!(x.configure("acct-1", "inst-c1", &op_id(1), None, &[ROUTING], T0 + 5), Err("replay_mismatch"));
+        // one unresolved mutation per installation; plans are not mutations
+        let apply = x.configure("github|1", "inst-c1", &op_id(2), Some(PLAN), &[ROUTING], T0).unwrap();
+        assert_eq!(keys(&apply["payload"]), keys(&fx["requests"]["apply"]));
+        assert_eq!(x.configure("github|1", "inst-c1", &op_id(3), Some(PLAN), &[ROUTING], T0), Err("busy"));
+        x.configure("github|1", "inst-c1", &op_id(4), None, &[ROUTING], T0).unwrap();
+        assert_eq!(x.readback("github|1", &op_id(2), T0).unwrap().unwrap()["state"], "queued");
+        // the host pulls through the coreq client; a lost pull reply pulls the same operations again
+        let mut w = Wire { e: &e, now: T0 + 10, code: None, calls: vec![], tick: false };
+        let mut b = coreq::enroll::Backoff::default();
+        let got = coreq::enroll::pull(&host, "agentq.configure", &mut b, &mut w).unwrap();
+        assert_eq!((got.operations.iter().map(|o| o["operation"].clone()).collect::<Vec<_>>(), got.rejected.len()), (vec![json!(op_id(1)), json!(op_id(2)), json!(op_id(4))], 0));
+        assert_eq!(coreq::enroll::pull(&host, "agentq.configure", &mut b, &mut w).unwrap(), got);
+        let op = &got.operations[1];
+        // payload claims never add authority: only the authority's actor, workspace and profiles pass
+        assert_eq!(coreq::enroll::admit(op, Some(&actor), Some("ws-1"), &["0123456789abcdef"]), Ok(()));
+        assert_eq!(coreq::enroll::admit(op, Some("acct-1"), None, &["0123456789abcdef"]), Err("wrong_actor"));
+        assert_eq!(coreq::enroll::admit(op, None, Some("ws-2"), &["0123456789abcdef"]), Err("wrong_workspace"));
+        assert_eq!(coreq::enroll::admit(op, None, None, &["9999999999999999"]), Err("profile_out_of_scope"));
+        assert_eq!(x.readback("github|1", &op_id(2), T0 + 10).unwrap().unwrap()["state"], "delivered");
+        // every published AgentQ plan and result envelope is storable metadata
+        for r in fx["results"].as_array().unwrap().iter().filter(|r| r["valid"] == true).map(|r| &r["result"]).chain(fx["cases"].as_array().unwrap().iter().filter(|c| c["expect"]["kind"] == "plan").map(|c| &c["expect"])) {
+            assert!(result_metadata(&json!({"result": r})), "{r}");
+        }
+        // the result commits before its receipt; a lost receipt repeats it; a changed result is refused
+        let result = json!({"result": fx["results"][0]["result"]});
+        let receipt = json!({"protocol": 1, "operation": op_id(2), "state": "accepted"});
+        assert_eq!(coreq::enroll::post_result(&host, op, result.clone(), &mut b, &mut w).unwrap(), receipt);
+        assert_eq!(coreq::enroll::post_result(&host, op, result.clone(), &mut b, &mut w).unwrap(), receipt);
+        let changed = coreq::enroll::post_result(&host, op, json!({"result": fx["results"][1]["result"]}), &mut b, &mut w).unwrap();
+        assert_eq!(changed, json!({"protocol": 1, "operation": op_id(2), "state": "rejected", "reason": "replay_mismatch"}));
+        // readback: the actor and the workspace administrator; another member reads nothing
+        let back = x.readback("github|1", &op_id(2), T0 + 11).unwrap().unwrap();
+        assert_eq!((&back["state"], &back["result"], &back["authority"]), (&json!("resulted"), &result, &apply["authority"]));
+        assert_eq!(x.readback("github|2", &op_id(2), T0 + 11).unwrap(), None);
+        // resolved: the next mutation queues; the resulted one is no longer pending
+        x.configure("github|1", "inst-c1", &op_id(5), Some(PLAN), &[ROUTING], T0 + 11).unwrap();
+        let ids = |p: &coreq::enroll::Pulled| p.operations.iter().map(|o| o["operation"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(&coreq::enroll::pull(&host, "agentq.configure", &mut b, &mut w).unwrap()), [op_id(1), op_id(4), op_id(5)]);
+        // a restart keeps operations and results
+        drop(w);
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        let mut w = Wire { e: &e, now: T0 + 12, code: None, calls: vec![], tick: false };
+        assert_eq!(ids(&coreq::enroll::pull(&host, "agentq.configure", &mut b, &mut w).unwrap()), [op_id(1), op_id(4), op_id(5)]);
+        assert_eq!(e.as_ref().unwrap().readback("github|1", &op_id(2), T0 + 12).unwrap().unwrap()["result"], result);
+    }
+
+    // chain: D16 A3, expiry, revocation and results commit in either order with the actual outcome: an undelivered
+    // operation never runs or blocks after expiry or revoke, a delivered one stays unresolved (across restart) until
+    // its result, and a committed result is never undone by a later revoke
+    #[test]
+    fn operation_expiry_revocation_and_restart_orderings() {
+        let (d, e) = setup("op-races");
+        let host = configurable(&e, "inst-r1", T0);
+        let cred = coreq::enroll::active(&host).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
+        let pull = |e: &Result<Enroll, String>, cred: &str, now| machine(e, "/operations", Some(cred), json!({"protocol": 1, "capability": "agentq.configure"}), now);
+        let post = |e: &Result<Enroll, String>, cred: &str, op: &Value, now| {
+            machine(e, "/operations/result", Some(cred), json!({"protocol": 1, "operation": op["operation"], "digest": op["digest"], "result": {"outcome": "applied"}}), now)
+        };
+        let state = |e: &Result<Enroll, String>, id: &str, now| e.as_ref().unwrap().readback("github|1", id, now).unwrap().unwrap()["state"].clone();
+        let x = e.as_ref().unwrap();
+        // expiry before delivery: never delivered, never blocks the next mutation
+        x.configure("github|1", "inst-r1", &op_id(1), Some(PLAN), &[ROUTING], T0).unwrap();
+        assert_eq!(pull(&e, &cred, T0 + 300), (200, json!({"protocol": 1, "operations": []})));
+        assert_eq!(state(&e, &op_id(1), T0 + 300), "expired");
+        let op2 = x.configure("github|1", "inst-r1", &op_id(2), Some(PLAN), &[ROUTING], T0 + 300).unwrap();
+        // delivery before expiry: unresolved past expiry, also after a restart, until its result arrives
+        assert_eq!(pull(&e, &cred, T0 + 301).1["operations"], json!([op2]));
+        assert_eq!(x.configure("github|1", "inst-r1", &op_id(3), Some(PLAN), &[ROUTING], T0 + 700), Err("busy"));
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        let x = e.as_ref().unwrap();
+        assert_eq!((state(&e, &op_id(2), T0 + 700), x.configure("github|1", "inst-r1", &op_id(3), Some(PLAN), &[ROUTING], T0 + 700)), (json!("delivered"), Err("busy")));
+        assert_eq!(post(&e, &cred, &op2, T0 + 701).1["state"], "accepted", "a late result of a delivered operation is its actual outcome");
+        let op3 = x.configure("github|1", "inst-r1", &op_id(3), Some(PLAN), &[ROUTING], T0 + 701).unwrap();
+        // result then revoke: the committed result stays; the revoked credential can neither pull nor post
+        assert_eq!(pull(&e, &cred, T0 + 702).1["operations"], json!([op3]));
+        assert_eq!(post(&e, &cred, &op3, T0 + 703).1["state"], "accepted");
+        assert_eq!(machine(&e, "/connection/revoke", Some(&cred), json!({"protocol": 1}), T0 + 704).0, 200);
+        assert_eq!(state(&e, &op_id(3), T0 + 705), "resulted");
+        assert_eq!(pull(&e, &cred, T0 + 705), (401, json!({"protocol": 1, "error": "revoked"})));
+        assert_eq!(post(&e, &cred, &op3, T0 + 705).0, 401);
+        assert_eq!(x.configure("github|1", "inst-r1", &op_id(4), None, &[ROUTING], T0 + 705), Err("no_grant"));
+        // revoke then result: the delivered operation reads unknown, the undelivered one revoked; neither is undone
+        let host2 = configurable(&e, "inst-r2", T0 + 800);
+        let cred2 = coreq::enroll::active(&host2).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
+        let op5 = x.configure("github|1", "inst-r2", &op_id(5), Some(PLAN), &[ROUTING], T0 + 800).unwrap();
+        assert_eq!(pull(&e, &cred2, T0 + 801).1["operations"], json!([op5]));
+        x.configure("github|1", "inst-r2", &op_id(6), None, &[ROUTING], T0 + 802).unwrap();
+        assert!(x.store.revoke("inst-r2", T0 + 803).unwrap());
+        assert_eq!(post(&e, &cred2, &op5, T0 + 804), (401, json!({"protocol": 1, "error": "revoked"})));
+        assert_eq!((state(&e, &op_id(5), T0 + 804), state(&e, &op_id(6), T0 + 804)), (json!("unknown"), json!("revoked")));
+        // reconnecting the installation: the unknown apply may still run on the host, so no new apply, also after restart
+        configurable(&e, "inst-r2", T0 + 805);
+        assert_eq!(x.configure("github|1", "inst-r2", &op_id(7), Some(PLAN), &[ROUTING], T0 + 806), Err("busy"));
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        let x = e.as_ref().unwrap();
+        assert_eq!(x.configure("github|1", "inst-r2", &op_id(7), Some(PLAN), &[ROUTING], T0 + 807), Err("busy"));
+        // an undelivered apply of a revoked generation never runs, so it does not block the reconnected installation
+        configurable(&e, "inst-r4", T0 + 810);
+        x.configure("github|1", "inst-r4", &op_id(8), Some(PLAN), &[ROUTING], T0 + 810).unwrap();
+        assert!(x.store.revoke("inst-r4", T0 + 811).unwrap());
+        configurable(&e, "inst-r4", T0 + 812);
+        assert!(x.configure("github|1", "inst-r4", &op_id(9), Some(PLAN), &[ROUTING], T0 + 813).is_ok());
+        // another installation's credential never reaches these operations
+        let host3 = configurable(&e, "inst-r3", T0 + 900);
+        let cred3 = coreq::enroll::active(&host3).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
+        assert_eq!(post(&e, &cred3, &op5, T0 + 901).1["reason"], "unknown_operation");
+        assert_eq!(pull(&e, &cred3, T0 + 901).1["operations"], json!([]));
+        assert_eq!(machine(&e, "/operations/result", Some(&cred3), json!({"protocol": 1, "operation": op_id(5), "digest": op5["digest"], "result": {"path": "/etc"}}), T0 + 902).0, 400);
+    }
 }
