@@ -1,0 +1,19 @@
+{
+  "status": "accepted design; synthetic only",
+  "contract": "AgentQ ACCOUNTING O1-O4; DashQ P1-P3",
+  "referenceSha256": "2c429507116ed2cc3ee0ac27889482d7bd4100972bb3114339390b3a52cb4390",
+  "style": "Accepted operator palette; AgentQ-specific outcomes, not TaskQ task states",
+  "qualification": [
+    "1024/16 light",
+    "360/20 dark",
+    "outcome detail",
+    "period/client filtering",
+    "partial, missing and empty",
+    "separate paired evidence"
+  ],
+  "limitations": [
+    "No live sources",
+    "Synthetic period scaling and bucket allocation",
+    "No production aggregation or causal proof"
+  ]
+}

@@ -70,3 +70,5 @@ ServerQ detail and task handoff follow [H1–H4](finding-tasks.md); Attention, f
 Connection detail uses [L1–L4](connections.md); source freshness and enrollment state remain distinct in the overview.
 
 AgentQ integration detail follows [G1–G4](agentq-settings.md); configuration, host readback and client verification stay distinct. TaskQ Work mode remains the separate task/admission owner.
+
+Supporting AgentQ activity view: [optimization results P1–P3](optimization-results.md); it does not displace first-screen resources, Attention or Boards.
