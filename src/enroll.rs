@@ -504,9 +504,11 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
     let mut index = Vec::new();
     for (i, r) in records.iter().enumerate() {
         match (r["schema"].as_str(), r["observed_at"].as_i64()) {
+            // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
+            (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
             (Some(schema), Some(observed)) if metadata(&r["payload"], 0) => {
-                // ponytail: every schema is a snapshot until export schemas and forwarding exist (C2)
-                events.push(Event { id: ids[i], schema, observed, kind: Kind::Snapshot, payload: &payloads[i] });
+                let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
+                events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
                 index.push(i);
             }
             (Some(_), Some(_)) => out[i] = Some("payload"),
@@ -1374,6 +1376,29 @@ mod tests {
     }
 
     #[test]
+    fn agentq_events_enter_the_outbox_beside_snapshots() {
+        let (_d, e) = setup("events");
+        let (s, v) = machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": "inst-1", "runtime": "native", "host_label": "mac-1", "schemas": ["agentq-snapshot/1", "agentq-event/1"]}), T0);
+        assert_eq!(s, 200, "{v}");
+        assert!(decide(&e, "github|1", v["user_code"].as_str().unwrap(), "approve", "ws-1", T0).1.contains("Approved"));
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": v["device_code"]}), T0).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), T0).0, 200);
+        let ev = |id: &str, p: Value| json!({"schema": "agentq-event/1", "event_id": id, "observed_at": T0, "payload": p});
+        let records = vec![
+            ev("r1", json!({"name": "agentq.run", "metadata": {"exit": 0}})),
+            ev("r2", json!({"name": "agentq.unknown", "metadata": {}})),
+            ev("r3", json!({"name": "agentq.run", "metadata": {"prompt": "hi"}})),
+            rec("s1", T0, json!({"version": "1.0.0"})),
+        ];
+        assert_eq!(states(&ingest(&e, &cred, records, T0).1), ["accepted", "rejected:payload", "rejected:payload", "accepted"]);
+        let store = &e.as_ref().unwrap().store;
+        assert_eq!(store.outbox(9).unwrap().iter().map(|r| r.event_id.as_str()).collect::<Vec<_>>(), ["r1"]);
+        // an export never becomes the snapshot or a history sample
+        assert_eq!(store.project(Scope::All).unwrap()[0].snapshot.as_ref().unwrap().event_id, "s1");
+        assert_eq!(store.history("inst-1").unwrap().len(), 1);
+    }
+
+    #[test]
     fn ingest_takes_ownership_from_the_grant_and_allowlists_payloads() {
         let (_d, e) = setup("ingest");
         let cred = connect(&e, "inst-1", "github|1", "ws-1", T0);
@@ -1470,8 +1495,8 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false };
-        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default() }
+        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false };
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
     }
 
     fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {

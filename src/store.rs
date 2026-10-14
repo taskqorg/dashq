@@ -276,6 +276,17 @@ pub struct Snapshot {
     pub payload: String,
 }
 
+/// One outbox row waiting for forwarding.
+#[derive(Debug, PartialEq)]
+pub struct Pending {
+    pub id: i64,
+    pub installation: String,
+    pub generation: i64,
+    pub event_id: String,
+    pub observed: i64,
+    pub payload: String,
+}
+
 pub struct Store {
     conn: Mutex<Connection>,
     waiting: AtomicUsize,
@@ -1000,6 +1011,40 @@ impl Store {
         Ok((rows, capped))
     }
 
+    /// The oldest outbox rows, at most `n`, in arrival order.
+    pub fn outbox(&self, n: usize) -> Result<Vec<Pending>, Error> {
+        let c = self.lock()?;
+        let mut q = c.prepare("SELECT id, installation, generation, event_id, observed, payload FROM outbox ORDER BY id LIMIT ?1")?;
+        let rows = q
+            .query_map([n as i64], |r| Ok(Pending { id: r.get(0)?, installation: r.get(1)?, generation: r.get(2)?, event_id: r.get(3)?, observed: r.get(4)?, payload: r.get(5)? }))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Removes forwarded rows; rows the destination refused for good are recorded as export gaps first (C5).
+    pub fn exported(&self, sent: &[i64], refused: &[i64], now: i64) -> Result<(), Error> {
+        self.write(|tx| {
+            for id in refused {
+                // a gap belongs to the workspace of the grant that sent the event, as in `prune`
+                tx.execute(
+                    "INSERT INTO export_gaps (installation, events, first_observed, last_observed, at, workspace)
+                     SELECT o.installation, 1, o.observed, o.observed, ?2, g.workspace FROM outbox o
+                     JOIN grants g ON g.installation = o.installation AND g.generation = o.generation WHERE o.id = ?1",
+                    params![id, now],
+                )?;
+            }
+            for id in sent.iter().chain(refused) {
+                tx.execute("DELETE FROM outbox WHERE id = ?1", [id])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// `(pending rows, export gap events)` for the export source.
+    pub fn export_counts(&self) -> Result<(i64, i64), Error> {
+        Ok(self.lock()?.query_row("SELECT (SELECT COUNT(*) FROM outbox), (SELECT COALESCE(SUM(events), 0) FROM export_gaps)", [], |r| Ok((r.get(0)?, r.get(1)?)))?)
+    }
+
     /// `(installation, events)` recorded as export gaps.
     pub fn export_gaps(&self) -> Result<Vec<(String, i64)>, Error> {
         let c = self.lock()?;
@@ -1027,6 +1072,7 @@ impl Store {
                 params![cut, now],
             )?;
             tx.execute("DELETE FROM outbox WHERE queued < ?1", [cut])?;
+            tx.execute("DELETE FROM export_gaps WHERE at < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
             // resolved operations (a result, or expired never delivered) keep the newest per installation; unresolved stay
@@ -1228,6 +1274,27 @@ mod tests {
         s.project(Scope::All).unwrap();
         assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert!(s.authorize(b"v1").unwrap().is_some());
+    }
+
+    #[test]
+    fn forwarded_rows_leave_the_outbox_refused_ones_become_gaps() {
+        let s = Store::open(&dir("forward").join("dashq.db"), LIMITS).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        s.accept(b"v1", &[export("x1", "1"), export("x2", "2"), export("x3", "3")], NOW).unwrap();
+        let p = s.outbox(2).unwrap();
+        assert_eq!(p.iter().map(|r| r.event_id.as_str()).collect::<Vec<_>>(), ["x1", "x2"]);
+        assert_eq!((p[0].installation.as_str(), p[0].generation, p[0].observed), ("inst-1", 1, NOW));
+        s.exported(&[p[0].id], &[p[1].id], NOW).unwrap();
+        assert_eq!(s.export_counts().unwrap(), (1, 1));
+        assert_eq!(s.outbox(9).unwrap()[0].event_id, "x3");
+        // a replay of a forwarded event is the same receipt, never a second export
+        assert_eq!(s.accept(b"v1", &[export("x1", "1")], NOW).unwrap(), [Outcome::Accepted]);
+        assert_eq!(s.export_counts().unwrap(), (1, 1));
+        // gaps leave with the history window
+        s.prune(NOW + 7 * 86400 + 1).unwrap();
+        assert_eq!(s.export_counts().unwrap(), (0, 1));
+        s.prune(NOW + 14 * 86400 + 2).unwrap();
+        assert_eq!(s.export_counts().unwrap(), (0, 0));
     }
 
     #[test]

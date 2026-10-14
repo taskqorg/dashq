@@ -64,11 +64,22 @@ pub struct Resp {
 
 /// GET with a 10 s timeout. URL and headers go to curl on stdin: no secret in the process list.
 pub fn get(url: &str, headers: &[String]) -> Result<Resp, Fail> {
-    let mut cfg = format!("url = \"{}\"\nuser-agent = \"dashq\"\n", url.replace('\\', "\\\\").replace('"', "\\\""));
+    send(url, headers, None)
+}
+
+/// GET, or POST of a JSON `body` when given. HTTPS only.
+pub fn send(url: &str, headers: &[String], body: Option<&str>) -> Result<Resp, Fail> {
+    let q = |x: &str| format!("\"{}\"", x.replace('\\', "\\\\").replace('"', "\\\""));
+    let mut cfg = format!("url = {}\nuser-agent = \"dashq\"\n", q(url));
     for h in headers {
-        cfg += &format!("header = \"{}\"\n", h.replace('\\', "\\\\").replace('"', "\\\""));
+        cfg += &format!("header = {}\n", q(h));
     }
-    let mut child = coreq::quiet(Command::new("curl").args(["-sS", "-i", "--max-time", "10", "--proto", "=https", "-K", "-"]))
+    if let Some(b) = body {
+        cfg += &format!("data-binary = {}\n", q(b));
+    }
+    // plain HTTP only for in-process test receivers; production config accepts only https:// bases
+    let proto = if cfg!(test) && url.starts_with("http://127.0.0.1:") { "=http" } else { "=https" };
+    let mut child = coreq::quiet(Command::new("curl").args(["-sS", "-i", "--max-time", "10", "--proto", proto, "-K", "-"]))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
