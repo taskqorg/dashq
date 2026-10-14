@@ -71,6 +71,24 @@ The live `/data` document was rendered through the production `page::render`, `a
 
 Whole-task effect reads `not measured`: no paired experiment exists, and five calls prove only these runs.
 
+## Accounting P3 recheck (#104)
+
+Task #104 rechecks [AgentQ accounting qualification](https://github.com/taskqorg/agentq/blob/main/docs/spec/VERIFICATION.md#accounting-qualification) (ACCOUNTING O4) for the #67 view with a later read-only pair. The PM ran both reads on 2026-10-14 about 14:19Z and attached them in [issue #104](https://github.com/taskqorg/dashq/issues/104); no source, setting or deployment changed.
+
+- Producer: `agentq stats --json` on the same Mac, AgentQ `0.5.9`, schema 1.
+- Guarded consumer: `dashq report --period=7200` on the FRA host as the service user, dashq `0.8.0`; Langfuse, GitHub and serverq sources ok. Window `[2026-10-14T12:19:07Z, 14:19:07Z)` = `[1791980347, 1791987547)` contains 13:45–13:46Z.
+
+| Check | Local stats | Guarded report |
+|---|---|---|
+| Calls | 4 (`none`) + 1 (`rtk`) = 5 | 5 |
+| Outcomes | compressed 1, passed 4, failed 0 | same |
+| Reasons | not in `stats --json` | not_qualified 3, short 1, compressed 1 (as A2) |
+| Volume rtk | 1 compressed, 4747 → 131 B | run · rtk, 1 paired, 4747 → 131 B, reduction 0.9724 |
+| State | not in `stats --json` | partial, lower bound |
+| Event IDs | none in `stats --json` | the five IDs of A1 |
+
+Verdict: pass for this window. Every compared total is equal, and the evidence IDs are the five events of A1, so no later event entered the window. Late delivery, duplicates and an unavailable source keep their A2 proof; this pair adds no new case for them. The producer reports agent `unknown` for all five calls.
+
 ## Gaps
 
 - The guarded comparison uses the owner's loopback read of the deployed service, not a read through Cloudflare Access; workers have no Access grant. The guarded screenshots render that excerpt with the deployed release's code; they are not captures of the deployed page.
