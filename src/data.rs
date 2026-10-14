@@ -626,7 +626,7 @@ pub fn build(inp: &Value) -> Value {
         let list = |labels: &[&str]| with(labels).map_or(json!([]), |v| v.iter().map(|i| json!({"number": i["number"], "title": i["title"], "url": i["url"]})).collect());
         let mut attempts = Vec::new();
         let date = v["date"].as_u64();
-        for hb in v["hosts"].as_array().into_iter().flatten() {
+        for (index, hb) in v["hosts"].as_array().into_iter().flatten().enumerate() {
             let Some(name) = hb["title"].as_str().and_then(|t| t.strip_prefix("taskq host ")).filter(|n| safe(n, 64, b"_.-")) else { continue };
             let body = hb["body"].as_str().unwrap_or("");
             let ttl = body.lines().find_map(|l| l.strip_prefix("ttl ")?.trim().parse().ok()).unwrap_or(HEARTBEAT_TTL);
@@ -637,14 +637,15 @@ pub fn build(inp: &Value) -> Value {
                     attempts.push(json!({"host": name, "task": n, "attempt": id.trim()}));
                 }
             }
-            // age = response Date minus updated_at: board clock only, never the local one
-            let age = date.zip(hb["updated_at"].as_str().and_then(iso_secs)).map(|(d, u)| d.saturating_sub(u));
+            // Board age at collection plus elapsed cache time; never compare the two clocks.
+            let at = hb["updated_at"].as_str().and_then(iso_secs);
+            let age = date.zip(at).zip(snap["at"].as_u64()).map(|((d, u), read_at)| d.saturating_sub(u).saturating_add(now.saturating_sub(read_at)));
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
             // taskq's own installation id (taskq.md § 4 `service`), never the host name; older heartbeats have none
             let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
-            let key = service.map_or(format!("host:{name}"), String::from);
+            let key = format!("{repo}:{}", service.map_or_else(|| format!("unidentified:{index}"), String::from));
             if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| age.is_some_and(|x| x < a))) {
-                heartbeats.insert(key, json!({"service": service, "host": name, "age_s": age, "ttl": ttl, "version": version}));
+                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": name, "at": at, "age_s": age, "ttl": ttl, "version": version, "source": src}));
             }
             let h = hosts.entry(name.into()).or_insert_with(|| host_row(name));
             if h["taskq"]["age_s"].as_u64().is_some_and(|a| age.is_none_or(|x| x >= a)) {

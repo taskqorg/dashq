@@ -58,6 +58,15 @@ fn gap(field: &str, provenance: &str) -> Value {
     json!({"state": "unknown", "reason": format!("{field} not reported by {provenance}")})
 }
 
+// Keep producer time/age while carrying failed or incomplete collection evidence (D6).
+fn observed(mut obs: Value, collection: &Value) -> Value {
+    if collection["state"] != "ok" {
+        obs["state"] = collection["state"].clone();
+        obs["reason"] = collection["reason"].clone();
+    }
+    obs
+}
+
 /// One row from the producer's own fields; `obs` is the host observation (producer time), separate from release time.
 #[allow(clippy::too_many_arguments)]
 fn row(
@@ -130,9 +139,10 @@ fn row(
 }
 
 /// Rows from enrolled snapshots, then Langfuse installations not enrolled, legacy updaters and taskq heartbeats.
-/// `legacy`: `{device, host, at, monitor, installed, available}`; `heartbeats`: `{service, host, age_s, ttl, version}`.
+/// `legacy`: `{device, host, at, monitor, installed, available}`; `heartbeats`: `{service, workspace, host, at, age_s, ttl, version, source}`.
 pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value]) -> Value {
     let now = inp["now"].as_u64().unwrap_or(0);
+    let lf = source(&inp["langfuse"], now, 600, None);
     let mut rows = Vec::new();
     let mut enrolled = Vec::new();
     for r in inp["installations"]["rows"]
@@ -199,7 +209,7 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             f["installation"].clone(),
             Value::Null,
             f["host"].clone(),
-            obs,
+            observed(obs, &lf),
             f["version"].clone(),
             Value::Null,
             json!({}),
@@ -215,7 +225,7 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             json!(format!("device:{}", l["device"].as_str().unwrap_or(""))),
             Value::Null,
             l["host"].clone(),
-            obs,
+            observed(obs, &lf),
             l["monitor"].clone(),
             l["installed"].clone(),
             extra,
@@ -234,14 +244,14 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             Some(a) if a > ttl => Some(format!("heartbeat {} old (ttl {})", dur(a), dur(ttl))),
             _ => None,
         };
-        let obs = json!({"state": state, "at": age.map(|a| now.saturating_sub(a)), "age_s": age, "reason": reason});
+        let obs = json!({"state": state, "at": h["at"], "age_s": age, "reason": reason});
         let mut x = row(
             "taskq",
             "taskq-heartbeat",
             h["service"].clone(),
-            Value::Null,
+            h["workspace"].clone(),
             h["host"].clone(),
-            obs,
+            observed(obs, &h["source"]),
             h["version"].clone(),
             Value::Null,
             json!({}),
@@ -282,6 +292,86 @@ mod tests {
                 json!({"value": null, "at": null, "error": "timeout", "incomplete": false});
         }
         crate::data::build(&inp)["versions"].clone()
+    }
+
+    /// Chain: cached source outage to version evidence; unrelated sources retain their state (A1/A5).
+    #[test]
+    fn cached_outages_preserve_last_known_versions() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        inp["langfuse"]["incomplete"] = json!(false);
+        let before = crate::data::build(&inp)["versions"].clone();
+        inp["langfuse"]["error"] = json!("timeout");
+        let failed = crate::data::build(&inp)["versions"].clone();
+        for (row, old) in failed["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(before["rows"].as_array().unwrap())
+        {
+            if row["product"] == "agentq" {
+                assert_eq!(row["observation"]["state"], "unconfirmed");
+                assert_eq!(row["observation"]["at"], old["observation"]["at"]);
+                assert_eq!(row["update"]["state"], "unknown");
+                for field in ["running", "selected"] {
+                    if !row[field]["version"].is_null() {
+                        assert_eq!(row[field]["last_known"], true);
+                    }
+                }
+            } else {
+                assert_eq!(row, old);
+            }
+        }
+        inp["boards"]["taskqorg/taskq"]["error"] = json!("timeout");
+        let failed = crate::data::build(&inp);
+        for row in failed["versions"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["product"] == "taskq")
+        {
+            assert_eq!(row["observation"]["state"], "unconfirmed");
+            assert_eq!(row["running"]["last_known"], true);
+            assert_eq!(row["update"]["state"], "unknown");
+        }
+    }
+
+    /// Chain: cached board heartbeat retains producer time, ages, and remains separate by project (V1).
+    #[test]
+    fn cached_heartbeat_time_and_project_identity() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        inp["boards"]["taskqorg/taskq"]["value"]["hosts"][0]["body"] =
+            json!("version 4.1.2\nservice abcdef123456");
+        inp["boards"]["taskqorg/agentq"] = inp["boards"]["taskqorg/taskq"].clone();
+        let before = crate::data::build(&inp);
+        let rows: Vec<_> = before["versions"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["installation"] == "abcdef123456")
+            .collect();
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0]["workspace"], rows[1]["workspace"]);
+        assert_eq!(rows[0]["observation"]["at"], json!(1791875040));
+        inp["now"] = json!(inp["now"].as_u64().unwrap() + 400);
+        let after = crate::data::build(&inp);
+        for old in rows {
+            let row = after["versions"]["rows"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| {
+                    r["installation"] == old["installation"] && r["workspace"] == old["workspace"]
+                })
+                .unwrap();
+            assert_eq!(row["observation"]["at"], old["observation"]["at"]);
+            assert_eq!(
+                row["observation"]["age_s"].as_u64().unwrap(),
+                old["observation"]["age_s"].as_u64().unwrap() + 400
+            );
+            assert_eq!(row["observation"]["state"], "stale");
+            assert_eq!(row["running"]["last_known"], true);
+            assert_eq!(row["update"]["state"], "unknown");
+        }
     }
 
     /// Chain: producer snapshot, heartbeat and release reads to `/data` `versions` rows (V1–V3, A1–A5): every
