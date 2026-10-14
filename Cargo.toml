@@ -8,4 +8,5 @@ publish = false
 coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.7.0" }
 ring = "0.17"
 rusqlite = { version = "0.40", features = ["bundled"] }
+serde = "1"
 serde_json = { version = "1", features = ["preserve_order"] }

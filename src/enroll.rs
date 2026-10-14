@@ -1027,7 +1027,8 @@ mod tests {
         // client copies of the trusted headers are stripped before anything else
         assert!(head.contains("request_header -X-Dashq-Subject") && head.contains("request_header -X-Dashq-Client"));
         let paths: Vec<&str> = head.lines().filter_map(|l| l.trim().strip_prefix("path ")).flat_map(str::split_whitespace).collect();
-        assert_eq!(paths, MACHINE);
+        // plus the resource exchange (D14), authorized by the same device credential
+        assert_eq!(paths, [&MACHINE[..], &["/api/taskq/resources/v1/exchange"]].concat());
         assert!(head.contains("method POST") && !head.contains("/data") && !head.contains('*'));
         assert!(guarded.contains("copy_headers") && guarded.contains(">X-Dashq-Subject") && guarded.contains("reverse_proxy 127.0.0.1:18882"));
     }
@@ -1244,8 +1245,8 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None };
-        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default() }
+        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false };
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default() }
     }
 
     fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {

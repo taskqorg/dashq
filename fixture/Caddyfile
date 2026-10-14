@@ -6,7 +6,7 @@ dash.example.com {
 	request_header -X-Dashq-Client
 	@machine {
 		method POST
-		path /connect/device /connect/token /connect/ack /ingest /connection/receipt /connection/revoke
+		path /connect/device /connect/token /connect/ack /ingest /connection/receipt /connection/revoke /api/taskq/resources/v1/exchange
 	}
 	route {
 		handle @machine {
