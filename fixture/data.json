@@ -833,6 +833,7 @@
         "host": "fra/native",
         "runtime": "linux",
         "version": "0.5.0",
+        "version_at": 1791874560,
         "last_seen": 1791874560,
         "heartbeat_at": 1791873000,
         "runs": 2,
@@ -851,6 +852,7 @@
         "host": "win-1/native",
         "runtime": "windows",
         "version": "0.4.0",
+        "version_at": 1791874800,
         "last_seen": 1791874800,
         "heartbeat_at": null,
         "runs": 0,
@@ -1055,9 +1057,10 @@
         "host": "fra/native",
         "observation": {
           "state": "incomplete",
-          "at": 1791873000,
-          "age_s": 2139,
-          "reason": "capped query"
+          "at": 1791874560,
+          "age_s": 579,
+          "reason": "capped query",
+          "incomplete": false
         },
         "running": {
           "version": "0.5.0",
@@ -1116,9 +1119,10 @@
         "host": "win-1/native",
         "observation": {
           "state": "incomplete",
-          "at": null,
-          "age_s": null,
-          "reason": "capped query"
+          "at": 1791874800,
+          "age_s": 339,
+          "reason": "capped query",
+          "incomplete": false
         },
         "running": {
           "version": "0.4.0",

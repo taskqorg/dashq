@@ -22,6 +22,14 @@
        "observation": {"state": "stale", "at": 1791860000, "age_s": 15139, "reason": "data is 4h old (limit 3m)", "incomplete": false},
        "snapshot": {"event_id": "snap-old", "schema": "agentq-snapshot/1", "payload": {"schema": 1, "installation": "inst-old", "runtime": "wsl", "version": "0.4.10", "status_at": 1791860000,
          "service": {"state": "running"}, "update": {"available": null, "error": false}, "engines": {}, "queue": {}}}},
+      {"installation": "inst-relay", "product": "agentq", "runtime": "linux", "host_label": "ams", "workspace": "ws-1", "generation": 1, "connection": "active",
+       "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
+       "snapshot": {"event_id": "snap-relay", "schema": "agentq-snapshot/1", "payload": {"schema": 1, "installation": "inst-relay", "runtime": "linux", "version": "0.4.16", "status_at": 1791860000,
+         "service": {"state": "running"}, "update": {"available": null, "error": false}, "engines": {}, "queue": {}}}},
+      {"installation": "inst-stop", "product": "agentq", "runtime": "linux", "host_label": "ams", "workspace": "ws-2", "generation": 1, "connection": "active",
+       "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
+       "snapshot": {"event_id": "snap-stop", "schema": "agentq-snapshot/1", "payload": {"schema": 1, "installation": "inst-stop", "runtime": "linux", "version": "0.4.16", "status_at": 1791875100,
+         "service": {"state": "stopped"}, "update": {"available": null, "error": false}, "engines": {}, "queue": {}}}},
       {"installation": "inst-s1", "product": "serverq", "runtime": "native", "host_label": "fra", "workspace": "ws-1", "generation": 1, "connection": "active",
        "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
        "snapshot": {"event_id": "snap-s1", "schema": "serverq-report/1", "payload": {"findings": 0, "version": "1.0.0"}}}
@@ -33,6 +41,8 @@
     "checksum rejection": {"installation": "inst-sum", "expect": {"/running/version": "0.4.16", "/update/state": "error", "/selected/version": null, "/lifecycle/state": "unknown"}},
     "confirmed rollback": {"installation": "inst-back", "expect": {"/running/version": "0.4.16", "/update/state": "available", "/health/state": "unknown", "/lifecycle/reason": "lifecycle stage not reported by enrollment"}},
     "stale": {"installation": "inst-old", "expect": {"/running/version": "0.4.10", "/running/last_known": true, "/update/state": "unknown", "/update/reason": "observation not current", "/health/reason": "observation stale: data is 4h old (limit 3m)", "/connection": "revoked"}},
+    "stale status in fresh snapshot": {"installation": "inst-relay", "expect": {"/observation/state": "stale", "/observation/at": 1791860000, "/running/last_known": true, "/update/state": "unknown", "/update/reason": "observation not current"}},
+    "service not running": {"installation": "inst-stop", "expect": {"/observation/state": "unknown", "/observation/reason": "service stopped", "/running/version": "0.4.16", "/running/last_known": true, "/update/state": "unknown"}},
     "unsupported": {"installation": "inst-s1", "expect": {"/product": "serverq", "/provenance": "unsupported", "/running/version": null, "/reason": "unsupported snapshot schema serverq-report/1", "/release/reason": "release source not configured"}},
     "mixed-version": {"installation": null, "expect": {"/mixed/0/product": "agentq", "/mixed/0/running": ["0.4.0", "0.4.10", "0.4.16", "0.5.0"], "/mixed/1/product": "taskq", "/mixed/1/running": ["4.1.2", "4.2.0"]}}
   }

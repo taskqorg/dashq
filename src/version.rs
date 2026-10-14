@@ -151,13 +151,38 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
         .flatten()
     {
         let p = &r["snapshot"]["payload"];
-        let obs = r["observation"].clone();
+        let mut obs = r["observation"].clone();
         let product = r["product"].as_str().unwrap_or("unknown");
         // no snapshot yet (startup) reads like a snapshot that reports nothing; another schema is unsupported
         let ok = product == "agentq"
             && (r["snapshot"].is_null()
                 || (r["snapshot"]["schema"] == "agentq-snapshot/1" && p["schema"] == 1));
         let prov = if ok { "enrollment" } else { "unsupported" };
+        // a fresh snapshot may carry an old status: status_at dates the versions, and a service that is not
+        // running leaves its version last known (V2)
+        if ok && !r["snapshot"].is_null() && obs["state"] == "ok" {
+            obs = match p["status_at"].as_u64() {
+                Some(t) => source(
+                    &json!({"value": true, "at": t.min(obs["at"].as_u64().unwrap_or(t))}),
+                    now,
+                    crate::enroll::STALE_SECS,
+                    None,
+                ),
+                None => {
+                    json!({"state": "unknown", "at": obs["at"], "age_s": obs["age_s"], "reason": "status time not reported"})
+                }
+            };
+            let service = p["service"]["state"].as_str();
+            if obs["state"] == "ok" && service != Some("running") {
+                obs["state"] = json!("unknown");
+                obs["reason"] = json!(format!(
+                    "service {}",
+                    service
+                        .filter(|s| crate::data::safe_id(s))
+                        .unwrap_or("state not reported")
+                ));
+            }
+        }
         enrolled.push(r["installation"].clone());
         let engines = p["engines"].as_object().map(|e| {
             e.iter()
@@ -202,7 +227,18 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
         .iter()
         .filter(|f| !enrolled.contains(&f["installation"]))
     {
-        let obs = json!({"state": f["state"], "at": f["heartbeat_at"], "age_s": f["heartbeat_at"].as_u64().map(|h| now.saturating_sub(h)), "reason": f["reason"]});
+        // the event that reported the version dates it, not a later heartbeat without one
+        let obs = match f["version_at"].as_u64() {
+            Some(at) => source(
+                &json!({"value": true, "at": at}),
+                now,
+                crate::data::AQ_HEARTBEAT_LIMIT,
+                None,
+            ),
+            None => {
+                json!({"state": "unknown", "at": null, "age_s": null, "reason": "no version event"})
+            }
+        };
         rows.push(row(
             "agentq",
             "langfuse",
@@ -261,6 +297,10 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             x["reason"] = json!("older heartbeat: no service id");
         }
         rows.push(x);
+    }
+    // the host filter scopes every row before the mixed-version summary (D7)
+    if let Some(h) = inp["filters"]["host"].as_str() {
+        rows.retain(|r| r["host"] == h);
     }
     // mixed versions: a product whose rows run different known versions (V1); each row keeps its own values
     let mut mixed = Vec::new();
@@ -372,6 +412,32 @@ mod tests {
             assert_eq!(row["running"]["last_known"], true);
             assert_eq!(row["update"]["state"], "unknown");
         }
+    }
+
+    /// Chain: Langfuse version events date their versions, and the host filter scopes rows and mixed (V1, D7).
+    #[test]
+    fn langfuse_version_time_and_host_filter() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        let doc = crate::data::build(&inp);
+        let fleet = doc["agents"]["fleet"].as_array().unwrap();
+        for r in doc["versions"]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["provenance"] == "langfuse")
+        {
+            let f = fleet
+                .iter()
+                .find(|f| f["installation"] == r["installation"])
+                .unwrap();
+            assert_eq!(r["observation"]["at"], f["version_at"]);
+        }
+        assert!(fleet.iter().any(|f| f["version_at"] != f["heartbeat_at"]));
+        inp["filters"] = json!({"host": "fra/native"});
+        let v = crate::data::build(&inp)["versions"].clone();
+        let rows = v["rows"].as_array().unwrap();
+        assert!(!rows.is_empty() && rows.iter().all(|r| r["host"] == "fra/native"));
+        assert_eq!(v["mixed"], json!([]));
     }
 
     /// Chain: producer snapshot, heartbeat and release reads to `/data` `versions` rows (V1–V3, A1–A5): every

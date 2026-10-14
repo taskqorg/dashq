@@ -15,7 +15,7 @@ const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
 const SERVERQ_LIMIT: u64 = 7200;
-const AQ_HEARTBEAT_LIMIT: u64 = 7200;
+pub const AQ_HEARTBEAT_LIMIT: u64 = 7200;
 const SERVICES: [&str; 7] = ["contextq", "serverq", "taskq", "gateway", "hermes-gateway", "langfuse", "updater"];
 const USAGE: [&str; 8] = ["input", "output", "total", "input_cached_tokens", "cache_read_input_tokens", "input_cache_creation_1h", "input_cache_creation_5m", "output_reasoning_tokens"];
 const NATIVE_FAILURE: [&str; 27] = [
@@ -553,7 +553,7 @@ pub fn build(inp: &Value) -> Value {
             }
             hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
             let x = fleet.entry(inst.clone()).or_insert_with(|| {
-                json!({"installation": inst, "host": host, "runtime": null, "version": null, "last_seen": 0, "heartbeat_at": null,
+                json!({"installation": inst, "host": host, "runtime": null, "version": null, "version_at": null, "last_seen": 0, "heartbeat_at": null,
                        "runs": if scoped { json!(0) } else { Value::Null }, "nonzero_exits": if scoped { json!(0) } else { Value::Null }, "exit_samples": 0,
                        "retrievals": if scoped { json!(0) } else { Value::Null }, "failed_retrievals": if scoped { json!(0) } else { Value::Null }, "trace_id": null})
             });
@@ -563,6 +563,7 @@ pub fn build(inp: &Value) -> Value {
                 x["host"] = json!(host);
                 x["runtime"] = aq(r, "agentq.runtime").as_str().filter(|s| safe(s, 16, b"")).map_or(Value::Null, |s| json!(s));
                 x["version"] = semver(aq(r, "agentq.version"));
+                x["version_at"] = if x["version"].is_null() { Value::Null } else { json!(at) };
                 x["trace_id"] = trace(r);
             }
             match key {
