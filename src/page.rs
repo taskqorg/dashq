@@ -628,7 +628,8 @@ fn servers(w: &mut String, res: &Value, now: u64) {
 fn boards(w: &mut String, boards: &[Value]) {
     let names = ["Doing", "Review", "Ask", "Failed", "Ready", "Blocked", "Later", "Closed"];
     let keys: Vec<&str> = crate::data::COUNTS.iter().copied().chain(["closed"]).collect();
-    let strip = |label: &str, counts: &[Option<u64>]| -> String {
+    // each counter carries an `id` and `data-n` so a refresh tints a changed count (overview.md)
+    let strip = |id: &str, label: &str, counts: &[Option<u64>]| -> String {
         let caps: String = counts
             .iter()
             .zip(names)
@@ -637,7 +638,7 @@ fn boards(w: &mut String, boards: &[Value]) {
             .map(|((n, name), k)| {
                 let v = n.map_or("?".into(), |n| n.to_string());
                 let what = if n.is_some() { v.clone() } else { "unknown".into() };
-                format!("<span class=\"c {k}\" title=\"{name}: {what}\" aria-label=\"{name}: {what}\">{name} {v}</span>")
+                format!("<span class=\"c {k}\" id=\"{id}-{k}\" data-n=\"{v}\" title=\"{name}: {what}\" aria-label=\"{name}: {what}\">{name} {v}</span>")
             })
             .collect();
         format!("<span class=\"counts\" aria-label=\"{} counters\">{caps}</span>", esc(label))
@@ -663,7 +664,7 @@ fn boards(w: &mut String, boards: &[Value]) {
     let _ = writeln!(
         w,
         "<div class=\"proj all\"><div class=\"ph\"><b>All boards</b>{}</div>{}</div>",
-        strip("All boards", &agg),
+        strip("boards-all", "All boards", &agg),
         if partial.is_empty() { String::new() } else { format!("<p class=\"detail\">Partial: no counts from {}.</p>", partial.join(", ")) }
     );
     // one representative question open by default, preferably one awaiting an answer; a refresh keeps the reader's own choice
@@ -682,7 +683,7 @@ fn boards(w: &mut String, boards: &[Value]) {
             w,
             "<div class=\"proj\" id=\"{id}\"><div class=\"ph\"><a href=\"{url}\">{}</a> <a class=\"board\" href=\"{url}\" aria-label=\"{0} Board on GitHub\" title=\"Board\">{GITHUB}</a> {fresh}{}</div>",
             esc(project),
-            strip(project, &counts)
+            strip(&id, project, &counts)
         );
         let qs = b["questions"].as_array().map_or(&[][..], Vec::as_slice);
         for q in qs {
@@ -900,7 +901,10 @@ mod tests {
         // counters: TaskQ order, zero hidden, unknown `?`, Closed unknown and quiet
         let board = |p: &str| first.split("<div class=\"proj").find(|b| b.contains(&format!("aria-label=\"{p} counters\""))).unwrap().to_string();
         let coreq = board("taskqorg/coreq");
-        assert!(coreq.contains(">Doing 1</span><span class=\"c waiting\" title=\"Blocked: 3\" aria-label=\"Blocked: 3\">Blocked 3</span><span class=\"c closed\" title=\"Closed: unknown\""), "{coreq}");
+        assert!(coreq.contains(">Doing 1</span><span class=\"c waiting\" id=\"board-taskqorg-coreq-waiting\" data-n=\"3\" title=\"Blocked: 3\" aria-label=\"Blocked: 3\">Blocked 3</span><span class=\"c closed\" id=\"board-taskqorg-coreq-closed\" data-n=\"?\" title=\"Closed: unknown\""), "{coreq}");
+        // every counter has a unique id and data-n, so a refresh can tint a changed count
+        let ids: Vec<&str> = first.split("<span class=\"c ").skip(1).map(|c| c.split("id=\"").nth(1).unwrap().split('"').next().unwrap()).collect();
+        assert!(ids.contains(&"boards-all-doing") && ids.len() == ids.iter().collect::<std::collections::HashSet<_>>().len(), "{ids:?}");
         assert!(!board("taskqorg/specq").contains("class=\"c doing\""));
         assert!(board("taskqorg/serverq").contains(">Doing ?</span>") && board("taskqorg/serverq").contains("read failed (timeout)"));
         assert!(board("All boards").contains("Partial: no counts from taskqorg/agentq, taskqorg/dashq, taskqorg/serverq."), "{}", board("All boards"));
