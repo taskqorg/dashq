@@ -188,7 +188,7 @@ pub struct Pairing {
     pub replaces: bool,
 }
 
-/// `/connect/token` answer (RFC 8628 § 3.5).
+/// `/machine/connect/token` answer (RFC 8628 § 3.5).
 #[derive(Debug, PartialEq)]
 pub enum Poll {
     Pending,
@@ -522,7 +522,7 @@ impl Store {
         self.write(|tx| Ok(tx.execute("UPDATE answers SET state = ?2, receipt = ?3, at = ?4 WHERE op_id = ?1", params![op_id, state, receipt, now]).map(|_| ())?))
     }
 
-    /// Queues one operation (D16, coreq `/operations`) for its installation and generation under the server's own
+    /// Queues one operation (D16, coreq `/machine/operations`) for its installation and generation under the server's own
     /// authority: `subject` is the verified account, `op.authority.actor` must be its actor ID, `op.authority.workspace`
     /// the live grant's, and the subject that workspace's administrator or the grant's approving member. The payload
     /// is never read for authority. One unresolved apply per installation; full storage refuses.
@@ -614,7 +614,7 @@ impl Store {
             .optional()?)
     }
 
-    /// `/operations`: pending operations of `capability` for the credential's own installation and generation (no
+    /// `/machine/operations`: pending operations of `capability` for the credential's own installation and generation (no
     /// result, not expired), at most 16, marked delivered in the same commit. `None`: capability outside the grant.
     pub fn pull(&self, verifier: &[u8], capability: &str, now: i64) -> Result<Option<Vec<serde_json::Value>>, Error> {
         self.write(|tx| {
@@ -635,7 +635,7 @@ impl Store {
         })
     }
 
-    /// `/operations/result`: stores the first result of the credential's own operation and binds its digest. `None`
+    /// `/machine/operations/result`: stores the first result of the credential's own operation and binds its digest. `None`
     /// is `accepted` (committed before the reply; the same result again repeats it), else the rejection reason. A
     /// result uses the control reserve, so a full store still resolves operations.
     pub fn post_result(&self, verifier: &[u8], operation: &str, digest: &str, result: &str, now: i64) -> Result<Option<&'static str>, Error> {
@@ -770,7 +770,7 @@ impl Store {
         })
     }
 
-    /// `/connect/token`: RFC 8628 polling with slow-down; the approved token response repeats until ack or expiry.
+    /// `/machine/connect/token`: RFC 8628 polling with slow-down; the approved token response repeats until ack or expiry.
     pub fn poll(&self, device: &[u8], now: i64) -> Result<Poll, Error> {
         self.write(|tx| {
             expire(tx, now)?;
@@ -808,7 +808,7 @@ impl Store {
         credential(&*self.lock()?, verifier)
     }
 
-    /// `/connect/ack`: activates the generation and erases its sealed token response. Repeats are the same.
+    /// `/machine/connect/ack`: activates the generation and erases its sealed token response. Repeats are the same.
     pub fn ack(&self, verifier: &[u8], now: i64) -> Result<Option<Credential>, Error> {
         self.write(|tx| {
             let Some(c) = credential(tx, verifier)? else { return Ok(None) };
@@ -822,7 +822,7 @@ impl Store {
         })
     }
 
-    /// `/connection/revoke`: revokes this credential's generation only, never a newer one.
+    /// `/machine/connection/revoke`: revokes this credential's generation only, never a newer one.
     pub fn revoke_credential(&self, verifier: &[u8], now: i64) -> Result<Option<Credential>, Error> {
         self.write(|tx| {
             let Some(c) = credential(tx, verifier)? else { return Ok(None) };

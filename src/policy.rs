@@ -13,6 +13,8 @@ use std::sync::Mutex;
 
 pub const SCHEMA: &str = "taskq.resources/1";
 const PREFIX: &str = "/api/taskq/resources/v1/";
+/// The device-credential route lives under the machine prefix with the enrollment routes (#110).
+pub const EXCHANGE: &str = "/machine/resources/v1/exchange";
 /// v1 bounds (TaskQ shared-resource-controls.md § Bounds and receipts).
 const MAX_BODY: usize = 16 << 10;
 const PENDING_INSTALLATION: i64 = 32;
@@ -68,12 +70,14 @@ fn store_error(e: store::Error) -> Resp {
 }
 
 pub fn route(c: &Ctx, r: &Req, now: i64) -> Option<Resp> {
+    if r.path == EXCHANGE {
+        return Some(if r.method == "POST" { exchange(c, r, now) } else { reply("404 Not Found", json!({"schema": SCHEMA, "reason": "invalid"})) });
+    }
     let rest = r.path.strip_prefix(PREFIX)?;
     let op = rest.strip_prefix("operations/");
     let x = match (r.method, rest, op.map(|o| o.split_once('/'))) {
         ("GET", "grants", _) => grants(c, r, now),
         ("POST", "operations", _) => submit(c, r, now),
-        ("POST", "exchange", _) => exchange(c, r, now),
         ("GET", _, Some(None)) => lookup(c, r, op.unwrap_or(""), now),
         ("POST", _, Some(Some((id, "cancel")))) => cancel(c, r, id, now),
         _ => return Some(reply("404 Not Found", json!({"schema": SCHEMA, "reason": "invalid"}))),
@@ -736,7 +740,7 @@ mod tests {
 
         fn exchange(&self, receipts: Value, now: i64) -> (u16, Value) {
             let b = json!({"schema": SCHEMA, "installation_id": INST, "generation": 1, "receipts": receipts});
-            self.call("POST", "/api/taskq/resources/v1/exchange", &[("authorization", &format!("Bearer {CRED}"))], &b.to_string(), now)
+            self.call("POST", EXCHANGE, &[("authorization", &format!("Bearer {CRED}"))], &b.to_string(), now)
         }
 
         fn stored(&self, id: &str) -> Value {
@@ -934,14 +938,16 @@ mod tests {
         let (_, x) = t.exchange(json!([]), 100);
         assert_eq!(x["operations"].as_array().unwrap().len(), EXCHANGE_ITEMS);
         let b = json!({"schema": SCHEMA, "installation_id": INST, "generation": 2, "receipts": []});
-        assert_eq!(t.call("POST", &format!("{PREFIX}exchange"), &[("authorization", &format!("Bearer {CRED}"))], &b.to_string(), 100).1["reason"], "scope");
+        assert_eq!(t.call("POST", EXCHANGE, &[("authorization", &format!("Bearer {CRED}"))], &b.to_string(), 100).1["reason"], "scope");
         let state = State::default();
         let c = Ctx { enroll: &t.e, enabled: true, public_host: HOST, state: &state };
         let h = vec![("authorization".to_string(), format!("Bearer {CRED}"))];
         let body = json!({"schema": SCHEMA, "installation_id": INST, "generation": 1, "receipts": []}).to_string();
-        let req = Req { method: "POST", path: "/api/taskq/resources/v1/exchange", query: "", headers: &h, body: body.as_bytes() };
+        let req = Req { method: "POST", path: EXCHANGE, query: "", headers: &h, body: body.as_bytes() };
         assert_eq!(route(&c, &req, 100).unwrap().status, "200 OK");
         assert_eq!(route(&c, &req, 103).unwrap().status, "429 Too Many Requests", "5 s between exchanges");
+        // the old browser-prefixed exchange path is gone, no alias (#110)
+        assert_eq!(route(&c, &Req { path: "/api/taskq/resources/v1/exchange", ..req }, 200).unwrap().status, "404 Not Found");
         // a readback for another target cannot satisfy the operation
         let mut rc = f["receipt"].clone();
         rc["op_id"] = json!("op-0");

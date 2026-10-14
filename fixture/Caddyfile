@@ -1,12 +1,12 @@
 # Reviewed dash. site (dashq.md D3/D11, docs/design/enrollment.md C3). The Langfuse UI guard covers every path
-# except the explicit POST machine routes, which carry their own pairing or device authorization.
+# except POST under /machine/, the machine routes, which carry their own pairing or device authorization.
 dash.example.com {
 	# a client never supplies the identity or address dashq trusts
 	request_header -X-Dashq-Subject
 	request_header -X-Dashq-Client
 	@machine {
 		method POST
-		path /connect/device /connect/token /connect/ack /ingest /connection/receipt /connection/revoke /operations /operations/result /api/taskq/resources/v1/exchange
+		path /machine/*
 	}
 	route {
 		handle @machine {
