@@ -617,8 +617,10 @@ pub fn build(inp: &Value) -> Value {
     let mut boards = Vec::new();
     let mut gh_states = Vec::new();
     let mut taskq_states = Vec::new();
-    // live taskq attempts per lowercase host name from fresh heartbeats: agents run there (#116)
+    // live taskq attempts per lowercase host name from fresh heartbeats: agents run there (#116);
+    // `unconfirmed`: hosts whose heartbeat came from a failed, stale or cached board read, with that reason
     let mut working: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut unconfirmed: BTreeMap<String, String> = BTreeMap::new();
     for repo in inp["projects"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let snap = &inp["boards"][repo];
         let src = source(snap, now, GITHUB_LIMIT, None);
@@ -652,7 +654,9 @@ pub fn build(inp: &Value) -> Value {
             let at = hb["updated_at"].as_str().and_then(iso_secs);
             let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
             let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
-            if cached_age.is_some_and(|a| a <= ttl) {
+            if src["state"] != "ok" {
+                unconfirmed.entry(name.to_ascii_lowercase()).or_insert_with(|| format!("{repo}: {}", src["reason"].as_str().unwrap_or("board read not confirmed")));
+            } else if cached_age.is_some_and(|a| a <= ttl) {
                 let tasks = working.entry(name.to_ascii_lowercase()).or_default();
                 tasks.extend(attempts[first..].iter().map(|a| format!("{repo}#{}", a["task"])));
             }
@@ -711,7 +715,20 @@ pub fn build(inp: &Value) -> Value {
     }
     // AgentQ coverage (#116): a running installation whose host's agents leave no compression or activity records.
     // ponytail: Langfuse heartbeats carry no routing or hook state; those rows come from enrolled snapshots below.
-    if scoped {
+    // Absence is asserted only on a fresh, uncapped read of every record kind it rests on; otherwise it is a gap (D6).
+    let coverage_keys = ["activity", "compression", "native_tools", "agentq.installation", "agentq.compress", "agentq.run"];
+    let lf_gap = match coverage_keys.iter().filter(|k| capped(k)).copied().collect::<Vec<_>>() {
+        _ if !matches!(lf_src["state"].as_str(), Some("ok" | "incomplete")) => lf_src["reason"].as_str().map(String::from),
+        c if c.is_empty() => None,
+        c => Some(format!("capped query ({})", c.join(", "))),
+    };
+    if scoped && let Some(reason) = &lf_gap {
+        for x in fleet.iter().filter(|x| x["state"] == "ok") {
+            gaps.push(json!({"source": "agentq", "host": x["host"], "client": null, "what": "AgentQ coverage unknown", "since": null,
+                "detail": format!("Langfuse {reason}: missing compression or activity records of installation {} are not confirmed.", x["installation"].as_str().unwrap()), "trace_id": null}));
+        }
+    }
+    if scoped && lf_gap.is_none() {
         let mut covered: HashMap<(String, &str), u64> = HashMap::new();
         for r in rows("agentq.compress").into_iter().chain(rows("agentq.run")).filter(|r| in_period(r).is_some()) {
             let Some((inst, _)) = aq_identity(r) else { continue };
@@ -741,6 +758,10 @@ pub fn build(inp: &Value) -> Value {
                 let none = if total == 0 && !compression.iter().chain(&rtk).any(|c| c["host"] == *host) { "activity or compression" } else { "activity" };
                 current.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": format!("TaskQ workers: no {none} records"), "since": null,
                     "detail": format!("TaskQ attempts {} run on this host, but no {none} records arrived in {} (installation {inst}).", tasks.join(", "), dur(period)), "trace_id": null}));
+            }
+            if let Some(reason) = unconfirmed.get(&name).filter(|_| calls.is_empty() && working.get(&name).is_none_or(|t| t.is_empty())) {
+                gaps.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": "TaskQ workers: liveness unknown", "since": null,
+                    "detail": format!("TaskQ board read {reason}: whether agents run here without records is not confirmed (installation {inst})."), "trace_id": null}));
             }
         }
     }
@@ -993,6 +1014,31 @@ mod tests {
         .map(|(h, c, w)| (h.to_string(), c.to_string(), w.to_string()))
         .collect();
         assert_eq!(got, want);
+        // D6: a cached Langfuse read after a timeout, or a capped query, never asserts absence; it is a gap per installation
+        let gaps = |inp: &Value| -> Vec<(String, String)> {
+            let doc = build(inp);
+            doc["attention"]["gaps"].as_array().unwrap().iter().filter(|i| i["source"] == "agentq").map(|i| (i["host"].as_str().unwrap().into(), i["what"].as_str().unwrap().into())).collect()
+        };
+        let coverage_rows = |inp: &Value| rows(inp).into_iter().filter(|r| r.0 != "mac/native").collect::<Vec<_>>();
+        let unknown = vec![("fra/native".to_string(), "AgentQ coverage unknown".to_string()), ("win-1/native".into(), "AgentQ coverage unknown".into())];
+        let mut timed_out = inp.clone();
+        timed_out["langfuse"]["error"] = json!("timeout");
+        assert_eq!(coverage_rows(&timed_out), vec![]);
+        assert_eq!(gaps(&timed_out), unknown);
+        let mut capped = inp.clone();
+        capped["langfuse"]["value"]["truncated"] = json!(["activity"]);
+        capped["langfuse"]["incomplete"] = json!(true);
+        assert_eq!(coverage_rows(&capped), vec![]);
+        assert_eq!(gaps(&capped), unknown);
+        // an unconfirmed board read never asserts that TaskQ workers run without records
+        let mut board_down = inp.clone();
+        board_down["boards"]["taskqorg/dashq"]["error"] = json!("timeout");
+        assert!(!rows(&board_down).iter().any(|r| r.1 == "TaskQ workers"));
+        assert_eq!(gaps(&board_down), vec![("win-1/native".to_string(), "TaskQ workers: liveness unknown".to_string())]);
+        // recovery: the next complete read asserts again
+        assert_eq!(rows(&inp).len(), 5);
+        assert_eq!(gaps(&inp), vec![]);
+
         let doc = build(&inp);
         let win = doc["attention"]["current"].as_array().unwrap().iter().find(|i| i["host"] == "win-1/native").unwrap();
         assert_eq!(win["detail"], "TaskQ attempts taskqorg/dashq#7 run on this host, but no activity or compression records arrived in 30m (installation inst-win).");

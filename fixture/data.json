@@ -364,6 +364,15 @@
         "trace_id": "tr-q5"
       },
       {
+        "source": "agentq",
+        "host": "fra/native",
+        "client": null,
+        "what": "AgentQ coverage unknown",
+        "since": null,
+        "detail": "Langfuse capped query (native_tools): missing compression or activity records of installation inst-fra are not confirmed.",
+        "trace_id": null
+      },
+      {
         "source": "serverq",
         "host": "fra/native",
         "what": "bounded-journal: unknown",
