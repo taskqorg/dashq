@@ -1,0 +1,20 @@
+{
+  "status": "accepted navigation reference; synthetic only",
+  "taskqDesignCommit": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
+  "parentManifest": "finding-task-reference.sources.json",
+  "sha256": "22f03201014235746ca3c5b689d9f1dc8b05377563d203585b518db634d23262",
+  "scope": "H5 navigation; H1-H4 retain authority; first-screen.md retains full layout",
+  "verified": [
+    "1024/16 light",
+    "360/20 dark",
+    "draft and answer retention",
+    "single task card",
+    "close is not recovery",
+    "unknown, verified and recurrence"
+  ],
+  "notQualified": [
+    "real source joins and transport",
+    "automatic refresh and scroll across real snapshots",
+    "consequential operations"
+  ]
+}

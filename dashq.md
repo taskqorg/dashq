@@ -160,7 +160,7 @@ Accepted target: [resource controls](docs/design/resource-controls.md) reuses Ta
 
 ## D15. ServerQ finding handoff
 
-Accepted target: [finding tasks H1–H4](docs/design/finding-tasks.md) narrowly extends D1 with an explicitly authorized TaskQ create/optional-start adapter and shared TaskQ composer. Observation credentials and `/answer` gain no authority. TaskQ owns board mutation/readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Implementation and live qualification remain pending.
+Accepted target: [finding tasks H1–H5](docs/design/finding-tasks.md) narrowly extends D1 with an explicitly authorized TaskQ create/optional-start adapter and shared TaskQ composer. Observation credentials and `/answer` gain no authority. TaskQ owns board mutation/readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Implementation and live qualification remain pending.
 
 ## D16. AgentQ integration settings
 
