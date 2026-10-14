@@ -173,3 +173,7 @@ Accepted target: [optimization results P1–P3](docs/design/optimization-results
 ## D18. Service versions and diagnostics
 
 Accepted target: [service versions V1–V4](docs/design/service-versions.md) refines D8.2/D9. Distinguish available, selected, running and verified health per installation; coreq and each consumer retain lifecycle ownership. Read-only diagnostics use allowlisted evidence. No remote update, restart or rollback authority is added.
+
+## D19. First launch and partial availability
+
+Accepted target: [startup and outages U1–U4](docs/design/startup-outages.md) composes D6/D10–D14 and existing enrollment without new authority. Unconfigured products do not create empty panels; unavailable sources preserve last-known values and drafts, with per-source action gating. [Prototype coverage](docs/design/prototype-coverage.md) distinguishes accepted examples from remaining design and live-qualification gaps.

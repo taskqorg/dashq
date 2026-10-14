@@ -32,3 +32,5 @@ Connection refresh preserves selection, focus, scroll and approval/review state.
 Browser checks at 736 px/16 px light and 360 px/20 px dark cover approval/code match, pending readback/timeout, network recovery, revoke/new approval, stale data, export delay, offline revoke and separate new identity. Qualify the same scenarios against real services under E1–E10 before release, including expiry, cancellation, restart, duplicate requests, cross-workspace denial and actual source freshness. UI evidence never substitutes for those gates.
 
 The existing #36 implementation is a baseline, not proof of this reference's full conformance; follow-up work retains its capabilities. #4 owns end-to-end release qualification; AgentQ #95 retains platform/migration evidence.
+
+Whole-dashboard first launch, standalone TaskQ and partial/all-source failure composition follows [U1–U4](startup-outages.md); its fixture shortcuts do not replace L2's enrollment flow.
