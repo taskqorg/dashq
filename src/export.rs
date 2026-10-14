@@ -270,7 +270,7 @@ mod tests {
     }
 
     /// Chain A3 live: the exact forwarder against a real Langfuse v4 project. Each event is delivered twice (a lost
-    /// reply, then the confirming pass) and must read back as one observation. Opt-in, tagged `test: dashq#37`:
+    /// reply, then the confirming pass) and must read back as one observation once Langfuse merges. Opt-in, tagged `test: dashq#37`:
     /// `DASHQ_LIVE_LANGFUSE=https://<host> LANGFUSE_PUBLIC_KEY=.. LANGFUSE_SECRET_KEY=.. cargo test -- --ignored live`
     #[test]
     #[ignore]
@@ -293,17 +293,20 @@ mod tests {
             let url = format!("{base}/api/public/v2/observations?traceId={}&fields=core,basic,metadata", span_ids(r).0);
             source::get(&url, &headers).map_err(|e| e.0).unwrap().body["data"].as_array().cloned().unwrap_or_default()
         };
-        // ingestion is queued: wait for both, then once more so a late duplicate would show
-        let mut found = vec![];
-        for _ in 0..24 {
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            found = rows.iter().map(read).collect();
-            if found.iter().all(|f| !f.is_empty()) {
-                std::thread::sleep(std::time::Duration::from_secs(30));
-                found = rows.iter().map(read).collect();
+        // ingestion is queued and the read path merges duplicate rows of one span only later (seen: 2 reads of one
+        // span for up to 3 min): wait until each span reads exactly once on two reads 30 s apart, at most 10 min
+        let (mut found, mut once, mut doubled) = (vec![], false, false);
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_secs(if once { 30 } else { 10 }));
+            found = rows.iter().map(read).collect::<Vec<_>>();
+            doubled |= found.iter().any(|f| f.len() > 1);
+            let single = found.iter().all(|f| f.len() == 1);
+            if single && once {
                 break;
             }
+            once = single;
         }
+        println!("transient duplicate reads before merge: {doubled}");
         for (r, f) in rows.iter().zip(&found) {
             assert_eq!(f.len(), 1, "{} read back {} observations", observation(r), f.len());
             let (o, at) = (&f[0], source::iso(r.observed as u64));
