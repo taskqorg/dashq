@@ -147,7 +147,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     first(w, doc, now);
     installations(w, &doc["installations"], &doc["resources"], now);
-    integrations(w, &doc["installations"]);
+    integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
     resources(w, &doc["resources"], now);
 
     // 2. Hosts
@@ -411,10 +411,11 @@ fn aq_codes(v: &Value) -> Vec<String> {
     v.as_array().into_iter().flatten().map(aq_code).collect()
 }
 
-/// AgentQ client integrations (agentq-settings.md G1, G4): read-only profiles from each connected AgentQ snapshot's
-/// `configuration` projection. Configured is never verified; nothing here is a TaskQ task or a saving.
-// ponytail: read-only view; review/apply (G1 editor, G2 results, G3 adapter) waits for AgentQ A3 apply and its own task
-fn integrations(w: &mut String, inst: &Value) {
+/// AgentQ client integrations (agentq-settings.md G1, G4): profiles from each connected AgentQ snapshot's
+/// `configuration` projection. Configured is never verified; nothing here is a TaskQ task or a saving. With
+/// `controls` (config `agentq_configure`, #63) a fresh installation granted `agentq.configure` gets draft selects
+/// per writable profile field and one review/apply editor; `app.js` drives the guarded `/agentq/configure` route.
+fn integrations(w: &mut String, inst: &Value, controls: bool) {
     let rows: Vec<&Value> = inst["rows"].as_array().into_iter().flatten().filter(|r| r["product"] == "agentq" && r["connection"] != "revoked").collect();
     if rows.is_empty() {
         return;
@@ -422,8 +423,9 @@ fn integrations(w: &mut String, inst: &Value) {
     let count: usize = rows.iter().filter_map(|r| r["snapshot"]["payload"]["configuration"]["profiles"].as_array()).map(Vec::len).sum();
     let _ = writeln!(
         w,
-        "<section id=\"integrations\" class=\"aq\">\n<h2>Agent integrations</h2>\n<p class=\"note\">{count} profile{} · read-only. ✓ configured · ◐ partial · ✕ missing · ↷ bypassed · ○ off · ? unknown · — not supported. Client activity is verified separately.</p>\n<div class=\"aq-head\" aria-hidden=\"true\"><span>Client / profile</span><span>Routing</span><span>MCP / hooks</span><span>Optimization</span></div>",
-        if count == 1 { "" } else { "s" }
+        "<section id=\"integrations\" class=\"aq\">\n<h2>Agent integrations</h2>\n<p class=\"note\">{count} profile{} · {}. ✓ configured · ◐ partial · ✕ missing · ↷ bypassed · ○ off · ? unknown · — not supported. Client activity is verified separately.</p>\n<div class=\"aq-head\" aria-hidden=\"true\"><span>Client / profile</span><span>Routing</span><span>MCP / hooks</span><span>Optimization</span></div>",
+        if count == 1 { "" } else { "s" },
+        if controls { "review shows the host's exact plan before any change" } else { "read-only" }
     );
     for r in rows {
         let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
@@ -456,8 +458,17 @@ fn integrations(w: &mut String, inst: &Value) {
         if !notes.is_empty() {
             let _ = writeln!(w, "<p class=\"aq-gap\"><b>{host}</b> · {}</p>", notes.join(" "));
         }
+        // G1: writes need the route, the agentq.configure grant and a fresh complete snapshot; else the precise reason
+        let granted = r["capabilities"].as_array().is_some_and(|c| c.iter().any(|x| x == "agentq.configure"));
+        let locked = match (controls, granted, stale || c["truncated"] == true || c["incomplete"] == true) {
+            (false, _, _) => None,
+            (_, false, _) => Some("this connection has no agentq.configure grant"),
+            (_, _, true) => Some("the snapshot is stale or incomplete"),
+            _ => Some(""),
+        };
+        let anchor = crate::enroll::anchor(inst_id, ws);
         for p in c["profiles"].as_array().into_iter().flatten() {
-            let id = format!("aq-{}-{}", crate::enroll::anchor(inst_id, ws), esc(p["id"].as_str().unwrap_or("")));
+            let id = format!("aq-{anchor}-{}", esc(p["id"].as_str().unwrap_or("")));
             let ops: Vec<&str> = p["operations"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             let plugin = ops.contains(&"plugin");
             let second = if plugin { aq_glyph("plugin", &p["plugin"]) } else { aq_glyph("hooks", &p["hooks"]) };
@@ -522,15 +533,36 @@ fn integrations(w: &mut String, inst: &Value) {
                 .map(|(e, v)| format!("<div class=\"aq-fact\"><span>{}</span><span>{}</span></div>", esc(e), if v["version"].is_null() { "unknown".into() } else { format!("{} · {}", text(&v["version"]), text(&v["state"])) }))
                 .collect();
             let d = &c["defaults"];
+            let writes = format!("Read-only: {}.", aq_codes(&p["writes"]["reasons"]).join(", "));
+            let writes = match locked {
+                Some("") if p["writes"]["enabled"] == true => {
+                    let fields: Vec<String> = crate::enroll::CHANGES
+                        .iter()
+                        .filter(|(f, _)| ops.contains(f))
+                        .filter_map(|(f, values)| {
+                            let opts: String = values.iter().filter(|v| p[*f] != **v).map(|v| format!("<option value=\"{v}\">{}</option>", aq_state(&json!(v)).2)).collect();
+                            // a field already at its only value has nothing to change
+                            (!opts.is_empty()).then(|| format!(
+                                "<label class=\"aq-fact\"><span>{f}</span><select id=\"{id}-{f}\" data-installation=\"{}\" data-profile=\"{}\" data-field=\"{f}\"><option value=\"\">keep {}</option>{opts}</select></label>",
+                                esc(inst_id),
+                                text(&p["id"]),
+                                aq_state(&p[*f]).2
+                            ))
+                        })
+                        .collect();
+                    format!("<div class=\"aq-draft\"><b>Draft</b>{}<small>Shared config: the change applies to every alias above.</small></div>", fields.join(""))
+                }
+                Some(why) if !why.is_empty() => format!("{writes} Changes disabled: {why}."),
+                _ => writes,
+            };
             let _ = writeln!(
                 w,
-                "<div class=\"aq-body\"><div><div class=\"aq-fact\"><span>Routing</span><span>{}</span></div><small>{routing_note}</small>\n<div class=\"aq-fact\"><span>Context optimization</span><span>{}</span></div><small>{pref}</small>\n<div class=\"aq-fact\"><span>MCP &amp; {}</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Shared config</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Project overrides</span><span>{overrides}</span></div>\n<div class=\"aq-fact\"><span>AgentQ-owned entries</span><span>{owned}</span></div>{problems}\n<p class=\"detail\">Read-only: {}.</p></div>\n<div><b>Verification</b>{verification}\n<div class=\"aq-fact\"><span>Revision</span><span><code>{}</code></span></div>\n<details><summary>Managed engines</summary>{}<small>Managed by the AgentQ release, not per client. Host minimum {} bytes; host optimization {}.</small></details>\n<details><summary>Activity</summary><small>Active task and progress are not supplied by this AgentQ projection.</small></details></div></div></details>",
+                "<div class=\"aq-body\"><div><div class=\"aq-fact\"><span>Routing</span><span>{}</span></div><small>{routing_note}</small>\n<div class=\"aq-fact\"><span>Context optimization</span><span>{}</span></div><small>{pref}</small>\n<div class=\"aq-fact\"><span>MCP &amp; {}</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Shared config</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Project overrides</span><span>{overrides}</span></div>\n<div class=\"aq-fact\"><span>AgentQ-owned entries</span><span>{owned}</span></div>{problems}\n<p class=\"detail\">{writes}</p></div>\n<div><b>Verification</b>{verification}\n<div class=\"aq-fact\"><span>Revision</span><span><code>{}</code></span></div>\n<details><summary>Managed engines</summary>{}<small>Managed by the AgentQ release, not per client. Host minimum {} bytes; host optimization {}.</small></details>\n<details><summary>Activity</summary><small>Active task and progress are not supplied by this AgentQ projection.</small></details></div></div></details>",
                 aq_word(&p["routing"]),
                 aq_word(&eff["state"]),
                 if plugin { "plugin" } else { "hooks" },
                 chips.join(""),
                 aliases.join(""),
-                aq_codes(&p["writes"]["reasons"]).join(", "),
                 text(&p["revision"]),
                 engines.join(""),
                 if d["min_bytes"].is_null() { "unknown".into() } else { text(&d["min_bytes"]) },
@@ -539,6 +571,15 @@ fn integrations(w: &mut String, inst: &Value) {
                     Some(false) => "off",
                     None => "unknown",
                 }
+            );
+        }
+        // one editor per installation (G1): review asks the host for the plan, apply confirms exactly that plan
+        if locked == Some("") {
+            let _ = writeln!(
+                w,
+                "<div class=\"aq-edit\" id=\"aqe-{anchor}\" data-installation=\"{}\" data-revision=\"{}\"><button type=\"button\" data-aq=\"review\">Review changes on {host}</button><div class=\"aq-out\" aria-live=\"polite\"></div></div>",
+                esc(inst_id),
+                text(&c["revision"])
             );
         }
     }
@@ -836,7 +877,7 @@ mod tests {
     #[test]
     fn agentq_profiles_render_read_only_from_snapshots() {
         let mut w = String::new();
-        integrations(&mut w, &agentq_doc()["installations"]);
+        integrations(&mut w, &agentq_doc()["installations"], false);
         if let Some(out) = std::env::var_os("DASHQ_EVIDENCE") {
             let css = include_str!("../assets/style.css");
             std::fs::write(out, format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>{css}</style></head><body><main id=\"main\">{w}</main></body></html>")).unwrap();
@@ -867,6 +908,33 @@ mod tests {
         }
         assert!(w.contains("Active task and progress are not supplied by this AgentQ projection."));
         assert!(w.contains("0.51.0 · ready") && w.contains("Host minimum 2048 bytes"));
+    }
+
+    /// G1 (#63): with the route on, only a fresh, complete, agentq.configure-granted installation gets one editor
+    /// and draft selects for AgentQ's writable profile fields (no value equal to the current one); everything else
+    /// keeps its precise read-only reason.
+    #[test]
+    fn agentq_editor_only_where_writes_are_possible() {
+        let mut doc = agentq_doc();
+        let rows = doc["installations"]["rows"].as_array_mut().unwrap();
+        // profile_projection: grant the capability, mark it complete and AgentQ's writes released for Codex
+        let r = rows.iter_mut().find(|r| r["host_label"] == "profile-projection").unwrap();
+        r["capabilities"] = json!(["agentq.configure"]);
+        let c = &mut r["snapshot"]["payload"]["configuration"];
+        c["incomplete"] = json!(false);
+        c["profiles"][0]["writes"] = json!({"enabled": true, "reasons": []});
+        rows.iter_mut().find(|r| r["host_label"] == "profile-projection-stale").unwrap()["capabilities"] = json!(["agentq.configure"]);
+        let mut w = String::new();
+        integrations(&mut w, &doc["installations"], true);
+        assert_eq!(w.matches("class=\"aq-edit\"").count(), 1, "{w}");
+        assert!(w.contains("data-installation=\"inst-18\" data-revision=\"00112233445566ff\"><button type=\"button\" data-aq=\"review\">"), "{w}");
+        let codex = w.split("<details id=").find(|s| s.contains("<b>Codex</b><small>profile-projection · ")).unwrap();
+        assert!(codex.contains("data-profile=\"0123456789abcdef\" data-field=\"routing\"><option value=\"\">keep AgentQ</option><option value=\"direct\">Direct</option></select>"), "{codex}");
+        assert!(codex.contains("data-field=\"optimization\"><option value=\"\">keep enabled</option><option value=\"disabled\">off</option>") && !codex.contains("data-field=\"plugin\""), "{codex}");
+        // the same installation's unreleased profile, an ungranted installation and a stale one say why
+        assert!(w.contains("Read-only: configuration adapter not released.</p>"));
+        assert!(w.contains("Changes disabled: this connection has no agentq.configure grant.") && w.contains("Changes disabled: the snapshot is stale or incomplete."));
+        assert_eq!(w.matches("<select").count(), 2);
     }
 
     /// first-screen.md F-A1 fixture: the pinned fixture plus two synthetic nodes (one long name with three filesystems,
@@ -956,8 +1024,8 @@ mod tests {
     #[test]
     fn integrations_absent_without_agentq_rows() {
         let mut w = String::new();
-        integrations(&mut w, &Value::Null);
-        integrations(&mut w, &json!({"rows": [{"product": "serverq"}, {"product": "agentq", "connection": "revoked"}]}));
+        integrations(&mut w, &Value::Null, true);
+        integrations(&mut w, &json!({"rows": [{"product": "serverq"}, {"product": "agentq", "connection": "revoked"}]}), true);
         assert!(w.is_empty());
     }
 }

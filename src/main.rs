@@ -1,6 +1,7 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
 mod answer;
+mod configure;
 mod data;
 mod enroll;
 mod page;
@@ -45,6 +46,8 @@ struct Config {
     answer: Option<answer::Config>,
     /// `resources: true` enables the typed host-policy routes (D14); off until the target-host adapter is qualified.
     resources: bool,
+    /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
+    agentq_configure: bool,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -115,6 +118,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key resources")?,
     };
+    let agentq_configure = match v.get("agentq_configure") {
+        None => false,
+        Some(x) => x.as_bool().ok_or("config: bad key agentq_configure")?,
+    };
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
@@ -129,6 +136,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         public_host,
         answer,
         resources,
+        agentq_configure,
     })
 }
 
@@ -213,6 +221,9 @@ impl App {
             "installations": projection,
         }));
         profile::step("build", t0);
+        let mut doc = doc;
+        // the page offers review/apply only where the route is on (D16)
+        doc["controls"] = json!({"agentq_configure": c.agentq_configure});
         doc
     }
 }
@@ -276,8 +287,12 @@ fn handle(app: &App, mut s: TcpStream) {
     let c = &app.cfg;
     let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
     let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
+    let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = configure::route(&cctx, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.configure", x.status)
+    } else if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.answer", x.status)
     } else if let Some(x) = policy::route(&rctx, &req, source::now() as i64) {
@@ -620,7 +635,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false }
+        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false }
     }
 
     #[test]

@@ -33,8 +33,7 @@ pub const TREND_SAMPLES: i64 = 3;
 const WAIT_SECS: i64 = 60;
 const MACHINE: [&str; 8] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke", "/operations", "/operations/result"];
 /// AgentQ configure fields and values (agentq CONFIGURATION.md A3 request `changes`); no removal value exists.
-#[allow(dead_code)] // the guarded browser adapter (#63) calls it
-const CHANGES: [(&str, &[&str]); 5] = [("routing", &["routed", "direct"]), ("optimization", &["enabled", "disabled"]), ("mcp", &["registered"]), ("hooks", &["registered"]), ("plugin", &["enabled"])];
+pub const CHANGES: [(&str, &[&str]); 5] = [("routing", &["routed", "direct"]), ("optimization", &["enabled", "disabled"]), ("mcp", &["registered"]), ("hooks", &["registered"]), ("plugin", &["enabled"])];
 
 pub struct Req<'a> {
     pub method: &'a str,
@@ -203,7 +202,6 @@ impl Enroll {
     /// profiles from its current snapshot; the caller names only the operation ID, the changes and, for an apply,
     /// the confirmed plan. Returns the immutable queued operation; the same ID and content again returns it
     /// unchanged. Errors are safe codes; nothing is queued.
-    #[allow(dead_code)] // the guarded browser adapter (#63) calls it
     pub fn configure(&self, subject: &str, installation: &str, operation: &str, plan: Option<Plan>, changes: &[Change], now: i64) -> Result<Value, &'static str> {
         let hex = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'));
         let mut seen = std::collections::HashSet::new();
@@ -259,7 +257,6 @@ impl Enroll {
     /// Readback of one queued operation for its actor or the workspace administrator; `None` for anyone else.
     /// `state`: `queued`, `delivered` (pulled, no result yet), `resulted` (with the host's result), `expired` or
     /// `revoked` (never delivered, so never run), `unknown` (delivered, then revoked before a result).
-    #[allow(dead_code)] // the guarded browser adapter (#63) calls it
     pub fn readback(&self, subject: &str, operation: &str, now: i64) -> Result<Option<Value>, store::Error> {
         let Some(rec) = self.store.operation(operation)? else { return Ok(None) };
         if rec.actor != actor_id(subject) && self.store.role(&rec.workspace, subject)?.as_deref() != Some("admin") {
@@ -280,14 +277,12 @@ impl Enroll {
 }
 
 /// One AgentQ configure change: `profile` (its stable ID), `field` and `value` from `CHANGES`.
-#[allow(dead_code)] // the guarded browser adapter (#63) calls it
 pub struct Change<'a> {
     pub profile: &'a str,
     pub field: &'a str,
     pub value: &'a str,
 }
 
-#[allow(dead_code)] // the guarded browser adapter (#63) calls it
 impl Change<'_> {
     fn wire(&self) -> Value {
         json!({"profile": self.profile, "field": self.field, "value": self.value})
@@ -295,7 +290,6 @@ impl Change<'_> {
 }
 
 /// The confirmed AgentQ plan an apply carries.
-#[allow(dead_code)] // the guarded browser adapter (#63) calls it
 pub struct Plan<'a> {
     pub revision: &'a str,
     pub digest: &'a str,
@@ -1470,7 +1464,7 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false };
+        let cfg = crate::Config { langfuse, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false };
         crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default() }
     }
 

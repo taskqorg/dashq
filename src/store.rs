@@ -253,6 +253,7 @@ pub struct OpRecord {
     pub delivered: bool,
     pub revoked: bool,
     pub result: Option<serde_json::Value>,
+    pub result_at: Option<i64>,
 }
 
 /// D16 operation lifetime: AgentQ refuses a window over 300 s.
@@ -662,7 +663,7 @@ impl Store {
         Ok(self
             .lock()?
             .query_row(
-                "SELECT op, workspace, actor, delivered, EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation), result
+                "SELECT op, workspace, actor, delivered, EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation), result, result_at
                  FROM operations o WHERE operation = ?1",
                 [id],
                 |r| {
@@ -674,10 +675,19 @@ impl Store {
                         delivered: r.get(3)?,
                         revoked: r.get(4)?,
                         result: result.and_then(|x| serde_json::from_str(&x).ok()),
+                        result_at: r.get(6)?,
                     })
                 },
             )
             .optional()?)
+    }
+
+    /// IDs of the newest `limit` operations queued for `installation`, newest first.
+    pub fn operation_ids(&self, installation: &str, limit: i64) -> Result<Vec<String>, Error> {
+        let c = self.lock()?;
+        let mut q = c.prepare("SELECT operation FROM operations WHERE installation = ?1 ORDER BY queued DESC, rowid DESC LIMIT ?2")?;
+        let rows = q.query_map(params![installation, limit], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        Ok(rows)
     }
 
     /// Workspaces where `subject` is a member, with its role.

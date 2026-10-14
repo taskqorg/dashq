@@ -74,6 +74,9 @@ tr:target td { background: #eef4ff; }
 .aq-ask { color: var(--aq-ask); }
 .aq-muted, .aq-stale .aq-good { color: var(--aq-muted); }
 .aq-gap { margin: 8px 0; }
+.aq-draft select, .aq-edit button { font: inherit; min-height: 32px; }
+.aq-edit { margin: 8px 0 16px; padding: 8px 4px; border-bottom: 1px solid var(--aq-line); overflow-wrap: anywhere; }
+.aq-out small { display: block; }
 .aq p { margin: 7px 0; }
 .aq details summary { min-height: 32px; }
 @media (max-width: 600px) {
