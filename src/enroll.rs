@@ -1389,8 +1389,10 @@ mod tests {
             ev("r2", json!({"name": "agentq.unknown", "metadata": {}})),
             ev("r3", json!({"name": "agentq.run", "metadata": {"prompt": "hi"}})),
             rec("s1", T0, json!({"version": "1.0.0"})),
+            // OTLP cannot time it: refused before acknowledgement, never an overflow in the forwarder (#37)
+            json!({"schema": "agentq-event/1", "event_id": "r4", "observed_at": i64::MAX, "payload": {"name": "agentq.run", "metadata": {}}}),
         ];
-        assert_eq!(states(&ingest(&e, &cred, records, T0).1), ["accepted", "rejected:payload", "rejected:payload", "accepted"]);
+        assert_eq!(states(&ingest(&e, &cred, records, T0).1), ["accepted", "rejected:payload", "rejected:payload", "accepted", "rejected:payload"]);
         let store = &e.as_ref().unwrap().store;
         assert_eq!(store.outbox(9).unwrap().iter().map(|r| r.event_id.as_str()).collect::<Vec<_>>(), ["r1"]);
         // an export never becomes the snapshot or a history sample

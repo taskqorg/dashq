@@ -29,15 +29,23 @@ pub fn span_ids(r: &Pending) -> (String, String) {
     (h[..32].into(), h[32..48].into())
 }
 
+/// OTLP time of a producer observation: unsigned 64-bit nanoseconds. `None` before 1970 or after 2554, which
+/// OTLP cannot express; ingest rejects such exports and a pass turns any left in the outbox into gaps.
+pub fn nanos(observed: i64) -> Option<String> {
+    u64::try_from(observed).ok()?.checked_mul(1_000_000_000).map(|n| n.to_string())
+}
+
 /// OTLP/JSON for Langfuse v4 ingestion: one complete `event` span per row, timed at producer observation, never
-/// at retry time (C5). Metadata keys become `langfuse.observation.metadata.*` (non-strings as JSON text).
+/// at retry time (C5). Metadata keys become `langfuse.observation.metadata.*` (non-strings as JSON text). Rows
+/// without an OTLP time are left out.
 pub fn batch(rows: &[Pending]) -> Value {
     let attr = |k: &str, v: &Value| json!({"key": k, "value": {"stringValue": v.as_str().map_or_else(|| v.to_string(), String::from)}});
     let spans: Vec<Value> = rows
         .iter()
-        .map(|r| {
+        .filter_map(|r| Some((r, nanos(r.observed)?)))
+        .map(|(r, at)| {
             let p: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
-            let ((trace, span), at) = (span_ids(r), (r.observed.max(0) as u64 * 1_000_000_000).to_string());
+            let (trace, span) = span_ids(r);
             let mut attrs = vec![attr("langfuse.observation.type", &json!("event")), attr("langfuse.trace.name", &p["name"])];
             let ids = [("dashq.id", json!(observation(r))), ("dashq.installation", json!(r.installation)), ("dashq.generation", json!(r.generation)), ("dashq.event_id", json!(r.event_id))];
             for (k, v) in p["metadata"].as_object().into_iter().flatten().map(|(k, v)| (k.as_str(), v.clone())).chain(ids) {
@@ -64,14 +72,14 @@ fn post(base: &str, auth: &str, rows: &[Pending]) -> Result<bool, String> {
 }
 
 /// One pass: sends the oldest rows. An accepted request removes its rows from the outbox. A refused request is
-/// retried row by row in the same pass and only the refused rows become export gaps. Anything else keeps the rows
-/// for the next pass under the same span IDs.
+/// retried row by row in the same pass and only the refused rows become export gaps, as do rows without an OTLP
+/// time. Anything else keeps the rows for the next pass under the same span IDs.
 pub fn pass(store: &Store, base: &str, auth: &str, now: i64) -> Result<(), String> {
-    let rows = store.outbox(BATCH).map_err(|e| format!("store {e:?}"))?;
+    let (rows, untimed): (Vec<Pending>, Vec<Pending>) = store.outbox(BATCH).map_err(|e| format!("store {e:?}"))?.into_iter().partition(|r| nanos(r.observed).is_some());
+    let (mut sent, mut refused) = (vec![], untimed.iter().map(|r| r.id).collect::<Vec<_>>());
     if rows.is_empty() {
-        return Ok(());
+        return store.exported(&sent, &refused, now).map_err(|e| format!("store {e:?}"));
     }
-    let (mut sent, mut refused) = (vec![], vec![]);
     let mut err = None;
     if post(base, auth, &rows)? {
         sent = rows.iter().map(|r| r.id).collect();
@@ -85,7 +93,7 @@ pub fn pass(store: &Store, base: &str, auth: &str, now: i64) -> Result<(), Strin
         }
     }
     store.exported(&sent, &refused, now).map_err(|e| format!("store {e:?}"))?;
-    match (rows.len() - sent.len() - refused.len(), err) {
+    match (rows.len() + untimed.len() - sent.len() - refused.len(), err) {
         (0, _) => Ok(()),
         (n, e) => Err(format!("{n} events not confirmed{}", e.map(|e| format!(" ({e})")).unwrap_or_default())),
     }
@@ -282,6 +290,36 @@ mod tests {
             assert_eq!((o["metadata"]["test"].as_str(), o["startTime"].as_str().map(|t| t.starts_with(&at[..19]))), (Some("dashq#37"), Some(true)));
             println!("readback {} -> span {} ok, 1 observation after 2 deliveries", observation(r), span_ids(r).1);
         }
+    }
+
+    /// Chain A2: an export time OTLP cannot express never reaches the outbox, and one already there becomes a gap
+    /// while the pass goes on; neither overflows. The last representable second still forwards exactly.
+    #[test]
+    fn untimed_exports_are_refused_or_gapped() {
+        let last = (u64::MAX / 1_000_000_000) as i64;
+        assert_eq!((nanos(last).as_deref(), nanos(last + 1), nanos(-1)), (Some("18446744073000000000"), None, None));
+        let s = store("untimed");
+        let run = r#"{"name":"agentq.run","metadata":{}}"#;
+        let ev = |id, observed| Event { id, schema: SCHEMA, observed, kind: Kind::Export, payload: run };
+        assert_eq!(s.accept(b"v1", &[ev("big", i64::MAX), ev("edge", last)], NOW).unwrap(), [Outcome::Rejected("payload"), Outcome::Accepted]);
+        // rows queued before ingest refused such times
+        let db = std::env::temp_dir().join(format!("dashq-export-untimed-{}", std::process::id())).join("dashq.db");
+        let queue = |id: &str, observed: i64| {
+            let sql = "INSERT INTO outbox (installation, generation, event_id, observed, queued, payload) VALUES ('inst-1', 1, ?1, ?2, ?3, ?4)";
+            rusqlite::Connection::open(&db).unwrap().execute(sql, rusqlite::params![id, observed, NOW, run]).unwrap();
+        };
+        queue("old", i64::MAX);
+        let lf = stub(vec!["ok"]);
+        assert_eq!(pass(&s, &lf.base, "Basic x", NOW), Ok(()));
+        assert_eq!(s.export_counts().unwrap(), (0, 1));
+        let obs = lf.observations.lock().unwrap();
+        let edge = obs.values().map(|sp| (meta(sp, "dashq.event_id").unwrap(), sp["startTimeUnixNano"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+        assert_eq!(edge, [("edge".to_string(), "18446744073000000000".to_string())]);
+        // only untimed rows left: they become gaps without a request
+        queue("neg", -1);
+        let dead = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        assert_eq!(pass(&s, &format!("http://{dead}"), "Basic x", NOW), Ok(()));
+        assert_eq!(s.export_counts().unwrap(), (0, 2));
     }
 
     #[test]

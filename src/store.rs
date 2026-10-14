@@ -872,6 +872,8 @@ impl Store {
                     None if !scopes.iter().any(|s| s == e.schema) => Outcome::Rejected("scope"),
                     // a dedup record may be pruned already: refuse instead of duplicating
                     None if e.observed < now - l.receipt_secs => Outcome::Rejected("expired"),
+                    // an export Langfuse cannot time (after 2554) is refused before acknowledgement
+                    None if e.kind == Kind::Export && crate::export::nanos(e.observed).is_none() => Outcome::Rejected("payload"),
                     None if full => Outcome::Rejected("store_full"),
                     None if e.kind == Kind::Export && outbox + e.payload.len() as u64 > l.outbox_bytes => Outcome::Rejected("outbox_full"),
                     None => {
