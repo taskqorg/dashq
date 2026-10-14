@@ -3,12 +3,14 @@ const boardCards = new Map();
 let boardFilter = null;
 const boardId = name => 'board-' + encodeURIComponent(name);
 const questionId = (name, n) => boardId(name) + '-q-' + n;
+// DashQ board rows -> TaskQ project model; a failed or incomplete read is partial, so counters read `?`.
+const boardProjects = boards => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
+  complete: b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: b.counts.closed, tasks: b.tasks || []}));
 function renderBoards() {
   const root = document.getElementById('boards');
   if (!root) return;
   const boards = JSON.parse(root.dataset.boards), blocks = root.querySelector('.board-blocks');
-  const projects = boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
-    complete: b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: b.counts.closed, tasks: b.tasks || []}));
+  const projects = boardProjects(boards);
   const open = new Map([...blocks.querySelectorAll('details[id]')].map(d => [d.id, d.open]));
   const kept = new Set(), fragments = document.createDocumentFragment();
   const aggregate = document.createElement('div');
@@ -80,7 +82,8 @@ function renderBoards() {
   }
   root.querySelector('.board-fallback').hidden = true;
 }
-document.addEventListener('click', e => {
+if (typeof module === 'object') module.exports = {boardProjects};
+else document.addEventListener('click', e => {
   const question = e.target.closest('[data-board-question]');
   if (question) {
     const el = document.getElementById(questionId(question.dataset.boardQuestion, question.dataset.task));

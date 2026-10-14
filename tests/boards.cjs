@@ -28,3 +28,16 @@ const pin = JSON.parse(fs.readFileSync('assets/taskq/provenance.json'));
 for (const [name, hash] of Object.entries(pin.files))
   assert.equal(crypto.createHash('sha256').update(fs.readFileSync('assets/taskq/' + name)).digest('hex'), hash, name);
 console.log('PASS immutable asset checksums');
+// Chain: fixture /data boards -> boardProjects -> pinned TaskQ counters. Risk: DashQ loses TaskQ order, shows a zero,
+// reports an unread board as 0, or makes Closed loud; the old server renderer checked these before #43.
+const blocks = require('../assets/taskq/project-blocks.js'), {boardProjects} = require('../assets/boards.js');
+const caps = html => [...html.matchAll(/class="([^"]*)" data-tqp="tasks"[^>]*data-state="(\w+)" aria-label="([^"]*)"/g)].map(m => [m[2], m[1], m[3]]);
+const [taskq, agentq] = boardProjects(require('../fixture/data.json').boards);
+assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready', 'Closed'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
+assert(blocks.summary(taskq).includes('href="https://github.com/taskqorg/taskq/issues"') && blocks.summary(taskq).includes('data-icon="github"'), 'board link and provider icon');
+assert.deepEqual(caps(blocks.summary(agentq)).map(c => c[2].split(' · ')[1]), blocks.states.map(([, n]) => n + ': unknown'), 'unread board: every state unknown, none 0');
+const all = blocks.aggregate([taskq, agentq]);
+assert(all.includes('Partial: taskqorg/agentq') && caps(all).every(c => c[2].endsWith('unknown')), 'aggregate of a partial set is unknown');
+const done = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'doing')};
+assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good'], ['closed', 'quiet']], 'zero hidden, Closed quiet');
+console.log('PASS counters: order, zero hidden, unknown, Closed quiet, partial aggregate');
