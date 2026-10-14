@@ -657,6 +657,13 @@ mod tests {
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }
 
+    // Chain D13 live gate (#44): the live board run stops before any write on a failed guard or prerequisite.
+    #[test]
+    fn answer_live_gate_stops_before_writes() {
+        let out = std::process::Command::new("node").arg("tests/answer-live-stub.cjs").current_dir(env!("CARGO_MANIFEST_DIR")).output().expect("node is required for the answer live gate");
+        assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+
     #[test]
     fn fixture_rendering_is_pinned() {
         let html = fixture_html();

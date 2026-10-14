@@ -6,6 +6,29 @@ const questionId = (name, n) => boardId(name) + '-q-' + n;
 // DashQ board rows -> TaskQ project model; a failed or incomplete read is partial, so counters read `?`.
 const boardProjects = boards => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
   complete: b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: b.counts.closed, tasks: b.tasks || []}));
+// answers.md Route (#41): the server decides per board and account. GET /answer?board= returns a CSRF token when
+// this account may answer there, else the reason (503 while the deployment has no `answer` config). Read once per page.
+const answerAccess = new Map();
+const answerCapability = board => {
+  const a = answerAccess.get(board);
+  return a && a.csrf ? {answer: true} : {answer: false, reason: a ? a.reason : 'Checking answer access…'};
+};
+function answerAccessLoad(board) {
+  if (answerAccess.has(board)) return;
+  answerAccess.set(board, {reason: 'Checking answer access…'});
+  fetch('/answer?board=' + encodeURIComponent(board), {credentials: 'same-origin'})
+    .then(r => r.json().then(v => r.ok && v.csrf ? {csrf: v.csrf} : {reason: (v.reason || 'Answers unavailable') + '; answer on the board.'}))
+    .catch(e => ({reason: 'Answer access unknown (' + e.message + '); answer on the board.'}))
+    .then(a => { answerAccess.set(board, a); for (const c of boardCards.values()) if (c.board === board) c.widget.update(c.rows); });
+}
+// One TaskQ operation as the route's form; the receipt's `outcome` is the card state. A lost or unreadable reply
+// rejects, so the card shows unknown and its retry resends the same op_id and payload.
+async function answerSend(board, op) {
+  const f = new URLSearchParams({board, csrf: answerAccess.get(board).csrf, task: op.task, revision: op.revision, op_id: op.id});
+  if (op.choice != null) f.set('choice', op.choice); else f.set('text', op.text);
+  const v = await (await fetch('/answer', {method: 'POST', body: f, credentials: 'same-origin'})).json();
+  return {state: v.outcome, reason: v.reason, next: v.next};
+}
 function controlKey(e) {
   const d = e.dataset;
   if (d.tqp) return d.tqp + (d.state ? '-' + d.state : '');
@@ -63,17 +86,18 @@ function renderBoards() {
         if (!card) {
           const el = document.createElement('div');
           el.id = id;
-          card = {el, widget: TaskqAnswerCard.mount(el, {
-            capability: () => ({answer: false, reason: card.source.state === 'ok'
-              ? 'Answer adapter has not been qualified; answer on the board.'
-              : 'Board observation ' + card.source.state + ': ' + (card.source.reason || 'current revision unavailable') + '; answer on the board.'}),
-            send: () => Promise.reject(new Error('Answering is disabled'))
+          card = {el, board: p.id, widget: TaskqAnswerCard.mount(el, {
+            capability: board => card.source.state === 'ok' && !card.source.incomplete ? answerCapability(board)
+              : {answer: false, reason: 'Board observation ' + card.source.state + ': ' + (card.source.reason || 'current revision unavailable') + '; answer on the board.'},
+            send: answerSend
           })};
           boardCards.set(id, card);
         }
         card.source = b.source;
         wrap.append(card.el);
-        card.widget.update([{board: p.id, row}]);
+        card.rows = [{board: p.id, row}];
+        card.widget.update(card.rows);
+        answerAccessLoad(p.id);
       }
       if (boardFilter && (!boardFilter.project || boardFilter.project === p.id) && row.state !== boardFilter.state) continue;
       const el = document.createElement('div');

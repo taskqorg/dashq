@@ -557,7 +557,11 @@
                 "recommended": true,
                 "consequential": false
               }
-            ]
+            ],
+            "limits": {
+              "lines": 4,
+              "chars": 240
+            }
           },
           "card": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★"
         },
