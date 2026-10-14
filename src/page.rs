@@ -143,6 +143,11 @@ pub fn render(doc: &Value, links: &Value) -> String {
         }
         let _ = writeln!(w, "</ul>{end}");
     }
+    for b in doc["boards"].as_array().into_iter().flatten() {
+        for q in b["questions"].as_array().into_iter().flatten() {
+            let _ = writeln!(w, "<p><a data-board-question=\"{}\" data-task=\"{}\" href=\"#boards\">{} · #{} {}</a></p>", text(&b["project"]), text(&q["number"]), text(&b["project"]), text(&q["number"]), text(&q["title"]));
+        }
+    }
     let _ = writeln!(w, "</section>");
 
     first(w, doc, now);
@@ -627,8 +632,6 @@ fn integrations(w: &mut String, inst: &Value, controls: bool) {
 
 /// Trend window of the server grid (overview.md: 30 min on a shared 0–100 % scale), whatever the period.
 const TREND: u64 = 1800;
-/// TaskQ provider Board asset at the pinned design revision (first-screen-reference.sources.json).
-const GITHUB: &str = include_str!("../assets/github.svg");
 
 fn pct(used: &Value, total: &Value) -> Option<f64> {
     used.as_f64().zip(total.as_f64().filter(|t| *t > 0.0)).map(|(u, t)| u / t * 100.0)
@@ -743,102 +746,16 @@ fn servers(w: &mut String, res: &Value, now: u64) {
     let _ = writeln!(w, "</section>");
 }
 
-/// Project boards beside the servers (boards.md): TaskQ counter order with zero hidden and unknown as `?`, the provider
-/// Board link, then questions, failures and live attempts on demand. Answers stay in TaskQ until the shared card (#43).
+/// D13: the TaskQ-owned browser components render these rows; static output keeps source/issue links.
 fn boards(w: &mut String, boards: &[Value]) {
-    let names = ["Doing", "Review", "Ask", "Failed", "Ready", "Blocked", "Later", "Closed"];
-    let keys: Vec<&str> = crate::data::COUNTS.iter().copied().chain(["closed"]).collect();
-    // each counter carries an `id` and `data-n` so a refresh tints a changed count (overview.md)
-    let strip = |id: &str, label: &str, counts: &[Option<u64>]| -> String {
-        let caps: String = counts
-            .iter()
-            .zip(names)
-            .zip(&keys)
-            .filter(|((n, _), _)| *n != &Some(0))
-            .map(|((n, name), k)| {
-                let v = n.map_or("?".into(), |n| n.to_string());
-                let what = if n.is_some() { v.clone() } else { "unknown".into() };
-                format!("<span class=\"c {k}\" id=\"{id}-{k}\" data-n=\"{v}\" title=\"{name}: {what}\" aria-label=\"{name}: {what}\">{name} {v}</span>")
-            })
-            .collect();
-        format!("<span class=\"counts\" aria-label=\"{} counters\">{caps}</span>", esc(label))
-    };
-    let _ = writeln!(w, "<section id=\"boards\">\n<h2>Boards</h2>");
-    // the aggregate sums known counts only; a project without a value for a state makes it partial
-    let mut agg = vec![Some(0u64); keys.len()];
-    let mut partial = vec![];
+    let _ = writeln!(w, "<section id=\"boards\" data-boards=\"{}\"><h2>Boards</h2><div class=\"board-blocks\"></div><div class=\"board-fallback\">", esc(&serde_json::to_string(boards).unwrap()));
     for b in boards {
-        let mut gap = false;
-        for (i, k) in keys.iter().enumerate() {
-            match b["counts"][k].as_u64() {
-                Some(n) => agg[i] = agg[i].map(|a| a + n),
-                None if *k != "closed" => gap = true,
-                None => {}
-            }
-        }
-        if gap {
-            partial.push(esc(b["project"].as_str().unwrap_or("")));
+        let _ = writeln!(w, "<p><a href=\"{}\">{}</a> · Shared TaskQ blocks require JavaScript.</p>{}", text(&b["url"]), text(&b["project"]), unknown_line(&b["source"]));
+        for q in b["questions"].as_array().into_iter().flatten() {
+            let _ = writeln!(w, "<p>{} · {}</p>", issue(q), text(&q["text"]));
         }
     }
-    agg[keys.len() - 1] = None;
-    let _ = writeln!(
-        w,
-        "<div class=\"proj all\"><div class=\"ph\"><b>All boards</b>{}</div>{}</div>",
-        strip("boards-all", "All boards", &agg),
-        if partial.is_empty() { String::new() } else { format!("<p class=\"detail\">Partial: no counts from {}.</p>", partial.join(", ")) }
-    );
-    // one representative question open by default, preferably one awaiting an answer; a refresh keeps the reader's own choice
-    let all: Vec<&Value> = boards.iter().flat_map(|b| b["questions"].as_array().into_iter().flatten()).collect();
-    let open_q = all.iter().find(|q| q["state"] == "ask").or(all.first()).map(|q| q["url"].clone());
-    for b in boards {
-        let project = b["project"].as_str().unwrap_or("");
-        let id = format!("board-{}", esc(&project.replace('/', "-")));
-        let src = &b["source"];
-        let counts: Vec<Option<u64>> = keys.iter().map(|k| b["counts"][k].as_u64()).collect();
-        let age = src["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", dur(a)));
-        let st = src["state"].as_str().unwrap_or("unknown");
-        let fresh = if st == "ok" { format!("<small>{age}</small>") } else { format!("{} <span class=\"detail\">{}</span>", badge(st, &age), esc(src["reason"].as_str().unwrap_or(""))) };
-        let url = esc(b["url"].as_str().unwrap_or(""));
-        let _ = writeln!(
-            w,
-            "<div class=\"proj\" id=\"{id}\"><div class=\"ph\"><a href=\"{url}\">{}</a> <a class=\"board\" href=\"{url}\" aria-label=\"{0} Board on GitHub\" title=\"Board\">{GITHUB}</a> {fresh}{}</div>",
-            esc(project),
-            strip(&id, project, &counts)
-        );
-        let qs = b["questions"].as_array().map_or(&[][..], Vec::as_slice);
-        for q in qs {
-            let _ = writeln!(
-                w,
-                "<details class=\"q\" id=\"q-{id}-{}\"{}><summary><span class=\"s unknown\">{}</span> {}</summary>",
-                text(&q["number"]),
-                if open_q.as_ref() == Some(&q["url"]) { " open" } else { "" },
-                if q["state"] == "review" { "Review" } else { "Ask" },
-                issue(q)
-            );
-            if let Some(t) = q["text"].as_str() {
-                let _ = writeln!(w, "<p>{}</p>", esc(t));
-            }
-            let choices: Vec<String> = q["choices"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|c| format!("<li value=\"{}\">{}{}</li>", text(&c["k"]), text(&c["text"]), if q["recommended"] == c["k"] { " <span aria-label=\"recommended\">★</span>" } else { "" }))
-                .collect();
-            if !choices.is_empty() {
-                let _ = writeln!(w, "<ol class=\"choices\">{}</ol>", choices.join(""));
-            }
-            let _ = writeln!(w, "<p class=\"detail\">Answer on the issue: answering is not enabled on this page.</p></details>");
-        }
-        for f in b["failed"].as_array().into_iter().flatten() {
-            let _ = writeln!(w, "<details class=\"q\" id=\"f-{id}-{}\"><summary><span class=\"s bad\">Failed</span> {}</summary><p>{}</p></details>", text(&f["number"]), issue(f), f["reason"].as_str().filter(|r| !r.is_empty()).map_or("No reason recorded.".into(), esc));
-        }
-        let attempts: Vec<String> = b["attempts"].as_array().into_iter().flatten().map(|a| format!("{} #{}", text(&a["host"]), text(&a["task"]))).collect();
-        if !attempts.is_empty() {
-            let _ = writeln!(w, "<p class=\"detail\">Live: {}</p>", attempts.join(" · "));
-        }
-        let _ = writeln!(w, "</div>");
-    }
-    let _ = writeln!(w, "</section>");
+    let _ = writeln!(w, "</div></section>");
 }
 
 /// Bytes in GB with one decimal (10^9, the producers' own figures).
@@ -1091,7 +1008,7 @@ mod tests {
             assert!(html.contains(&format!("<section id=\"{id}\">")), "{id}");
         }
         assert_eq!(first.matches("<article class=\"node\"").count(), 4);
-        assert_eq!(first.matches("<div class=\"proj\" id=").count(), 6);
+        assert_eq!(first.matches("Shared TaskQ blocks require JavaScript.").count(), 6);
         let node = |id: &str| first.split("<article").find(|a| a.contains(&format!("id=\"node-{id}\""))).unwrap().to_string();
         // 7 samples: CPU and RAM lines on 0–100 %, three filesystems with bars, pp change from the previous sample
         let build = node("inst-build");
@@ -1104,24 +1021,10 @@ mod tests {
         assert!(mac.contains("no trend yet") && !mac.contains("<polyline") && mac.contains("9.5 %"), "{mac}");
         assert!(node("inst-fra").contains("title=\"unknown: stat failed\">—</span>"));
         assert_eq!(first.matches("Work mode: no TaskQ policy adapter</span>").count(), 4);
-        // counters: TaskQ order, zero hidden, unknown `?`, Closed unknown and quiet
-        let board = |p: &str| first.split("<div class=\"proj").find(|b| b.contains(&format!("aria-label=\"{p} counters\""))).unwrap().to_string();
-        let coreq = board("taskqorg/coreq");
-        assert!(coreq.contains(">Doing 1</span><span class=\"c waiting\" id=\"board-taskqorg-coreq-waiting\" data-n=\"3\" title=\"Blocked: 3\" aria-label=\"Blocked: 3\">Blocked 3</span><span class=\"c closed\" id=\"board-taskqorg-coreq-closed\" data-n=\"?\" title=\"Closed: unknown\""), "{coreq}");
-        // every counter has a unique id and data-n, so a refresh can tint a changed count
-        let ids: Vec<&str> = first.split("<span class=\"c ").skip(1).map(|c| c.split("id=\"").nth(1).unwrap().split('"').next().unwrap()).collect();
-        assert!(ids.contains(&"boards-all-doing") && ids.len() == ids.iter().collect::<std::collections::HashSet<_>>().len(), "{ids:?}");
-        assert!(!board("taskqorg/specq").contains("class=\"c doing\""));
-        assert!(board("taskqorg/serverq").contains(">Doing ?</span>") && board("taskqorg/serverq").contains("read failed (timeout)"));
-        assert!(board("All boards").contains("Partial: no counts from taskqorg/agentq, taskqorg/dashq, taskqorg/serverq."), "{}", board("All boards"));
-        assert!(board("taskqorg/taskq").contains("href=\"https://github.com/taskqorg/taskq/issues\" aria-label=\"taskqorg/taskq Board on GitHub\""));
-        // one representative question open; choices keep their numbers and the recommendation
-        assert_eq!(first.matches("<details class=\"q\" id=\"q-").count(), 2);
-        assert_eq!(first.matches("\" open><summary>").count(), 1);
-        assert!(first.contains("<li value=\"3\">Files <span aria-label=\"recommended\">★</span></li>"));
-        for absent in ["<button", "85 %", "90 %", "threshold", "<input", "<form", "demo", "simulat"] {
-            assert!(!first.to_lowercase().contains(absent), "{absent}");
-        }
+        assert!(first.contains("data-boards="));
+        assert!(first.contains("Shared TaskQ blocks require JavaScript."));
+        assert!(first.contains("https://github.com/taskqorg/taskq/issues"));
+        assert!(!first.contains("class=\"counts\""), "no independent counter renderer");
     }
 
     /// D14/#46: shared fixture groups enter the existing server row, not another node list.

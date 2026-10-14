@@ -63,7 +63,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 ## D5. Refresh
 - Redesign target: [shared dashboard rules W4–W6](https://github.com/taskqorg/specq/blob/main/design/dashboards.md) and D10. The mechanism below is the current baseline, not proof of stable in-place updates.
 - The page fetches `/data` on load, every 60 s and on the Refresh button. No live push.
-- One renderer, on the server: `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
+- The server renders the page shell; D13 boards use the pinned TaskQ browser renderer. Baseline: `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
 - The page shows `Updated <time>` and each source's age. A failed fetch keeps the last page and shows the error banner (D6); it never blanks values.
 
 ## D6. Unknown and stale
@@ -162,7 +162,7 @@ Accepted target: [enrollment C1–C7](docs/design/enrollment.md), including E1�
 
 ## D13. TaskQ answer card
 
-Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Transport and authority are implemented ([#41](https://github.com/taskqorg/dashq/issues/41), [answers § Route](docs/design/answers.md#route-41)); the route stays off until a deployment configures `answer`, and production writes wait for live qualification ([#44](https://github.com/taskqorg/dashq/issues/44)). The card embedding is [#43](https://github.com/taskqorg/dashq/issues/43).
+Accepted target: [shared-card integration](docs/design/answers.md). TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter. This narrowly amends the no-state-changing-buttons restriction in D1 and adds guarded `POST /answer` to D2/D7; observation enrollment retains no action authority. Ordinary answers use TaskQ’s canonical dispatcher, expected revision, operation ID and verified receipt. Consequential operations are excluded. Transport and authority are implemented ([#41](https://github.com/taskqorg/dashq/issues/41), [answers § Route](docs/design/answers.md#route-41)); the route stays off until a deployment configures `answer`, and production writes wait for live qualification ([#44](https://github.com/taskqorg/dashq/issues/44)). The card embedding ([#43](https://github.com/taskqorg/dashq/issues/43)) consumes unchanged TaskQ source assets at `a32b7e17fbbed879b6480c266baeb4ce9c1d383f`, pinned per-file in `assets/taskq/provenance.json` (owner-approved pre-release exception; repin to v4.2.0 separately). Browser Boards owns one card per board/task; Attention navigates to it. Source rows preserve canonical question fields. Browser capability remains disabled pending #44; this embedding never invokes `/answer`. Static/no-script snapshots retain issue links and an explicit component-unavailable reason; browser evidence qualifies the shared blocks.
 
 ## D14. TaskQ resource controls
 

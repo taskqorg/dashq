@@ -35,7 +35,13 @@ async function refresh() {
     const was = e => before.has(e.id) ? before.get(e.id) : e.matches('.c') && document.getElementById(e.closest('[id]:not(.c)')?.id) ? '0' : undefined;
     main.querySelectorAll('[data-n]').forEach(e => { const n = was(e); if (n !== undefined && n !== e.dataset.n) e.classList.add('tint'); });
     DashqResources.preserve(main);
+    const oldBoards = document.getElementById('boards'), newBoards = main.querySelector('#boards');
+    if (oldBoards && newBoards) {
+      oldBoards.dataset.boards = newBoards.dataset.boards;
+      newBoards.replaceWith(oldBoards);
+    }
     document.getElementById('main').replaceWith(main);
+    renderBoards();
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
     if (version) selectVersion(version);
@@ -230,6 +236,7 @@ document.addEventListener('click', e => {
   const row = e.target.closest('.connect-select');
   if (row) selectConnection(row.getAttribute('aria-controls'));
 });
+renderBoards();
 bind();
 revealConnection();
 addEventListener('hashchange', revealConnection);

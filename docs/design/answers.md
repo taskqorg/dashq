@@ -38,3 +38,9 @@ Implemented transport and authority; [#43](https://github.com/taskqorg/dashq/iss
 Shared component and TaskQ tray adapter qualify together. DashQ display uses the canonical board snapshot adapter; authenticated answers additionally require the browser identity/store boundary and the updated answer-route task. Reading questions and answering them are separate capabilities; do not block observation-only enrollment on this feature.
 
 Before enabling production writes, qualify an authorized test task on the real board: option and free-text paths, matching receipt/readback, lost response without duplicate entry, stale question, revoked identity and cross-workspace denial. Preserve unrelated tasks. Record exact component/TaskQ/DashQ versions and guard configuration. UI fixtures alone do not pass this gate.
+
+## Embedded consumer (#43)
+
+The browser loads the unchanged answer-card and project-blocks assets from the same-origin app/style responses. `assets/taskq/provenance.json` records the owner-approved source commit and SHA-256 per file, not a published release. `boards.tasks` preserves canonical row/question identity, choices, evidence and limits. Label-only rows have no parsed question and no answer capability. Source freshness remains beside each block. Navigation counters filter observed rows; Closed remains unknown.
+
+Attention opens the single Boards card. The board container and component instances survive page refresh; the canonical component owns revision-bound drafts. This consumer always supplies `answer: false` until #44 qualifies the real adapter; no tray management capability or answer request is added. Static `--snapshot` remains script-free with source and issue links; browser evidence is required for the shared UI.

@@ -23,7 +23,7 @@ tr:target td { background: #eef4ff; }
 /* Combined first screen (first-screen.md): servers and Boards side by side; em widths reflow earlier at large text */
 .first { --line: #dce0e5; --mark: #4f7fa8; --track: #e6e9ed; --tint: #fff1b8; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
 .node { display: grid; grid-template-columns: minmax(7em, 1.1fr) repeat(3, minmax(0, 1fr)); gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.node small, .proj small { color: #55606b; }
+.node small { color: #55606b; }
 .m .k, .disk .k { display: block; color: #55606b; font-size: .875em; }
 .disk + .disk { margin-top: 6px; }
 .v { border-radius: 3px; }
@@ -35,20 +35,6 @@ tr:target td { background: #eef4ff; }
 .cap rect { fill: var(--track); }
 .cap rect.fill { fill: var(--mark); }
 .policy { font-size: .875em; }
-.proj { padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
-.ph { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.board svg { width: 1em; height: 1em; vertical-align: -.125em; fill: currentColor; }
-.board { color: inherit; display: inline-flex; padding: 2px; }
-/* TaskQ counter capsules: stable order, right-aligned wrap, zero hidden, Closed quiet */
-.counts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; max-width: 100%; }
-.c { border-radius: 20px; padding: 1px 8px; background: var(--track); font-size: .875em; white-space: nowrap; }
-.c.doing { background: #d8f0e6; color: #1d5c47; }
-.c.ask { background: #fbe3d2; color: #7a3f14; }
-.c.failed { background: #f7d9d9; color: #842626; }
-.c.closed { background: #eff1f3; color: #68727d; }
-.q { margin: 6px 0 0; }
-.q > summary { cursor: pointer; }
-.q p { margin: 6px 0; }
 .tint { animation: tint 1.3s ease-out; }
 @keyframes tint { from { background: var(--tint); } to { background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .tint { animation: none; } }
@@ -93,11 +79,7 @@ tr:target td { background: #eef4ff; }
 @media (prefers-color-scheme: dark) {
   .aq { --aq-line: #46505b; --aq-hover: #37424c; --aq-good: #8dd2b8; --aq-ask: #edbc96; --aq-muted: #b9c3cd; }
   .first { --line: #2c3238; --mark: #8ab4dc; --track: #262c33; --tint: #4a3f12; }
-  .node small, .proj small, .m .k, .disk .k, .d, .trend.none { color: #9aa4ae; }
-  .c.doing { background: #1f4236; color: #a6e3cc; }
-  .c.ask { background: #4a2f1c; color: #f2c7a6; }
-  .c.failed { background: #4a2323; color: #f1b0b0; }
-  .c.closed { background: #2b3138; color: #9ba5b0; }
+  .node small, .m .k, .disk .k, .d, .trend.none { color: #9aa4ae; }
   body { color: #e3e6ea; background: #15181c; }
   header, th, td { border-color: #2c3238; }
   th, .bar, .note, .detail { color: #9aa4ae; }
@@ -222,3 +204,7 @@ tr:target td { background: #eef4ff; }
 #aqresults *{box-sizing:border-box}#aqresults strong,#aqresults h2,#aqresults h3{font-weight:500}
 #aqresults button{border:0;min-height:32px}#aqresults select{background:var(--paper);max-width:100%}#aqresults :focus-visible{outline:2px solid var(--good);outline-offset:2px}
 @media(pointer:coarse){#aqresults button,#aqresults select,#aqresults summary{min-height:44px}}
+
+/* Shared blocks inherit sizing and placement; TaskQ owns their internal styles. */
+#boards { color-scheme: light dark; }
+.board-blocks > div { margin-block: 8px; }
