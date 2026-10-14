@@ -15,12 +15,13 @@ const BATCH: usize = 100;
 
 /// An `agentq-event/1` payload: exactly a known span name and a metadata object.
 pub fn valid(p: &Value) -> bool {
-    p.as_object().is_some_and(|o| o.len() == 2 && o["metadata"].is_object() && o.get("name").and_then(Value::as_str).is_some_and(|n| NAMES.contains(&n)))
+    p.as_object().is_some_and(|o| o.len() == 2 && o.get("metadata").is_some_and(Value::is_object) && o.get("name").and_then(Value::as_str).is_some_and(|n| NAMES.contains(&n)))
 }
 
 /// The Langfuse observation ID: installation, generation and event ID, so a retry upserts the same observation.
+/// `:` never occurs in installation or event IDs (`A-Z a-z 0-9 . _ -`, enforced at ingest), so the ID is unambiguous.
 pub fn observation(r: &Pending) -> String {
-    format!("{}-{}-{}", r.installation, r.generation, r.event_id)
+    format!("{}:{}:{}", r.installation, r.generation, r.event_id)
 }
 
 /// One `event-create` per row, timed at producer observation, never at retry time (C5).
@@ -197,7 +198,7 @@ mod tests {
         let snap = Event { id: "s1", schema: "agentq-snapshot/1", observed: NOW, kind: Kind::Snapshot, payload: "{}" };
         assert_eq!(s.accept(b"v1", &[snap], NOW).unwrap(), [Outcome::Accepted]);
 
-        let lf = stub(vec!["500", "lost", "refuse inst-1-1-r2", "ok"]);
+        let lf = stub(vec!["500", "lost", "refuse inst-1:1:r2", "ok"]);
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Err("HTTP 500".into()));
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Err("HTTP 500".into()));
         assert_eq!(s.export_counts().unwrap(), (2, 0));
@@ -209,12 +210,12 @@ mod tests {
         let bodies = lf.bodies.lock().unwrap();
         let ids = |b: &str| serde_json::from_str::<Value>(b).unwrap()["batch"].as_array().unwrap().iter().map(|e| e["body"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         assert_eq!(bodies.len(), 3);
-        assert!(bodies.iter().all(|b| ids(b) == ["inst-1-1-r1", "inst-1-1-r2"]));
+        assert!(bodies.iter().all(|b| ids(b) == ["inst-1:1:r1", "inst-1:1:r2"]));
         // credentials travel only in the Authorization header, never in a forwarded body
         assert!(bodies.iter().all(|b| !b.contains(SECRET) && !b.contains("Basic")));
         // readback: one observation per event despite three deliveries, producer time and event ID kept
         let obs = lf.observations.lock().unwrap();
-        let r1 = &obs["inst-1-1-r1"];
+        let r1 = &obs["inst-1:1:r1"];
         assert_eq!(obs.len(), 2);
         assert_eq!((r1["name"].as_str(), r1["startTime"].as_str()), (Some("agentq.run"), Some(source::iso(NOW as u64 - 30).as_str())));
         assert_eq!((r1["metadata"]["dashq.event_id"].as_str(), r1["metadata"]["runner"].as_str()), (Some("r1"), Some("cargo test")));
@@ -229,5 +230,15 @@ mod tests {
         assert!(!valid(&json!({"name": "agentq.other", "metadata": {}})));
         assert!(!valid(&json!({"name": "agentq.run", "metadata": {}, "extra": 1})));
         assert!(!valid(&json!({"name": "agentq.run", "metadata": 1})));
+        // two keys without metadata: rejected, never a panic
+        assert!(!valid(&json!({"name": "agentq.run", "extra": {}})));
+    }
+
+    /// Distinct (installation, generation, event) triples never share a Langfuse observation ID.
+    #[test]
+    fn observation_ids_are_unambiguous() {
+        let row = |i: &str, g: i64, e: &str| Pending { id: 0, installation: i.into(), generation: g, event_id: e.into(), observed: 0, payload: String::new() };
+        assert_ne!(observation(&row("a-1", 1, "x")), observation(&row("a", 1, "1-x")));
+        assert_eq!(observation(&row("a-1", 1, "x")), "a-1:1:x");
     }
 }
