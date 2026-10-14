@@ -46,6 +46,7 @@ dependencies = [
  "coreq",
  "ring",
  "rusqlite",
+ "serde",
  "serde_json",
 ]
 

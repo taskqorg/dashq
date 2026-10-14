@@ -4,6 +4,7 @@ mod answer;
 mod data;
 mod enroll;
 mod page;
+mod policy;
 mod profile;
 mod resource;
 mod source;
@@ -21,7 +22,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -41,6 +42,8 @@ struct Config {
     public_host: String,
     /// `None`: no answer route (D13); writes need the dedicated credential and the pinned binary.
     answer: Option<answer::Config>,
+    /// `resources: true` enables the typed host-policy routes (D14); off until the target-host adapter is qualified.
+    resources: bool,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -107,6 +110,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
             Some(answer::Config { token: token.into(), boards })
         }
     };
+    let resources = match v.get("resources") {
+        None => false,
+        Some(x) => x.as_bool().ok_or("config: bad key resources")?,
+    };
     let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
     let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
@@ -120,6 +127,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         serverq_host: host,
         public_host,
         answer,
+        resources,
     })
 }
 
@@ -143,6 +151,7 @@ struct App {
     /// `Err` until `dashq admin` sets enrollment up, or when its store is unavailable.
     enroll: Result<enroll::Enroll, String>,
     answers: answer::Answers,
+    resources: policy::State,
 }
 
 impl App {
@@ -268,10 +277,14 @@ fn handle(app: &App, mut s: TcpStream) {
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
     let c = &app.cfg;
     let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
+    let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
     let t0 = profile::begin();
     let (op, status) = if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.answer", x.status)
+    } else if let Some(x) = policy::route(&rctx, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.resources", x.status)
     } else if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.enroll", x.status)
@@ -345,7 +358,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default() });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default() });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -438,7 +451,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default() }.doc(1800, json!({}), None);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -469,7 +482,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
             let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default() }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -480,6 +493,29 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             enroll::Enroll::answerer(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
             println!("answerer: {subject} {op} in {workspace}");
+        }
+        ["resources", "grant", workspace, subject, installation, hours, rest @ ..] => {
+            let hours: i64 = hours.parse().ok().filter(|h| (1..=24 * 365).contains(h)).unwrap_or_else(|| t.die(USAGE));
+            let (mut host, mut projects, mut runtimes) = (false, vec![], vec![]);
+            for x in rest {
+                match x.split_once('=') {
+                    None if *x == "host" => host = true,
+                    Some(("project", p)) => projects.push(p.to_string()),
+                    Some(("runtime", r)) => runtimes.push(r.to_string()),
+                    _ => t.die(USAGE),
+                }
+            }
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
+            let expires = source::now() as i64 + hours * 3600;
+            let (id, actor) = policy::issue(e.store(), workspace, subject, installation, host, &projects, &runtimes, expires).unwrap_or_else(|e| t.die(&e));
+            println!("resources grant: {id} for {subject} as {actor} on {installation}");
+        }
+        ["resources", "revoke", id] => {
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
+            let found = policy::revoke(e.store(), id).unwrap_or_else(|e| t.die(&e));
+            println!("resources revoke: {}", if found { "revoked" } else { "no such grant" });
         }
         ["profile", rest @ ..] => {
             let window = match rest {
@@ -578,7 +614,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         assert_eq!(route(&app, "POST", "/data", "", None).0, "405 Method Not Allowed");
         assert_eq!(route(&app, "GET", "/data", "period=5", None).0, "400 Bad Request");
@@ -586,7 +622,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None }
+        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false }
     }
 
     #[test]

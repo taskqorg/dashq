@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT 
 CREATE TABLE IF NOT EXISTS activations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
 CREATE TABLE IF NOT EXISTS answerers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
 CREATE TABLE IF NOT EXISTS answers(op_id TEXT PRIMARY KEY, subject TEXT NOT NULL, workspace TEXT NOT NULL, board TEXT NOT NULL, task INTEGER NOT NULL, revision INTEGER NOT NULL, payload BLOB NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'stale', 'unknown')), receipt TEXT, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS resource_grants(grant_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, subject TEXT NOT NULL, workspace TEXT NOT NULL, installation TEXT NOT NULL, generation INTEGER NOT NULL, projects TEXT NOT NULL, runtimes TEXT NOT NULL, host_policy INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS resource_ops(op_id TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, actor_id TEXT NOT NULL, grant_id TEXT NOT NULL, submit TEXT NOT NULL, expires_at INTEGER NOT NULL, delivered INTEGER NOT NULL, cancel INTEGER NOT NULL, state TEXT NOT NULL, receipt TEXT NOT NULL, at INTEGER NOT NULL);
 ";
 
 /// C5 bounds; tests shrink them.
@@ -388,7 +390,7 @@ impl Store {
     }
 
     /// One transaction under the single writer; dropped without commit on any error.
-    fn write<T>(&self, f: impl FnOnce(&Transaction) -> Result<T, Error>) -> Result<T, Error> {
+    pub(crate) fn write<T>(&self, f: impl FnOnce(&Transaction) -> Result<T, Error>) -> Result<T, Error> {
         let mut c = self.lock()?;
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let r = f(&tx)?;
