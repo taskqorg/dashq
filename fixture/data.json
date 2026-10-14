@@ -505,7 +505,81 @@
         "ready": 1,
         "waiting": 0,
         "later": 0
-      }
+      },
+      "tasks": [
+        {
+          "n": 10,
+          "title": "Doing task",
+          "url": "https://github.com/taskqorg/taskq/issues/10",
+          "state": "doing",
+          "revision": 6139993856,
+          "question": null,
+          "card": null
+        },
+        {
+          "n": 11,
+          "title": "Review task",
+          "url": "https://github.com/taskqorg/taskq/issues/11",
+          "state": "review",
+          "revision": 6139993901,
+          "question": {
+            "parsed": false,
+            "text": "Merge now or wait?",
+            "done": null,
+            "problem": null,
+            "evidence": [],
+            "choices": []
+          },
+          "card": "Merge now or wait?"
+        },
+        {
+          "n": 12,
+          "title": "Which option? <b>",
+          "url": "https://github.com/taskqorg/taskq/issues/12",
+          "state": "ask",
+          "revision": 6139994000,
+          "question": {
+            "parsed": true,
+            "text": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★",
+            "done": "checked",
+            "problem": "pick a store <i>",
+            "evidence": [],
+            "choices": [
+              {
+                "id": 1,
+                "text": "SQLite",
+                "recommended": false,
+                "consequential": false
+              },
+              {
+                "id": 3,
+                "text": "Files",
+                "recommended": true,
+                "consequential": false
+              }
+            ]
+          },
+          "card": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★"
+        },
+        {
+          "n": 13,
+          "title": "Ready task",
+          "url": "https://github.com/taskqorg/taskq/issues/13",
+          "state": "ready",
+          "revision": 6139994100,
+          "question": null,
+          "card": null
+        },
+        {
+          "n": 14,
+          "title": "Broken task",
+          "url": "https://github.com/taskqorg/taskq/issues/14",
+          "state": "failed",
+          "revision": 6139994200,
+          "question": null,
+          "card": null
+        }
+      ]
     },
     {
       "project": "taskqorg/agentq",
@@ -534,7 +608,8 @@
         "ready": null,
         "waiting": null,
         "later": null
-      }
+      },
+      "tasks": []
     },
     {
       "project": "taskqorg/dashq",
@@ -563,7 +638,8 @@
         "ready": null,
         "waiting": null,
         "later": null
-      }
+      },
+      "tasks": []
     }
   ],
   "resources": {

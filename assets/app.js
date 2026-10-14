@@ -30,12 +30,17 @@ async function refresh() {
       .map(e => [e.id, { value: e.value, checked: e.checked }]));
     const y = window.scrollY;
     // overview.md: the final number at once, a brief local tint where it changed; row and Attention swap together
+    // board counters tint in renderBoards()
     const before = new Map([...document.querySelectorAll('main [data-n]')].map(e => [e.id, e.dataset.n]));
-    // boards.md hides zero counters: a counter new to a shown board was 0
-    const was = e => before.has(e.id) ? before.get(e.id) : e.matches('.c') && document.getElementById(e.closest('[id]:not(.c)')?.id) ? '0' : undefined;
-    main.querySelectorAll('[data-n]').forEach(e => { const n = was(e); if (n !== undefined && n !== e.dataset.n) e.classList.add('tint'); });
+    main.querySelectorAll('[data-n]').forEach(e => { if (before.has(e.id) && before.get(e.id) !== e.dataset.n) e.classList.add('tint'); });
     DashqResources.preserve(main);
+    const oldBoards = document.getElementById('boards'), newBoards = main.querySelector('#boards');
+    if (oldBoards && newBoards) {
+      oldBoards.dataset.boards = newBoards.dataset.boards;
+      newBoards.replaceWith(oldBoards);
+    }
     document.getElementById('main').replaceWith(main);
+    renderBoards();
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
     if (version) selectVersion(version);
@@ -230,6 +235,7 @@ document.addEventListener('click', e => {
   const row = e.target.closest('.connect-select');
   if (row) selectConnection(row.getAttribute('aria-controls'));
 });
+renderBoards();
 bind();
 revealConnection();
 addEventListener('hashchange', revealConnection);

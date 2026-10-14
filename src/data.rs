@@ -689,6 +689,10 @@ pub fn build(inp: &Value) -> Value {
             counts[k] = count(&[&format!("q-{k}")]);
         }
         board["counts"] = counts;
+        board["tasks"] = issues.into_iter().flatten().map(|i| {
+            let state = COUNTS.iter().find(|k| i["labels"].as_array().is_some_and(|ls| ls.iter().any(|l| l == &format!("q-{k}"))));
+            json!({"n": i["number"], "title": i["title"], "url": i["url"], "state": state, "revision": null})
+        }).collect::<Vec<_>>().into();
         // taskq-snapshot (adapters.md S3 R1) replaces counts, questions and failures when configured; heartbeats stay
         if let Some(ts) = inp["taskq"].get(repo) {
             let tsrc = source(ts, now, GITHUB_LIMIT, None);
@@ -698,6 +702,11 @@ pub fn build(inp: &Value) -> Value {
             let pick = |f: &dyn Fn(&Value) -> bool, m: &dyn Fn(&Value) -> Value| -> Value { tasks.into_iter().flatten().filter(|t| f(t)).map(m).collect::<Vec<_>>().into() };
             board["source"] = tsrc;
             board["adapter"] = json!("taskq-snapshot");
+            // D13: preserve canonical question identities/limits/evidence; no second parser or session authority.
+            board["tasks"] = tasks.into_iter().flatten().map(|t| json!({
+                "n": t["n"], "title": t["title"], "url": t["url"], "state": t["state"],
+                "revision": t["revision"], "question": t["question"], "card": t["card"]
+            })).collect::<Vec<_>>().into();
             board["in_work"] = total(&["doing", "review"]);
             board["waiting"] = total(&["ask"]);
             board["ready"] = total(&["ready"]);
@@ -922,6 +931,13 @@ mod tests {
         let doc = build(&serde_json::from_str(include_str!("../fixture/input.json")).unwrap());
         let b = &doc["boards"][0];
         assert_eq!((b["adapter"].as_str(), b["in_work"].as_u64(), b["waiting"].as_u64(), b["ready"].as_u64()), (Some("taskq-snapshot"), Some(2), Some(1), Some(1)));
+        let source: Value = serde_json::from_str(crate::FIXTURE).unwrap();
+        let original = &source["taskq"]["taskqorg/taskq"]["value"]["tasks"];
+        for t in b["tasks"].as_array().unwrap() {
+            let row = original.as_array().unwrap().iter().find(|r| r["n"] == t["n"]).unwrap();
+            assert_eq!(t["revision"], row["revision"]);
+            assert_eq!(t["question"], row["question"], "D13 canonical choices/evidence/limits unchanged");
+        }
         let q = &b["questions"];
         // parsed card: source k, order and text kept, ★ as recommended; unparsed review card: verbatim, no choices
         assert_eq!(q[1], json!({"id": "https://github.com/taskqorg/taskq/issues/12", "number": 12, "title": "Which option? <b>", "url": "https://github.com/taskqorg/taskq/issues/12", "state": "ask",

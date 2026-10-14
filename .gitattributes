@@ -4,3 +4,5 @@ assets/taskq/resource-controls.css -text
 assets/taskq/LICENSE -text
 fixture/taskq/resource-controls.json -text
 fixture/page.html -text
+assets/taskq/answer-card.* -text
+assets/taskq/project-blocks.* -text

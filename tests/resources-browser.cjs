@@ -15,8 +15,8 @@ const fx = require('../fixture/taskq/resource-controls.json');
       await page.clock.install({time: 1000000});
       await page.route('http://fixture/**', route => {
         const path = new URL(route.request().url()).pathname;
-        const body = path === '/app.js' ? ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/app.js'].map(p => fs.readFileSync(p, 'utf8')).join('\n') :
-          path === '/style.css' ? ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css'].map(p => fs.readFileSync(p, 'utf8')).join('\n') :
+        const body = path === '/app.js' ? ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(p => fs.readFileSync(p, 'utf8')).join('\n') :
+          path === '/style.css' ? ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(p => fs.readFileSync(p, 'utf8')).join('\n') :
           path === '/data' ? '{}' : html;
         return route.fulfill({contentType: path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path === '/data' ? 'application/json' : 'text/html', body});
       });

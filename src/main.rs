@@ -348,8 +348,8 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
         return ("405 Method Not Allowed", "text/plain", b"method not allowed".to_vec());
     }
     match path {
-        "/app.js" => ("200 OK", "text/javascript; charset=utf-8", [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/app.js")].join("\n").into_bytes()),
-        "/style.css" => ("200 OK", "text/css; charset=utf-8", [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css")].join("\n").into_bytes()),
+        "/app.js" => ("200 OK", "text/javascript; charset=utf-8", app_js().into_bytes()),
+        "/style.css" => ("200 OK", "text/css; charset=utf-8", style_css().into_bytes()),
         _ => {
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
@@ -438,6 +438,14 @@ fn serve(t: &Tool, service: bool) -> ! {
     std::process::exit(1)
 }
 
+fn app_js() -> String {
+    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
+}
+
+fn style_css() -> String {
+    [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css")].join("\n")
+}
+
 fn fixture_doc() -> Value {
     data::build(&serde_json::from_str(FIXTURE).expect("fixture JSON"))
 }
@@ -449,7 +457,7 @@ fn fixture_html() -> String {
 
 /// The fixture page as one file: stylesheet inlined, script dropped (D2 --snapshot).
 fn snapshot_html() -> String {
-    let css = format!("<style>\n{}</style>", include_str!("../assets/style.css"));
+    let css = format!("<style>\n{}</style>", style_css());
     fixture_html().replace("<link rel=\"stylesheet\" href=\"/style.css\">", &css).replace("<script src=\"/app.js\" defer></script>\n", "")
 }
 
@@ -633,6 +641,13 @@ mod tests {
         assert!(!restarts(&Err("selftest failed".into()), false, true), "failed");
     }
 
+    // Chain D13: pinned shared card fixtures -> duplicate/stale/receipt behavior and unmodified assets.
+    #[test]
+    fn shared_board_conformance() {
+        let out = std::process::Command::new("node").arg("tests/boards.cjs").current_dir(env!("CARGO_MANIFEST_DIR")).output().expect("node is required for shared TaskQ conformance");
+        assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+
     #[test]
     fn fixture_rendering_is_pinned() {
         let html = fixture_html();
@@ -651,7 +666,7 @@ mod tests {
         let r = snapshot(&d);
         let html = std::fs::read_to_string(d.join("page.html")).unwrap();
         // pinned: fixture/page.html with the stylesheet inlined and the script dropped
-        let css = format!("<style>\n{}</style>", include_str!("../assets/style.css"));
+        let css = format!("<style>\n{}</style>", style_css());
         assert_eq!(html, FIXTURE_HTML.replace("<link rel=\"stylesheet\" href=\"/style.css\">", &css).replace("<script src=\"/app.js\" defer></script>\n", ""));
         assert!(html.contains(&css) && !html.contains("/style.css") && !html.contains("/app.js"));
         // CI (ubuntu-latest) ships Chrome; a local run without it only checks the HTML
