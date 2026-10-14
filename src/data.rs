@@ -617,6 +617,10 @@ pub fn build(inp: &Value) -> Value {
     let mut boards = Vec::new();
     let mut gh_states = Vec::new();
     let mut taskq_states = Vec::new();
+    // live taskq attempts per lowercase host name from fresh heartbeats: agents run there (#116);
+    // `unconfirmed`: hosts whose heartbeat came from a failed, stale or cached board read, with that reason
+    let mut working: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut unconfirmed: BTreeMap<String, String> = BTreeMap::new();
     for repo in inp["projects"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let snap = &inp["boards"][repo];
         let src = source(snap, now, GITHUB_LIMIT, None);
@@ -638,6 +642,7 @@ pub fn build(inp: &Value) -> Value {
             let Some(name) = hb["title"].as_str().and_then(|t| t.strip_prefix("taskq host ")).filter(|n| safe(n, 64, b"_.-")) else { continue };
             let body = hb["body"].as_str().unwrap_or("");
             let ttl = body.lines().find_map(|l| l.strip_prefix("ttl ")?.trim().parse().ok()).unwrap_or(HEARTBEAT_TTL);
+            let first = attempts.len();
             for l in body.lines() {
                 if let Some((n, id)) = l.strip_prefix('#').and_then(|l| l.split_once(' '))
                     && let Ok(n) = n.parse::<u64>()
@@ -649,6 +654,12 @@ pub fn build(inp: &Value) -> Value {
             let at = hb["updated_at"].as_str().and_then(iso_secs);
             let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
             let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
+            if src["state"] != "ok" {
+                unconfirmed.entry(name.to_ascii_lowercase()).or_insert_with(|| format!("{repo}: {}", src["reason"].as_str().unwrap_or("board read not confirmed")));
+            } else if cached_age.is_some_and(|a| a <= ttl) {
+                let tasks = working.entry(name.to_ascii_lowercase()).or_default();
+                tasks.extend(attempts[first..].iter().map(|a| format!("{repo}#{}", a["task"])));
+            }
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
             // taskq's own installation id (taskq.md § 4 `service`), never the host name; older heartbeats have none
             let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
@@ -701,6 +712,84 @@ pub fn build(inp: &Value) -> Value {
             current.push(json!({"source": "taskq", "host": null, "what": format!("{repo}#{}: failed", i["number"]), "since": null, "detail": detail, "trace_id": null, "url": i["url"]}));
         }
         boards.push(board);
+    }
+    // AgentQ coverage (#116): a running installation whose host's agents leave no compression or activity records.
+    // ponytail: Langfuse heartbeats carry no routing or hook state; those rows come from enrolled snapshots below.
+    // Absence is asserted only on a fresh, uncapped read of every record kind it rests on; otherwise it is a gap (D6).
+    let coverage_keys = ["activity", "compression", "native_tools", "agentq.installation", "agentq.compress", "agentq.run"];
+    let lf_gap = match coverage_keys.iter().filter(|k| capped(k)).copied().collect::<Vec<_>>() {
+        _ if !matches!(lf_src["state"].as_str(), Some("ok" | "incomplete")) => lf_src["reason"].as_str().map(String::from),
+        c if c.is_empty() => None,
+        c => Some(format!("capped query ({})", c.join(", "))),
+    };
+    if scoped && let Some(reason) = &lf_gap {
+        for x in fleet.iter().filter(|x| x["state"] == "ok") {
+            gaps.push(json!({"source": "agentq", "host": x["host"], "client": null, "what": "AgentQ coverage unknown", "since": null,
+                "detail": format!("Langfuse {reason}: missing compression or activity records of installation {} are not confirmed.", x["installation"].as_str().unwrap()), "trace_id": null}));
+        }
+    }
+    if scoped && lf_gap.is_none() {
+        let mut covered: HashMap<(String, &str), u64> = HashMap::new();
+        for r in rows("agentq.compress").into_iter().chain(rows("agentq.run")).filter(|r| in_period(r).is_some()) {
+            let Some((inst, _)) = aq_identity(r) else { continue };
+            let agent = match aq(r, "agentq.agent").as_str() {
+                Some("claude") => "claude-code",
+                Some(a) if agent_name(a).is_some() => a,
+                _ => "unknown",
+            };
+            *covered.entry((inst, agent)).or_default() += 1;
+        }
+        let legacy_rows = |host: &Value, agent: &Value| compression.iter().chain(&rtk).any(|c| c["host"] == *host && c["agent"] == *agent);
+        for x in fleet.iter().filter(|x| x["state"] == "ok") {
+            let (inst, host) = (x["installation"].as_str().unwrap().to_string(), &x["host"]);
+            let n = |a: &str| covered.get(&(inst.clone(), a)).copied().unwrap_or(0);
+            let total: u64 = covered.iter().filter(|((i, _), _)| *i == inst).map(|(_, n)| n).sum();
+            let calls: Vec<&Value> = activity.iter().filter(|a| a["host"] == *host).collect();
+            for a in &calls {
+                let agent = a["agent"].as_str().unwrap();
+                if n(agent) == 0 && n("unknown") == 0 && !legacy_rows(host, &a["agent"]) {
+                    let client = agent_name(agent).unwrap();
+                    current.push(json!({"source": "agentq", "host": host, "client": client, "what": format!("{client}: no compression records"), "since": null,
+                        "detail": format!("{} model calls in {}, but installation {inst} sent no agentq.compress or agentq.run record for this client.", a["calls"], dur(period)), "trace_id": a["trace_id"]}));
+                }
+            }
+            let name = host.as_str().unwrap().split('/').next().unwrap().to_ascii_lowercase();
+            if let Some(tasks) = working.get(&name).filter(|t| !t.is_empty() && calls.is_empty()) {
+                let none = if total == 0 && !compression.iter().chain(&rtk).any(|c| c["host"] == *host) { "activity or compression" } else { "activity" };
+                current.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": format!("TaskQ workers: no {none} records"), "since": null,
+                    "detail": format!("TaskQ attempts {} run on this host, but no {none} records arrived in {} (installation {inst}).", tasks.join(", "), dur(period)), "trace_id": null}));
+            }
+            if let Some(reason) = unconfirmed.get(&name).filter(|_| calls.is_empty() && working.get(&name).is_none_or(|t| t.is_empty())) {
+                gaps.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": "TaskQ workers: liveness unknown", "since": null,
+                    "detail": format!("TaskQ board read {reason}: whether agents run here without records is not confirmed (installation {inst})."), "trace_id": null}));
+            }
+        }
+    }
+    // Enrolled AgentQ profiles: an onboarded (AgentQ-owned) client that routes direct or lost its hooks.
+    for r in inp["installations"]["rows"].as_array().into_iter().flatten().filter(|r| r["product"] == "agentq" && r["connection"] != "revoked") {
+        let c = &r["snapshot"]["payload"]["configuration"];
+        if !matches!(c["state"].as_str(), Some("fresh" | "stale")) {
+            continue;
+        }
+        let label = r["host_label"].as_str().filter(|h| safe(h, 64, b"_.-")).unwrap_or("unknown");
+        let host = format!("{label}/{}", if r["runtime"] == "wsl" { "wsl" } else { "native" });
+        let last = if c["state"] == "stale" || r["observation"]["state"] != "ok" { " Last known: the snapshot is not fresh." } else { "" };
+        for p in c["profiles"].as_array().into_iter().flatten().filter(|p| p["owned"] == true) {
+            let client = p["label"].as_str().filter(|l| safe(l, 48, b" ._-")).unwrap_or("unknown client");
+            let item = |what: String, detail: String| json!({"source": "agentq", "host": host, "client": client, "what": format!("{client}: {what}"), "since": c["at"], "detail": detail + last, "trace_id": null});
+            match p["routing"].as_str() {
+                Some("direct") => current.push(item("routing direct".into(), "Onboarded client calls its provider directly: no AgentQ routing or provider compression.".into())),
+                Some("bypassed") => current.push(item("routing bypassed".into(), "Another provider owns the route of this onboarded client: no AgentQ routing.".into())),
+                _ => {}
+            }
+            if p["operations"].as_array().is_some_and(|o| o.iter().any(|x| x == "hooks")) {
+                match p["hooks"].as_str() {
+                    Some(h @ ("missing" | "absent" | "partial")) => current.push(item(format!("hooks {h}"), format!("AgentQ hooks of this onboarded client are {h}: hook compression and evidence stop."))),
+                    Some("registered" | "disabled" | "unsupported") => {}
+                    _ => gaps.push(item("hooks unknown".into(), "AgentQ could not read the hooks of this onboarded client.".into())),
+                }
+            }
+        }
     }
     let taskq_src = (!taskq_states.is_empty()).then(|| worst(taskq_states.iter().map(|(n, s)| (n.clone(), s)), now));
     let gh_src = if gh_states.is_empty() { source(&Value::Null, now, GITHUB_LIMIT, None) } else { worst(gh_states.iter().map(|(n, s)| (n.clone(), s)), now) };
@@ -876,5 +965,92 @@ mod tests {
         let incidents = doc["attention"]["incidents"].as_array().unwrap();
         assert_eq!(incidents.iter().filter(|i| i["source"] == "agentq").count(), 1, "one event id is one incident");
         assert!(doc["attention"]["gaps"].as_array().unwrap().iter().any(|g| g["what"] == "agentq installation inst-win: stale"));
+    }
+
+    /// Chain #116 A1: routing, hook and silent-compression failures of AgentQ installations reach Attention with host,
+    /// client and reason, and clear once the installation routes and compresses again. Risk: a fleet that reads ok while
+    /// every client bypasses AgentQ.
+    #[test]
+    fn agentq_coverage_failures_reach_attention_and_clear() {
+        let now = 1_791_875_139;
+        let at = |ago: u64| crate::source::iso(now - ago);
+        let aq_row = |name: &str, inst: &str, host: &str, agent: Option<&str>| {
+            let mut m = json!({"attributes.agentq.installation": inst, "attributes.host.name": host, "attributes.agentq.runtime": "linux"});
+            if let Some(a) = agent {
+                m["attributes.agentq.agent"] = json!(a);
+            }
+            json!({"id": format!("{name}-{inst}-{}", agent.unwrap_or("")), "name": name, "startTime": at(120), "traceId": "t1", "metadata": m})
+        };
+        let call = |host: &str, agent: &str| json!({"id": format!("g-{host}-{agent}"), "type": "GENERATION", "startTime": at(60), "traceId": "g1", "tags": [format!("host:{host}"), "runtime:native", format!("agent:{agent}")]});
+        let cases: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
+        let mut payload = cases["cases"]["profile_state_and_revision"].clone();
+        payload["configuration"]["profiles"][1]["owned"] = json!(true);
+        payload["configuration"]["profiles"][1]["hooks"] = json!("missing");
+        let mut inp = json!({
+            "now": now, "period": 1800, "filters": {}, "projects": ["taskqorg/dashq"],
+            "boards": {"taskqorg/dashq": {"at": now, "value": {"issues": [], "date": now, "hosts": [{"title": "taskq host WIN-1", "body": "version 4.2.0
+#7 a1", "updated_at": at(60)}]}}},
+            "langfuse": {"at": now, "value": {
+                "agentq.installation": [aq_row("agentq.installation", "inst-fra", "fra", None), aq_row("agentq.installation", "inst-win", "win-1", None)],
+                "activity": [call("fra", "codex"), call("fra", "claude-code")],
+                "agentq.compress": [aq_row("agentq.compress", "inst-fra", "fra", Some("claude"))]}},
+            "installations": {"source": {"state": "ok"}, "rows": [{"installation": "inst-mac", "product": "agentq", "connection": "active", "host_label": "mac", "runtime": "macos",
+                "observation": {"state": "ok"}, "snapshot": {"payload": payload}}]},
+        });
+        let rows = |inp: &Value| -> Vec<(String, String, String)> {
+            let doc = build(inp);
+            doc["attention"]["current"].as_array().unwrap().iter().filter(|i| i["source"] == "agentq").map(|i| (i["host"].as_str().unwrap().into(), i["client"].as_str().unwrap().into(), i["what"].as_str().unwrap().into())).collect()
+        };
+        let mut got = rows(&inp);
+        got.sort();
+        let want: Vec<(String, String, String)> = [
+            ("fra/native", "Codex", "Codex: no compression records"),
+            ("mac/native", "Claude Code", "Claude Code: hooks missing"),
+            ("mac/native", "Claude Code", "Claude Code: routing direct"),
+            ("mac/native", "Codex", "Codex: routing direct"),
+            ("win-1/native", "TaskQ workers", "TaskQ workers: no activity or compression records"),
+        ]
+        .iter()
+        .map(|(h, c, w)| (h.to_string(), c.to_string(), w.to_string()))
+        .collect();
+        assert_eq!(got, want);
+        // D6: a cached Langfuse read after a timeout, or a capped query, never asserts absence; it is a gap per installation
+        let gaps = |inp: &Value| -> Vec<(String, String)> {
+            let doc = build(inp);
+            doc["attention"]["gaps"].as_array().unwrap().iter().filter(|i| i["source"] == "agentq").map(|i| (i["host"].as_str().unwrap().into(), i["what"].as_str().unwrap().into())).collect()
+        };
+        let coverage_rows = |inp: &Value| rows(inp).into_iter().filter(|r| r.0 != "mac/native").collect::<Vec<_>>();
+        let unknown = vec![("fra/native".to_string(), "AgentQ coverage unknown".to_string()), ("win-1/native".into(), "AgentQ coverage unknown".into())];
+        let mut timed_out = inp.clone();
+        timed_out["langfuse"]["error"] = json!("timeout");
+        assert_eq!(coverage_rows(&timed_out), vec![]);
+        assert_eq!(gaps(&timed_out), unknown);
+        let mut capped = inp.clone();
+        capped["langfuse"]["value"]["truncated"] = json!(["activity"]);
+        capped["langfuse"]["incomplete"] = json!(true);
+        assert_eq!(coverage_rows(&capped), vec![]);
+        assert_eq!(gaps(&capped), unknown);
+        // an unconfirmed board read never asserts that TaskQ workers run without records
+        let mut board_down = inp.clone();
+        board_down["boards"]["taskqorg/dashq"]["error"] = json!("timeout");
+        assert!(!rows(&board_down).iter().any(|r| r.1 == "TaskQ workers"));
+        assert_eq!(gaps(&board_down), vec![("win-1/native".to_string(), "TaskQ workers: liveness unknown".to_string())]);
+        // recovery: the next complete read asserts again
+        assert_eq!(rows(&inp).len(), 5);
+        assert_eq!(gaps(&inp), vec![]);
+
+        let doc = build(&inp);
+        let win = doc["attention"]["current"].as_array().unwrap().iter().find(|i| i["host"] == "win-1/native").unwrap();
+        assert_eq!(win["detail"], "TaskQ attempts taskqorg/dashq#7 run on this host, but no activity or compression records arrived in 30m (installation inst-win).");
+
+        // agentq fixes routing: clients route, hooks registered, compression and activity records arrive
+        for p in inp["installations"]["rows"][0]["snapshot"]["payload"]["configuration"]["profiles"].as_array_mut().unwrap() {
+            p["routing"] = json!("routed");
+            p["hooks"] = json!("registered");
+        }
+        let v = &mut inp["langfuse"]["value"];
+        v["agentq.compress"].as_array_mut().unwrap().extend([aq_row("agentq.compress", "inst-fra", "fra", Some("codex")), aq_row("agentq.compress", "inst-win", "win-1", Some("codex"))]);
+        v["activity"].as_array_mut().unwrap().push(call("win-1", "codex"));
+        assert_eq!(rows(&inp), vec![]);
     }
 }
