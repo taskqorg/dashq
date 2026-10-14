@@ -36,7 +36,8 @@ tr:target td { background: #eef4ff; }
 .cap rect.fill { fill: var(--mark); }
 .policy { font-size: .875em; }
 .tint { animation: tint 1.3s ease-out; }
-@keyframes tint { from { background: var(--tint); } to { background: transparent; } }
+/* no `to`: the tint fades into the element's own background (TaskQ counter capsules have one) */
+@keyframes tint { from { background: var(--tint); } }
 @media (prefers-reduced-motion: reduce) { .tint { animation: none; } }
 @media (max-width: 60em) { .first { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 36em) { .node { grid-template-columns: repeat(2, minmax(0, 1fr)); } .who, .disks { grid-column: 1 / -1; } }

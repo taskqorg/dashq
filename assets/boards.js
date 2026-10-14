@@ -20,6 +20,9 @@ function renderBoards() {
   const boards = JSON.parse(root.dataset.boards), blocks = root.querySelector('.board-blocks');
   const projects = boardProjects(boards);
   const open = new Map([...blocks.querySelectorAll('details[id]')].map(d => [d.id, d.open]));
+  // overview.md: a counter whose value changed gets a brief local tint; a counter new to a shown board was 0 (hidden)
+  const counted = new Map([...blocks.querySelectorAll('.tqp-counts button[id]')].map(b => [b.id, b.textContent.trim()]));
+  const shownBefore = new Set([...blocks.children].map(e => e.id));
   const kept = new Set(), fragments = document.createDocumentFragment();
   const aggregate = document.createElement('div');
   aggregate.innerHTML = TaskqProjectBlocks.aggregate(projects);
@@ -96,6 +99,10 @@ function renderBoards() {
     for (let n = 2; used.has(id); n++) id = base + '-' + n;
     used.add(id);
     e.id = id;
+  });
+  blocks.querySelectorAll('.tqp-counts button').forEach(b => {
+    const was = counted.has(b.id) ? counted.get(b.id) : shownBefore.has(b.parentElement.closest('[id]').id) ? '0' : undefined;
+    if (was !== undefined && was !== b.textContent.trim()) b.classList.add('tint');
   });
   root.querySelector('.board-fallback').hidden = true;
 }

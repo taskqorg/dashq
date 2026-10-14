@@ -82,6 +82,25 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     assert.equal(await page.evaluate(() => document.activeElement.closest('[id$="-q-12"]') && document.activeElement.getAttribute('href')), link, 'card focus after Doing restored');
     await page.close();
   }
+  // counter tint (overview.md): a refresh tints changed and newly nonzero counters only; reduced motion drops the animation
+  {
+    const page = await browser.newPage({viewport: {width: 1024, height: 900}, reducedMotion: 'no-preference'});
+    await page.goto(url); await page.waitForSelector('#boards .tqp-counts');
+    const tinted = () => page.$$eval('#boards .tqp-counts button.tint', bs => bs.map(b => [b.parentElement.closest('[id]').id, b.dataset.state, getComputedStyle(b).animationName]));
+    const board = 'board-taskqorg%2Ftaskq';
+    // Doing 1 -> 0 (hidden), Ready 1 -> 2, Later 0 -> 1; Review, Ask, Failed and Closed `?` unchanged
+    snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: [...b.tasks.filter(t => t.state !== 'doing'),
+      {...b.tasks.find(t => t.state === 'ready'), n: 15}, {...b.tasks.find(t => t.state === 'ready'), n: 16, state: 'later'}]});
+    await page.evaluate(() => refresh());
+    assert.deepEqual(await tinted(), [[board, 'ready', 'tint'], [board, 'later', 'tint']], 'changed and newly nonzero counters tint');
+    await page.evaluate(() => refresh());
+    assert.deepEqual(await tinted(), [], 'unchanged values do not tint');
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    snapshot = boards => boards;
+    await page.evaluate(() => refresh());
+    assert.deepEqual(await tinted(), [[board, 'doing', 'none'], [board, 'ready', 'none']], 'reduced motion: marked, no animation');
+    await page.close();
+  }
   // narrow long-text fixture: long project, title and question wrap inside the column
   const page = await browser.newPage({viewport: {width: 360, height: 900}, colorScheme: 'dark'});
   await page.goto(url); await page.addStyleTag({content: 'html{font-size:20px}'});
@@ -93,5 +112,5 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'long text overflow');
   await page.locator('#boards').screenshot({path: `${out}/360-20-dark-long.png`});
   await browser.close(); server.close();
-  console.log('PASS boards browser (' + browser.version() + '): 4 size/theme layouts, long text, counters, icon contrast, Attention, 3 refreshes, changing-snapshot focus');
+  console.log('PASS boards browser (' + browser.version() + '): 4 size/theme layouts, long text, counters, icon contrast, Attention, 3 refreshes, changing-snapshot focus, counter tint');
 })().catch(e => { console.error(e); server.close(); process.exit(1); });
