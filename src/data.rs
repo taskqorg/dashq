@@ -109,8 +109,15 @@ fn num(v: &Value) -> Option<f64> {
     v.as_f64().filter(|n| n.is_finite() && *n >= 0.0)
 }
 
+/// `MAJOR.MINOR.PATCH[-pre]` (dev builds such as `4.2.0-dev.1791961334`); build metadata and other forms read unknown.
 pub fn semver(v: &Value) -> Value {
-    v.as_str().filter(|s| s.split('.').count() == 3 && s.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))).map_or(Value::Null, |s| json!(s))
+    let ok = |s: &str| {
+        let (core, pre) = s.split_once('-').map_or((s, None), |(c, p)| (c, Some(p)));
+        core.split('.').count() == 3
+            && core.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+            && pre.is_none_or(|p| p.split('.').all(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')))
+    };
+    v.as_str().filter(|s| s.len() <= 64 && ok(s)).map_or(Value::Null, |s| json!(s))
 }
 
 fn trace(row: &Value) -> Value {
