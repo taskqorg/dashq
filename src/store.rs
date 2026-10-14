@@ -571,10 +571,12 @@ impl Store {
             if a["workspace"] != workspace.as_str() || !(role.as_deref() == Some("admin") || (role.is_some() && account == subject)) {
                 return Ok(Queued::Refused("authority"));
             }
-            // unresolved: no result yet, and either pulled (the host may be running it) or still deliverable
+            // unresolved, in any generation: no result yet, and either pulled (the host may be running it, also after a
+            // revoke and reconnect) or still deliverable (unexpired, generation not revoked)
             let (pending, unresolved, applying): (i64, i64, i64) = tx.query_row(
-                "SELECT COALESCE(SUM(generation = ?2 AND expires_at > ?3), 0), COUNT(*), COALESCE(SUM(generation = ?2 AND apply = 1), 0)
-                 FROM operations WHERE installation = ?1 AND result IS NULL AND (delivered = 1 OR expires_at > ?3)",
+                "SELECT COALESCE(SUM(generation = ?2 AND expires_at > ?3), 0), COUNT(*), COALESCE(SUM(apply = 1), 0)
+                 FROM operations o WHERE installation = ?1 AND result IS NULL AND (delivered = 1 OR (expires_at > ?3
+                   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation)))",
                 params![inst, generation, now],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?;

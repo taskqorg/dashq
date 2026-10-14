@@ -1927,6 +1927,19 @@ mod tests {
         assert!(x.store.revoke("inst-r2", T0 + 803).unwrap());
         assert_eq!(post(&e, &cred2, &op5, T0 + 804), (401, json!({"protocol": 1, "error": "revoked"})));
         assert_eq!((state(&e, &op_id(5), T0 + 804), state(&e, &op_id(6), T0 + 804)), (json!("unknown"), json!("revoked")));
+        // reconnecting the installation: the unknown apply may still run on the host, so no new apply, also after restart
+        configurable(&e, "inst-r2", T0 + 805);
+        assert_eq!(x.configure("github|1", "inst-r2", &op_id(7), Some(PLAN), &[ROUTING], T0 + 806), Err("busy"));
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        let x = e.as_ref().unwrap();
+        assert_eq!(x.configure("github|1", "inst-r2", &op_id(7), Some(PLAN), &[ROUTING], T0 + 807), Err("busy"));
+        // an undelivered apply of a revoked generation never runs, so it does not block the reconnected installation
+        configurable(&e, "inst-r4", T0 + 810);
+        x.configure("github|1", "inst-r4", &op_id(8), Some(PLAN), &[ROUTING], T0 + 810).unwrap();
+        assert!(x.store.revoke("inst-r4", T0 + 811).unwrap());
+        configurable(&e, "inst-r4", T0 + 812);
+        assert!(x.configure("github|1", "inst-r4", &op_id(9), Some(PLAN), &[ROUTING], T0 + 813).is_ok());
         // another installation's credential never reaches these operations
         let host3 = configurable(&e, "inst-r3", T0 + 900);
         let cred3 = coreq::enroll::active(&host3).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
