@@ -72,3 +72,5 @@ Connection detail uses [L1–L4](connections.md); source freshness and enrollmen
 AgentQ integration detail follows [G1–G4](agentq-settings.md); configuration, host readback and client verification stay distinct. TaskQ Work mode remains the separate task/admission owner.
 
 Supporting AgentQ activity view: [optimization results P1–P3](optimization-results.md); it does not displace first-screen resources, Attention or Boards.
+
+Service versions and diagnostics are a supporting view under [D18 / V1–V4](service-versions.md), preserving the first-screen operational layout.

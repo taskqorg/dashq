@@ -169,3 +169,7 @@ Accepted target: [client integration G1–G4](docs/design/agentq-settings.md) ad
 ## D17. AgentQ optimization results
 
 Accepted target: [optimization results P1–P3](docs/design/optimization-results.md) refines D8.4 with AgentQ-owned accounting definitions, honest coverage and a separate paired-experiment view. Read-only; it adds no configuration authority, optimizer or experiment runner. Existing metadata/privacy and source-failure rules remain.
+
+## D18. Service versions and diagnostics
+
+Accepted target: [service versions V1–V4](docs/design/service-versions.md) refines D8.2/D9. Distinguish available, selected, running and verified health per installation; coreq and each consumer retain lifecycle ownership. Read-only diagnostics use allowlisted evidence. No remote update, restart or rollback authority is added.

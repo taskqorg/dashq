@@ -1,0 +1,14 @@
+{
+  "status": "accepted design; synthetic only",
+  "contract": "DashQ D18; V1-V4; existing coreq and consumer lifecycle contracts",
+  "referenceSha256": "c07667794ebc27f92c11fd71cafd9540bbbeb56e76e9e21ac7eaece6a81dcfaa",
+  "qualification": [
+    "1024/16 light",
+    "360/20 dark",
+    "waiting, starting, checksum, rollback, stale"
+  ],
+  "limitations": [
+    "No live sources",
+    "No remote lifecycle actions"
+  ]
+}
