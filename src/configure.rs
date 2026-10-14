@@ -1,6 +1,6 @@
 //! Guarded AgentQ configuration review and apply (dashq.md D16, docs/design/agentq-settings.md G2/G3, #63). A
 //! signed-in actor asks the host for a plan of typed changes, reviews the host's exact diff and applies that plan;
-//! the operations travel through the #96 store and `/operations`. DashQ never edits a host config: the plan, the
+//! the operations travel through the #96 store and `/machine/operations`. DashQ never edits a host config: the plan, the
 //! outcome and the readback all come from AgentQ. Authority is the server's (`Enroll::configure`); the browser
 //! names only the installation, a fresh operation ID and either the changes or the reviewed plan's operation.
 

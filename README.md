@@ -45,7 +45,7 @@ dash.ufobe.com {
 }
 ```
 
-Enrollment (D11, inactive until set up): use [fixture/Caddyfile](fixture/Caddyfile) instead, exempting only the `POST` machine routes from the guard (and from Cloudflare Access), then run `dashq admin <workspace> <provider subject>` on the host; `/connect` shows a signed-in account its subject.
+Enrollment (D11, inactive until set up): use [fixture/Caddyfile](fixture/Caddyfile) instead, exempting only `POST /machine/*` from the guard (and from Cloudflare Access), then run `dashq admin <workspace> <provider subject>` on the host; `/connect` shows a signed-in account its subject.
 
 Cloudflare: proxied DNS record for `dash.ufobe.com`, the host added to the Langfuse Access application, a public bypass for `/.well-known/acme-challenge/*`. Rollback: remove the site block, `systemctl reload caddy`, `dashq service uninstall`.
 

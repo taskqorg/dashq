@@ -31,7 +31,7 @@ pub const STALE_SECS: u64 = 180;
 pub const TREND_SAMPLES: i64 = 3;
 /// C5: first-connection progress polls every 2 s for at most 60 s.
 const WAIT_SECS: i64 = 60;
-const MACHINE: [&str; 8] = ["/connect/device", "/connect/token", "/connect/ack", "/ingest", "/connection/receipt", "/connection/revoke", "/operations", "/operations/result"];
+const MACHINE: [&str; 8] = ["/machine/connect/device", "/machine/connect/token", "/machine/connect/ack", "/machine/ingest", "/machine/connection/receipt", "/machine/connection/revoke", "/machine/operations", "/machine/operations/result"];
 /// AgentQ configure fields and values (agentq CONFIGURATION.md A3 request `changes`); no removal value exists.
 pub const CHANGES: [(&str, &[&str]); 5] = [("routing", &["routed", "direct"]), ("optimization", &["enabled", "disabled"]), ("mcp", &["registered"]), ("hooks", &["registered"]), ("plugin", &["enabled"])];
 
@@ -378,8 +378,8 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
     }
     let unavailable = |_| error("503 Service Unavailable", "unavailable");
     match r.path {
-        "/connect/device" => device(e, r, &body, now),
-        "/connect/token" => {
+        "/machine/connect/device" => device(e, r, &body, now),
+        "/machine/connect/token" => {
             let Some(code) = body["device_code"].as_str() else { return error("400 Bad Request", "invalid_request") };
             let device = sha256(code);
             match e.store.poll(&device, now) {
@@ -412,18 +412,18 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
             let v = sha256(cred);
             match e.store.credential(&v) {
                 // revoke always ends a connection, whatever scope it names
-                Ok(Some(c)) if r.path != "/connection/revoke" && !same_board(&body, &c.grant) => return error("403 Forbidden", "scope"),
+                Ok(Some(c)) if r.path != "/machine/connection/revoke" && !same_board(&body, &c.grant) => return error("403 Forbidden", "scope"),
                 Err(x) => return unavailable(x),
                 _ => {}
             }
-            if ["/ingest", "/connection/receipt", "/operations", "/operations/result"].contains(&r.path) {
+            if ["/machine/ingest", "/machine/connection/receipt", "/machine/operations", "/machine/operations/result"].contains(&r.path) {
                 return device_data(e, r.path, &v, &body, now);
             }
-            let res = if r.path == "/connect/ack" { e.store.ack(&v, now) } else { e.store.revoke_credential(&v, now) };
+            let res = if r.path == "/machine/connect/ack" { e.store.ack(&v, now) } else { e.store.revoke_credential(&v, now) };
             match res {
                 Ok(None) => error("401 Unauthorized", "invalid_credential"),
                 // a revoked credential cannot activate; revoke repeats its reply so offline retries end
-                Ok(Some(c)) if c.revoked && r.path == "/connect/ack" => error("401 Unauthorized", "revoked"),
+                Ok(Some(c)) if c.revoked && r.path == "/machine/connect/ack" => error("401 Unauthorized", "revoked"),
                 Ok(Some(c)) => {
                     let mut x = json!({"protocol": 1, "state": if c.revoked { "revoked" } else { "active" }, "generation": c.grant.generation});
                     with_board(&mut x, &c.grant);
@@ -435,7 +435,7 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
     }
 }
 
-/// `/ingest` and `/connection/receipt` for an authenticated device; every call rechecks revocation.
+/// `/machine/ingest` and `/machine/connection/receipt` for an authenticated device; every call rechecks revocation.
 fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp {
     let c = match e.store.credential(v) {
         Ok(Some(c)) => c,
@@ -458,7 +458,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         store::Error::Denied => error("401 Unauthorized", "revoked"),
         _ => error("503 Service Unavailable", "unavailable"),
     };
-    if path == "/operations" {
+    if path == "/machine/operations" {
         let Some(cap) = body["capability"].as_str() else { return error("400 Bad Request", "invalid_request") };
         return match e.store.pull(v, cap, now) {
             Ok(Some(ops)) => json("200 OK", json!({"protocol": 1, "operations": ops})),
@@ -466,7 +466,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
             Err(x) => refused(x),
         };
     }
-    if path == "/operations/result" {
+    if path == "/machine/operations/result" {
         let (Some(op), Some(digest)) = (body["operation"].as_str(), body["digest"].as_str()) else { return error("400 Bad Request", "invalid_request") };
         // a result is metadata (C4), at most 16 KiB
         let result = body["result"].to_string();
@@ -479,7 +479,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
             Err(x) => refused(x),
         };
     }
-    if path == "/connection/receipt" {
+    if path == "/machine/connection/receipt" {
         let Some(id) = body["event_id"].as_str() else { return error("400 Bad Request", "invalid_request") };
         return match e.store.receipt(v, id) {
             Ok(Some((schema, o))) => {
@@ -987,7 +987,7 @@ mod tests {
     }
 
     fn start(e: &Result<Enroll, String>, inst: &str, now: i64) -> (String, String) {
-        let (s, v) = machine(e, "/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["agentq-snapshot/1"]}), now);
+        let (s, v) = machine(e, "/machine/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["agentq-snapshot/1"]}), now);
         assert_eq!(s, 200, "{v}");
         assert_eq!((&v["verification_uri"], &v["expires_in"], &v["interval"]), (&json!("https://dash.example.com/connect"), &json!(600), &json!(5)));
         (v["device_code"].as_str().unwrap().into(), v["user_code"].as_str().unwrap().into())
@@ -1005,7 +1005,8 @@ mod tests {
 
     impl coreq::enroll::Wire for Wire<'_> {
         fn post(&mut self, destination: &str, route: &str, auth: Option<&str>, body: &Value) -> Result<(u16, Value), String> {
-            assert_eq!(destination, "https://dash.example.com");
+            assert_eq!(destination, "https://dash.example.com/machine");
+            let route = &format!("/machine{route}");
             self.calls.push(route.into());
             Ok(machine(self.e, route, auth, body.clone(), self.now))
         }
@@ -1031,11 +1032,11 @@ mod tests {
         let host = dir("client-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
         let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
-        let a = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         assert_eq!((&a["generation"], &a["workspace"], &a["product"]), (&json!(1), &json!("ws-1"), &json!("agentq")));
-        assert_eq!(w.calls, ["/connect/device", "/connect/token", "/connect/token", "/connect/ack"]);
+        assert_eq!(w.calls, ["/machine/connect/device", "/machine/connect/token", "/machine/connect/token", "/machine/connect/ack"]);
         // repeating enrollment returns the active connection without new requests or grants
-        coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         assert_eq!(w.calls.len(), 4);
         let cred = a["credential"].as_str().unwrap();
         assert!(cred.len() >= 43, "256-bit credential");
@@ -1044,22 +1045,22 @@ mod tests {
         let c = e.as_ref().unwrap().store.credential(&sha256(cred)).unwrap().unwrap();
         assert!(c.active && !c.revoked && c.grant.account == "github|1");
         // revoke survives restart; the reply repeats so offline retries end
-        assert_eq!(machine(&e, "/connection/revoke", Some(cred), json!({"protocol": 1}), T0 + 60), (200, json!({"protocol": 1, "state": "revoked", "generation": 1})));
+        assert_eq!(machine(&e, "/machine/connection/revoke", Some(cred), json!({"protocol": 1}), T0 + 60), (200, json!({"protocol": 1, "state": "revoked", "generation": 1})));
         drop(e);
         let e = Enroll::open(&d, HOST);
-        assert_eq!(machine(&e, "/connection/revoke", Some(cred), json!({"protocol": 1}), T0 + 61), (200, json!({"protocol": 1, "state": "revoked", "generation": 1})));
-        assert_eq!(machine(&e, "/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 62), (401, json!({"protocol": 1, "error": "revoked"})));
-        assert_eq!(machine(&e, "/connect/ack", Some("forged"), json!({"protocol": 1}), T0 + 62), (401, json!({"protocol": 1, "error": "invalid_credential"})));
-        assert_eq!(machine(&e, "/connect/ack", None, json!({"protocol": 1}), T0 + 62).0, 401);
+        assert_eq!(machine(&e, "/machine/connection/revoke", Some(cred), json!({"protocol": 1}), T0 + 61), (200, json!({"protocol": 1, "state": "revoked", "generation": 1})));
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 62), (401, json!({"protocol": 1, "error": "revoked"})));
+        assert_eq!(machine(&e, "/machine/connect/ack", Some("forged"), json!({"protocol": 1}), T0 + 62), (401, json!({"protocol": 1, "error": "invalid_credential"})));
+        assert_eq!(machine(&e, "/machine/connect/ack", None, json!({"protocol": 1}), T0 + 62).0, 401);
         assert!(e.as_ref().unwrap().store.authorize(&sha256(cred)).unwrap().is_none());
     }
 
     #[test]
     fn polling_lost_replies_and_expiry() {
         let (d, e) = setup("poll");
-        assert_eq!(machine(&e, "/connect/device", None, json!({"protocol": 2}), T0), (400, json!({"protocol": 1, "error": "unsupported_protocol"})));
+        assert_eq!(machine(&e, "/machine/connect/device", None, json!({"protocol": 2}), T0), (400, json!({"protocol": 1, "error": "unsupported_protocol"})));
         let (device, code) = start(&e, "inst-1", T0);
-        let tok = |e: &Result<Enroll, String>, now| machine(e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now);
+        let tok = |e: &Result<Enroll, String>, now| machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), now);
         assert_eq!(tok(&e, T0 + 5).1["error"], "authorization_pending");
         assert_eq!(tok(&e, T0 + 7).1["error"], "slow_down");
         assert_eq!(tok(&e, T0 + 12).1["error"], "slow_down", "interval is now 10 s");
@@ -1074,18 +1075,18 @@ mod tests {
         let e = Enroll::open(&d, HOST);
         assert_eq!(tok(&e, T0 + 40), (200, first.clone()));
         let cred = first["credential"].as_str().unwrap();
-        assert_eq!(machine(&e, "/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 41), (200, json!({"protocol": 1, "state": "active", "generation": 1})));
-        assert_eq!(machine(&e, "/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 42).0, 200);
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 41), (200, json!({"protocol": 1, "state": "active", "generation": 1})));
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 42).0, 200);
         assert_eq!(tok(&e, T0 + 43).1["error"], "invalid_grant");
         let sealed: Option<Vec<u8>> = rusqlite::Connection::open(d.join("dashq.db")).unwrap().query_row("SELECT sealed FROM pairings", [], |r| r.get(0)).unwrap();
         assert_eq!(sealed, None, "erased at acknowledgement");
         // approved but never acknowledged: expiry erases the token response
         let (device2, code2) = start(&e, "inst-2", T0 + 100);
         decide(&e, "github|1", &code2, "approve", "ws-1", T0 + 110);
-        assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device2}), T0 + 700).1["error"], "expired_token");
+        assert_eq!(machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device2}), T0 + 700).1["error"], "expired_token");
         let (_, code3) = start(&e, "inst-3", T0 + 800);
         assert!(decide(&e, "github|1", &code3, "approve", "ws-1", T0 + 1400).1.contains("unknown, expired"));
-        assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": "nope"}), T0).1["error"], "invalid_grant");
+        assert_eq!(machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": "nope"}), T0).1["error"], "invalid_grant");
     }
 
     #[test]
@@ -1095,15 +1096,15 @@ mod tests {
         let (_d, e) = setup("capability");
         let req = |inst: &str, product: &str, caps: Value| json!({"protocol": 1, "product": product, "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": [format!("{product}-snapshot/1")], "capabilities": caps});
         for (product, caps) in [("serverq", json!(["agentq.configure"])), ("agentq", json!(["agentq.run"])), ("agentq", json!(["agentq.configure", "agentq.configure"])), ("agentq", json!([])), ("agentq", json!("agentq.configure"))] {
-            assert_eq!(machine(&e, "/connect/device", None, req("inst-x", product, caps.clone()), T0), (400, json!({"protocol": 1, "error": "invalid_request"})), "{product} {caps}");
+            assert_eq!(machine(&e, "/machine/connect/device", None, req("inst-x", product, caps.clone()), T0), (400, json!({"protocol": 1, "error": "invalid_request"})), "{product} {caps}");
         }
         let token = |inst: &str, ticks: &str| {
-            let (_, v) = machine(&e, "/connect/device", None, req(inst, "agentq", json!(["agentq.configure"])), T0);
+            let (_, v) = machine(&e, "/machine/connect/device", None, req(inst, "agentq", json!(["agentq.configure"])), T0);
             let (device, code) = (v["device_code"].as_str().unwrap().to_string(), v["user_code"].as_str().unwrap().to_string());
             let p = page(&e, "github|1", &code, T0).1;
             assert!(p.contains("<input type=\"checkbox\" name=\"capability.agentq.configure\" value=\"grant\"> Allow <code>agentq.configure</code>"), "{p}");
             assert!(decide(&e, "github|1", &code, &format!("approve{ticks}"), "ws-1", T0 + 1).1.contains("Approved"));
-            machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1
+            machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1
         };
         // approving the connection alone grants no capability; a forged extra capability is ignored
         assert_eq!(token("inst-1", "&capability.agentq.run=grant")["capabilities"], json!([]));
@@ -1112,12 +1113,12 @@ mod tests {
         let (device, code) = start(&e, "inst-3", T0);
         assert!(!page(&e, "github|1", &code, T0).1.contains("Also requested"));
         decide(&e, "github|1", &code, "approve&capability.agentq.configure=grant", "ws-1", T0 + 1);
-        assert!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1.get("capabilities").is_none());
+        assert!(machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1.get("capabilities").is_none());
         // the shared client: approval without the tick leaves the active grant without the capability
         let host = dir("capability-host");
         let r = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &["agentq.configure"] };
         let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
-        assert_eq!(coreq::enroll::pair(&host, "https://dash.example.com", &r, &mut w).unwrap()["capabilities"], json!([]));
+        assert_eq!(coreq::enroll::pair(&host, "https://dash.example.com/machine", &r, &mut w).unwrap()["capabilities"], json!([]));
     }
 
     #[test]
@@ -1126,29 +1127,29 @@ mod tests {
         let scope = json!({"name": "taskq-board/1", "value": "taskqorg/taskq"});
         let req = |inst: &str, scope: Value| json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["agentq-snapshot/1"], "scope": scope});
         for bad in [json!({"name": "taskq-board"}), json!({"name": "board", "value": "x"}), json!({"name": "taskq-board/1", "value": "a\nb"}), json!("taskq-board/1")] {
-            assert_eq!(machine(&e, "/connect/device", None, req("inst-x", bad.clone()), T0).1["error"], "invalid_request", "{bad}");
+            assert_eq!(machine(&e, "/machine/connect/device", None, req("inst-x", bad.clone()), T0).1["error"], "invalid_request", "{bad}");
         }
         // A1: the page names the scope the device requested; a request without one renders as before
-        let (_, v) = machine(&e, "/connect/device", None, req("inst-1", scope.clone()), T0);
+        let (_, v) = machine(&e, "/machine/connect/device", None, req("inst-1", scope.clone()), T0);
         let (device, code) = (v["device_code"].as_str().unwrap(), v["user_code"].as_str().unwrap());
         assert!(page(&e, "github|1", code, T0).1.contains("<dt>Board scope</dt><dd><code>taskq-board/1</code>: <code>taskqorg/taskq</code></dd>"));
         assert!(!page(&e, "github|1", &start(&e, "inst-2", T0).1, T0).1.contains("Board scope"));
         // A2: the grant keeps the approved scope and token, status and receipt replies name it
         assert!(decide(&e, "github|1", code, "approve", "ws-1", T0 + 5).1.contains("Approved"));
-        let tok = |scope: Value| machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device, "scope": scope}), T0 + 10);
+        let tok = |scope: Value| machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device, "scope": scope}), T0 + 10);
         assert_eq!(tok(json!({"name": "taskq-board/1", "value": "taskqorg/other"})), (403, json!({"protocol": 1, "error": "scope"})));
         let (s, t) = tok(scope.clone());
         assert_eq!((s, &t["scope"]), (200, &scope));
         let cred = t["credential"].as_str().unwrap();
-        let (s, a) = machine(&e, "/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 11);
+        let (s, a) = machine(&e, "/machine/connect/ack", Some(cred), json!({"protocol": 1}), T0 + 11);
         assert_eq!((s, &a["scope"]), (200, &scope));
         let other = json!({"protocol": 1, "scope": {"name": "taskq-board/1", "value": "taskqorg/other"}, "records": [rec("e1", T0, json!({"n": 1}))]});
-        assert_eq!(machine(&e, "/ingest", Some(cred), other, T0 + 12), (403, json!({"protocol": 1, "error": "scope"})));
+        assert_eq!(machine(&e, "/machine/ingest", Some(cred), other, T0 + 12), (403, json!({"protocol": 1, "error": "scope"})));
         assert_eq!(ingest(&e, cred, vec![rec("e1", T0, json!({"n": 1}))], T0 + 12).0, 200);
-        let (s, r) = machine(&e, "/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": "e1", "scope": scope}), T0 + 13);
+        let (s, r) = machine(&e, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": "e1", "scope": scope}), T0 + 13);
         assert_eq!((s, &r["scope"]), (200, &scope));
         // revoke always ends the connection
-        assert_eq!(machine(&e, "/connection/revoke", Some(cred), json!({"protocol": 1, "scope": {"name": "x/1", "value": "y"}}), T0 + 14).1["state"], "revoked");
+        assert_eq!(machine(&e, "/machine/connection/revoke", Some(cred), json!({"protocol": 1, "scope": {"name": "x/1", "value": "y"}}), T0 + 14).1["state"], "revoked");
     }
 
     #[test]
@@ -1178,7 +1179,7 @@ mod tests {
         let (_, c1) = start(&e, "inst-0", T0);
         assert!(page(&e, "github|1", &c1, T0).1.contains("already connected"));
         // a forged subject header on a machine route grants nothing
-        let forged = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 5);
+        let forged = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 5);
         assert_eq!(forged.1["error"], "authorization_pending");
         // wrong workspace counts as a failed approval; five invalidate the code
         Enroll::admin(&_d, "ws-2", "github|2").unwrap();
@@ -1190,13 +1191,13 @@ mod tests {
         }
         assert_eq!(decide(&e, "github|1", &code, "deny", "ws-1", T0 + 11).0, "200 OK");
         assert!(decide(&e, "github|1", &code, "approve", "ws-1", T0 + 12).1.contains("unknown, expired"));
-        assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 20).1["error"], "access_denied");
+        assert_eq!(machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 20).1["error"], "access_denied");
         let (device2, code2) = start(&e, "inst-2", T0);
         for _ in 0..5 {
             decide(&e, "github|2", &code2, "approve", "ws-1", T0 + 10);
         }
         assert!(decide(&e, "github|1", &code2, "approve", "ws-1", T0 + 11).1.contains("unknown, expired"));
-        assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device2}), T0 + 20).1["error"], "invalid_grant");
+        assert_eq!(machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device2}), T0 + 20).1["error"], "invalid_grant");
         assert!(s.credential(b"none").unwrap().is_none());
     }
 
@@ -1205,16 +1206,20 @@ mod tests {
         let d = dir("setup");
         let none = Enroll::open(&d, HOST);
         assert!(none.is_err());
-        assert_eq!(call(&none, "POST", "/connect/device", &[], "{}", T0).0, "503 Service Unavailable");
+        assert_eq!(call(&none, "POST", "/machine/connect/device", &[], "{}", T0).0, "503 Service Unavailable");
         assert!(Enroll::admin(&d, "ws 1", "x").is_err() && Enroll::admin(&d, "ws", "a\nb").is_err());
         let (d, e) = setup("limits");
         #[cfg(unix)]
         assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(d.join("dashq.key")).unwrap().permissions()) & 0o777, 0o600);
-        assert_eq!(call(&e, "GET", "/connect/token", &[], "", T0).0, "405 Method Not Allowed");
+        assert_eq!(call(&e, "GET", "/machine/connect/token", &[], "", T0).0, "405 Method Not Allowed");
         assert!(route(&e, &Req { method: "GET", path: "/data", query: "", headers: &[], body: b"" }, T0).is_none());
+        // the old unprefixed machine paths are gone, no aliases (#110): the page router answers 404
+        for p in MACHINE.map(|p| p.strip_prefix("/machine").unwrap()) {
+            assert!(route(&e, &Req { method: "POST", path: p, query: "", headers: &[], body: b"{}" }, T0).is_none(), "{p}");
+        }
         let dev = |ip: &str, inst: &str| {
             let h = [(CLIENT, ip)];
-            call(&e, "POST", "/connect/device", &h, &json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "wsl", "host_label": "pc", "schemas": ["agentq-snapshot/1"]}).to_string(), T0)
+            call(&e, "POST", "/machine/connect/device", &h, &json!({"protocol": 1, "product": "agentq", "installation": inst, "runtime": "wsl", "host_label": "pc", "schemas": ["agentq-snapshot/1"]}).to_string(), T0)
         };
         for i in 0..10 {
             assert_eq!(dev("203.0.113.1", &format!("i{i}")).0, "200 OK");
@@ -1224,7 +1229,7 @@ mod tests {
         assert_eq!(dev("203.0.113.2", "i11").0, "200 OK");
         // scope: a product requests only its own schemas
         let bad = json!({"protocol": 1, "product": "serverq", "installation": "s1", "runtime": "native", "host_label": "pc", "schemas": ["agentq-snapshot/1"]});
-        assert_eq!(machine(&e, "/connect/device", None, bad, T0).1["error"], "invalid_request");
+        assert_eq!(machine(&e, "/machine/connect/device", None, bad, T0).1["error"], "invalid_request");
         assert_eq!(user_code("abcd efgh"), Some("ABCD-EFGH".into()));
         assert_eq!(user_code("ABCD-EFG1"), None);
     }
@@ -1236,9 +1241,10 @@ mod tests {
         // client copies of the trusted headers are stripped before anything else
         assert!(head.contains("request_header -X-Dashq-Subject") && head.contains("request_header -X-Dashq-Client"));
         let paths: Vec<&str> = head.lines().filter_map(|l| l.trim().strip_prefix("path ")).flat_map(str::split_whitespace).collect();
-        // plus the resource exchange (D14), authorized by the same device credential
-        assert_eq!(paths, [&MACHINE[..], &["/api/taskq/resources/v1/exchange"]].concat());
-        assert!(head.contains("method POST") && !head.contains("/data") && !head.contains('*'));
+        // one prefix for every machine route, the resource exchange (D14) included (#110)
+        assert_eq!(paths, ["/machine/*"]);
+        assert!(MACHINE.iter().chain(&[crate::policy::EXCHANGE]).all(|p| p.starts_with("/machine/")));
+        assert!(head.contains("method POST") && !head.contains("/data"));
         assert!(guarded.contains("copy_headers") && guarded.contains(">X-Dashq-Subject") && guarded.contains("reverse_proxy 127.0.0.1:18882"));
     }
 
@@ -1246,8 +1252,8 @@ mod tests {
     fn connect(e: &Result<Enroll, String>, inst: &str, subject: &str, ws: &str, now: i64) -> String {
         let (device, code) = start(e, inst, now);
         assert!(decide(e, subject, &code, "approve", ws, now).1.contains("Approved"));
-        let cred = machine(e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
-        assert_eq!(machine(e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        let cred = machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
         cred
     }
 
@@ -1256,7 +1262,7 @@ mod tests {
     }
 
     fn ingest(e: &Result<Enroll, String>, cred: &str, records: Vec<Value>, now: i64) -> (u16, Value) {
-        machine(e, "/ingest", Some(cred), json!({"protocol": 1, "records": records}), now)
+        machine(e, "/machine/ingest", Some(cred), json!({"protocol": 1, "records": records}), now)
     }
 
     fn states(v: &Value) -> Vec<String> {
@@ -1408,11 +1414,11 @@ mod tests {
         // malformed batches are refused whole
         assert_eq!(ingest(&e, &cred, vec![json!({"schema": "agentq-snapshot/1"})], T0 + 4), (400, json!({"protocol": 1, "error": "invalid_request"})));
         assert_eq!(ingest(&e, &cred, (0..101).map(|i| rec(&format!("m{i}"), T0, json!({}))).collect(), T0 + 5).0, 400);
-        assert_eq!(machine(&e, "/connection/receipt", Some(&cred), json!({"protocol": 1}), T0 + 6).0, 400);
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(&cred), json!({"protocol": 1}), T0 + 6).0, 400);
         // per-device rate: burst 10, then 429 with Retry-After
         let codes: Vec<u16> = (0..12).map(|_| ingest(&e, &cred, vec![], T0 + 100).0).collect();
         assert_eq!(codes, [[200; 10].as_slice(), &[429, 429]].concat());
-        let (s, h, _) = call(&e, "POST", "/ingest", &[("authorization", &format!("Bearer {cred}"))], r#"{"protocol": 1, "records": []}"#, T0 + 100);
+        let (s, h, _) = call(&e, "POST", "/machine/ingest", &[("authorization", &format!("Bearer {cred}"))], r#"{"protocol": 1, "records": []}"#, T0 + 100);
         assert_eq!((s.as_str(), h.as_str()), ("429 Too Many Requests", "Retry-After: 1\r\n"));
         assert_eq!(ingest(&e, &cred, vec![], T0 + 101).0, 200);
     }
@@ -1442,10 +1448,10 @@ mod tests {
         assert!(seen(Scope::Subject("github|9")).is_empty());
         assert_eq!(seen(Scope::All).len(), 4);
         // a device reads only its own receipts
-        assert_eq!(machine(&e, "/connection/receipt", Some(&other), json!({"protocol": 1, "event_id": "a-1"}), T0).0, 404);
-        assert_eq!(machine(&e, "/connection/receipt", Some(&admin), json!({"protocol": 1, "event_id": "a-1"}), T0).1["state"], "projected");
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(&other), json!({"protocol": 1, "event_id": "a-1"}), T0).0, 404);
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(&admin), json!({"protocol": 1, "event_id": "a-1"}), T0).1["state"], "projected");
         // revoked: kept as revoked, not dropped; a new approval into another workspace starts empty there
-        assert_eq!(machine(&e, "/connection/revoke", Some(&admin), json!({"protocol": 1}), T0).0, 200);
+        assert_eq!(machine(&e, "/machine/connection/revoke", Some(&admin), json!({"protocol": 1}), T0).0, 200);
         assert_eq!(ingest(&e, &admin, vec![rec("a-2", T0, json!({}))], T0 + 1), (401, json!({"protocol": 1, "error": "revoked"})));
         s.add_member("ws-2", "github|1", "member").unwrap();
         let moved = connect(&e, "inst-a", "github|1", "ws-2", T0 + 2);
@@ -1480,7 +1486,7 @@ mod tests {
         let host = dir("e2e-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
         let mut w = Wire { e: &e, now, code: None, calls: vec![], tick: false };
-        let conn = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let conn = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         let payload = json!({"version": "1.2.0", "cpu": {"percent": 7}});
         let r = coreq::enroll::stamp(&host, "agentq-snapshot/1", "snap-1", now as u64, payload.clone()).unwrap();
         let got = coreq::enroll::deliver(&host, std::slice::from_ref(&r), &mut Default::default(), &mut w).unwrap();
@@ -1530,8 +1536,8 @@ mod tests {
         // a late sample joins history only and is never projected as current
         assert_eq!(states(&ingest(e, &cred, vec![rec("s-0", now - 900, json!({"v": 0}))], now + 1).1), ["accepted"]);
         assert_eq!(obs("")["snapshot"]["event_id"], "s-1");
-        assert_eq!(machine(e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-0"}), now + 2).1["state"], "accepted");
-        assert_eq!(machine(e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 2).1["state"], "projected");
+        assert_eq!(machine(e, "/machine/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-0"}), now + 2).1["state"], "accepted");
+        assert_eq!(machine(e, "/machine/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 2).1["state"], "projected");
         // future time: shown as clock-uncertain, never fresh, and the next real sample replaces it
         ingest(e, &cred, vec![rec("s-f", now + 3600, json!({"v": 9}))], now + 3);
         let o = obs("");
@@ -1564,8 +1570,8 @@ mod tests {
         let (_, body) = decide(&e, "github|1", &code, "approve", "ws-1", now);
         let wait = format!("/connect?wait=inst-1&workspace=ws-1&generation=1&since={now}");
         assert!(body.contains(&format!("content=\"2; url={}\"", wait.replace('&', "&amp;"))), "{body}");
-        let cred = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
-        assert_eq!(machine(&e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
         let (s, _, b) = get(&e, "github|1", &wait, now + 2);
         assert!(s == "200 OK" && b.contains("Waiting for the first snapshot") && b.contains("http-equiv=\"refresh\""), "{b}");
         // another account cannot follow or even see it
@@ -1573,7 +1579,7 @@ mod tests {
         assert_eq!(states(&ingest(&e, &cred, vec![rec("s-1", now, json!({"v": 1}))], now + 3).1), ["accepted"]);
         let (s, h, _) = get(&e, "github|1", &wait, now + 4);
         assert_eq!((s.as_str(), h.as_str()), ("303 See Other", "Location: /#inst-inst-1-ws-1\r\n"));
-        assert_eq!(machine(&e, "/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 4).1["state"], "projected");
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": "s-1"}), now + 4).1["state"], "projected");
         assert!(get(&e, "github|1", &wait.replace("generation=1", "generation=7"), now + 4).2.contains("replaced or revoked"));
         // a host that never sends: progress ends after 60 s with an honest state
         let other = connect(&e, "inst-2", "github|2", "ws-2", now);
@@ -1655,8 +1661,8 @@ mod tests {
         let pending = get(&e, "github|1", &wait, now + 2).2;
         assert!(pending.contains("credential activation"));
         emit("activation", &pending);
-        let cred = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now + 5).1["credential"].as_str().unwrap().to_string();
-        machine(&e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now + 5);
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": device}), now + 5).1["credential"].as_str().unwrap().to_string();
+        machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now + 5);
         let pending = get(&e, "github|1", &wait, now + 6).2;
         assert!(pending.contains("Waiting for the first snapshot"));
         emit("snapshot", &pending);
@@ -1701,7 +1707,7 @@ mod tests {
         // Standalone products do not require AgentQ or Langfuse and keep their own scope.
         for product in ["serverq", "taskq"] {
             let schema = format!("{product}-snapshot/1");
-            let (_, d) = machine(e, "/connect/device", None, json!({"protocol": 1, "product": product, "installation": product, "runtime": "wsl", "host_label": "same-long-host-label", "schemas": [schema], "scope": {"name": "board/1", "value": "example/project"}}), now + 30);
+            let (_, d) = machine(e, "/machine/connect/device", None, json!({"protocol": 1, "product": product, "installation": product, "runtime": "wsl", "host_label": "same-long-host-label", "schemas": [schema], "scope": {"name": "board/1", "value": "example/project"}}), now + 30);
             decide(e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", now + 31);
         }
         let p = projection(e, Some(Scope::Subject("github|1")), None, (now + 32) as u64).unwrap();
@@ -1723,7 +1729,7 @@ mod tests {
         assert!(gap.contains("gap · events expired before export: 1") && gap.contains("✓ Connected"));
         emit("export-gap", &gap);
         // Separately approved operations from D16 stay separate from the observation scope.
-        let (_, d) = machine(e, "/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": "inst-scoped", "runtime": "native", "host_label": "scoped-host", "schemas": ["agentq-snapshot/1"], "capabilities": ["agentq.configure"]}), now + 40);
+        let (_, d) = machine(e, "/machine/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": "inst-scoped", "runtime": "native", "host_label": "scoped-host", "schemas": ["agentq-snapshot/1"], "capabilities": ["agentq.configure"]}), now + 40);
         let code = d["user_code"].as_str().unwrap();
         emit("approval-capability", &page(e, "github|1", code, now + 41).1);
         decide(e, "github|1", code, "approve&capability.agentq.configure=grant", "ws-1", now + 41);
@@ -1751,19 +1757,19 @@ mod tests {
         let host = dir("offline-life-host");
         let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "same-host", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
         let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
-        let grant = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let grant = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         assert_eq!(coreq::enroll::disconnect(&host, &mut Offline), Err("1 revoke pending".into()));
         assert!(coreq::enroll::active(&host).unwrap().is_none());
         assert_eq!(coreq::enroll::stamp(&host, "agentq-snapshot/1", "off", T0 as u64, json!({})), Err("disconnected".into()));
         assert_eq!(projection(&e, Some(Scope::All), None, T0 as u64).unwrap()["rows"][0]["connection"], "active");
         coreq::enroll::retry_revokes(&host, &mut w).unwrap();
         coreq::enroll::retry_revokes(&host, &mut w).unwrap();
-        assert_eq!(w.calls.iter().filter(|s| *s == "/connection/revoke").count(), 1);
+        assert_eq!(w.calls.iter().filter(|s| *s == "/machine/connection/revoke").count(), 1);
         drop(e);
         let e = Enroll::open(&d, HOST);
         assert_eq!(projection(&e, Some(Scope::All), None, T0 as u64).unwrap()["rows"][0]["connection"], "revoked");
         let mut w = Wire { e: &e, now: T0 + 60, code: None, calls: vec![], tick: false };
-        let new = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let new = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         assert_eq!(new["installation"], grant["installation"]);
         assert_eq!(new["generation"], 2);
         assert_eq!(e.as_ref().unwrap().project(Scope::All).unwrap().len(), 1);
@@ -1775,7 +1781,7 @@ mod tests {
         let host = dir(&format!("{inst}-host"));
         let req = coreq::enroll::Request { installation: Some(inst), product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &["agentq.configure"] };
         let mut w = Wire { e, now, code: None, calls: vec![], tick: true };
-        let a = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         assert_eq!(a["capabilities"], json!(["agentq.configure"]));
         let snap: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
         assert_eq!(states(&ingest(e, a["credential"].as_str().unwrap(), vec![rec("s1", now, snap["cases"]["profile_projection"].clone())], now).1), ["accepted"]);
@@ -1884,9 +1890,9 @@ mod tests {
         let (d, e) = setup("op-races");
         let host = configurable(&e, "inst-r1", T0);
         let cred = coreq::enroll::active(&host).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
-        let pull = |e: &Result<Enroll, String>, cred: &str, now| machine(e, "/operations", Some(cred), json!({"protocol": 1, "capability": "agentq.configure"}), now);
+        let pull = |e: &Result<Enroll, String>, cred: &str, now| machine(e, "/machine/operations", Some(cred), json!({"protocol": 1, "capability": "agentq.configure"}), now);
         let post = |e: &Result<Enroll, String>, cred: &str, op: &Value, now| {
-            machine(e, "/operations/result", Some(cred), json!({"protocol": 1, "operation": op["operation"], "digest": op["digest"], "result": {"outcome": "applied"}}), now)
+            machine(e, "/machine/operations/result", Some(cred), json!({"protocol": 1, "operation": op["operation"], "digest": op["digest"], "result": {"outcome": "applied"}}), now)
         };
         let state = |e: &Result<Enroll, String>, id: &str, now| e.as_ref().unwrap().readback("github|1", id, now).unwrap().unwrap()["state"].clone();
         let x = e.as_ref().unwrap();
@@ -1907,7 +1913,7 @@ mod tests {
         // result then revoke: the committed result stays; the revoked credential can neither pull nor post
         assert_eq!(pull(&e, &cred, T0 + 702).1["operations"], json!([op3]));
         assert_eq!(post(&e, &cred, &op3, T0 + 703).1["state"], "accepted");
-        assert_eq!(machine(&e, "/connection/revoke", Some(&cred), json!({"protocol": 1}), T0 + 704).0, 200);
+        assert_eq!(machine(&e, "/machine/connection/revoke", Some(&cred), json!({"protocol": 1}), T0 + 704).0, 200);
         assert_eq!(state(&e, &op_id(3), T0 + 705), "resulted");
         assert_eq!(pull(&e, &cred, T0 + 705), (401, json!({"protocol": 1, "error": "revoked"})));
         assert_eq!(post(&e, &cred, &op3, T0 + 705).0, 401);
@@ -1939,6 +1945,6 @@ mod tests {
         let cred3 = coreq::enroll::active(&host3).unwrap().unwrap()["credential"].as_str().unwrap().to_string();
         assert_eq!(post(&e, &cred3, &op5, T0 + 901).1["reason"], "unknown_operation");
         assert_eq!(pull(&e, &cred3, T0 + 901).1["operations"], json!([]));
-        assert_eq!(machine(&e, "/operations/result", Some(&cred3), json!({"protocol": 1, "operation": op_id(5), "digest": op5["digest"], "result": {"path": "/etc"}}), T0 + 902).0, 400);
+        assert_eq!(machine(&e, "/machine/operations/result", Some(&cred3), json!({"protocol": 1, "operation": op_id(5), "digest": op5["digest"], "result": {"path": "/etc"}}), T0 + 902).0, 400);
     }
 }
