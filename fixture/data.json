@@ -833,6 +833,7 @@
         "host": "fra/native",
         "runtime": "linux",
         "version": "0.5.0",
+        "version_at": 1791874560,
         "last_seen": 1791874560,
         "heartbeat_at": 1791873000,
         "runs": 2,
@@ -851,6 +852,7 @@
         "host": "win-1/native",
         "runtime": "windows",
         "version": "0.4.0",
+        "version_at": 1791874800,
         "last_seen": 1791874800,
         "heartbeat_at": null,
         "runs": 0,
@@ -1042,6 +1044,336 @@
       {
         "rule": "backups-restore-drill",
         "status": "not verified"
+      }
+    ]
+  },
+  "versions": {
+    "rows": [
+      {
+        "product": "agentq",
+        "provenance": "langfuse",
+        "installation": "inst-fra",
+        "workspace": null,
+        "host": "fra/native",
+        "observation": {
+          "state": "incomplete",
+          "at": 1791874560,
+          "age_s": 579,
+          "reason": "capped query",
+          "incomplete": false
+        },
+        "running": {
+          "version": "0.5.0",
+          "source": "langfuse",
+          "reason": null,
+          "last_known": true
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "0.4.17",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "unknown",
+          "reason": "observation not current"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "observation incomplete: capped query"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by langfuse"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running"
+        ],
+        "gaps": [
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ]
+      },
+      {
+        "product": "agentq",
+        "provenance": "langfuse",
+        "installation": "inst-win",
+        "workspace": null,
+        "host": "win-1/native",
+        "observation": {
+          "state": "incomplete",
+          "at": 1791874800,
+          "age_s": 339,
+          "reason": "capped query",
+          "incomplete": false
+        },
+        "running": {
+          "version": "0.4.0",
+          "source": "langfuse",
+          "reason": null,
+          "last_known": true
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "0.4.17",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "unknown",
+          "reason": "observation not current"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "observation incomplete: capped query"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by langfuse"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running"
+        ],
+        "gaps": [
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ]
+      },
+      {
+        "product": "agentq",
+        "provenance": "langfuse-legacy",
+        "installation": "device:dev-fra",
+        "workspace": null,
+        "host": "fra/native",
+        "observation": {
+          "state": "incomplete",
+          "at": 1791874860,
+          "age_s": 279,
+          "reason": "capped query",
+          "incomplete": false
+        },
+        "running": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "selected": {
+          "version": "0.4.16",
+          "source": "langfuse-legacy",
+          "reason": null,
+          "last_known": true
+        },
+        "release": {
+          "version": "0.4.17",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": "0.4.17",
+        "update": {
+          "state": "unknown",
+          "reason": "no verified version comparison"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "observation incomplete: capped query"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by langfuse-legacy"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running",
+          "selected"
+        ],
+        "gaps": [
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ]
+      },
+      {
+        "product": "taskq",
+        "provenance": "taskq-heartbeat",
+        "installation": null,
+        "workspace": "taskqorg/taskq",
+        "host": "macbook-m2.local",
+        "observation": {
+          "state": "ok",
+          "at": 1791875040,
+          "age_s": 99,
+          "reason": null
+        },
+        "running": {
+          "version": "4.1.2",
+          "source": "taskq-heartbeat",
+          "reason": null,
+          "last_known": false
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "4.2.0",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "available",
+          "reason": null
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "health receipt not reported by taskq-heartbeat"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by taskq-heartbeat"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running"
+        ],
+        "gaps": [
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ],
+        "reason": "older heartbeat: no service id"
+      },
+      {
+        "product": "taskq",
+        "provenance": "taskq-heartbeat",
+        "installation": null,
+        "workspace": "taskqorg/taskq",
+        "host": "fra",
+        "observation": {
+          "state": "stale",
+          "at": 1791871200,
+          "age_s": 3939,
+          "reason": "heartbeat 65m old (ttl 5m)"
+        },
+        "running": {
+          "version": "4.2.0",
+          "source": "taskq-heartbeat",
+          "reason": null,
+          "last_known": true
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "4.2.0",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "unknown",
+          "reason": "observation not current"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "observation stale: heartbeat 65m old (ttl 5m)"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by taskq-heartbeat"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running"
+        ],
+        "gaps": [
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ],
+        "reason": "older heartbeat: no service id"
+      }
+    ],
+    "mixed": [
+      {
+        "product": "agentq",
+        "running": [
+          "0.4.0",
+          "0.5.0"
+        ]
+      },
+      {
+        "product": "taskq",
+        "running": [
+          "4.1.2",
+          "4.2.0"
+        ]
       }
     ]
   }

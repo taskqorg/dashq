@@ -15,7 +15,7 @@ const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
 const SERVERQ_LIMIT: u64 = 7200;
-const AQ_HEARTBEAT_LIMIT: u64 = 7200;
+pub const AQ_HEARTBEAT_LIMIT: u64 = 7200;
 const SERVICES: [&str; 7] = ["contextq", "serverq", "taskq", "gateway", "hermes-gateway", "langfuse", "updater"];
 const USAGE: [&str; 8] = ["input", "output", "total", "input_cached_tokens", "cache_read_input_tokens", "input_cache_creation_1h", "input_cache_creation_5m", "output_reasoning_tokens"];
 const NATIVE_FAILURE: [&str; 27] = [
@@ -109,7 +109,7 @@ fn num(v: &Value) -> Option<f64> {
     v.as_f64().filter(|n| n.is_finite() && *n >= 0.0)
 }
 
-fn semver(v: &Value) -> Value {
+pub fn semver(v: &Value) -> Value {
     v.as_str().filter(|s| s.split('.').count() == 3 && s.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))).map_or(Value::Null, |s| json!(s))
 }
 
@@ -271,6 +271,7 @@ pub fn build(inp: &Value) -> Value {
     let mut hosts: BTreeMap<String, Value> = BTreeMap::new();
     let (mut current, mut gaps, mut history) = (Vec::new(), Vec::new(), Vec::new());
     let mut counters = Vec::new();
+    let (mut legacy, mut heartbeats): (Vec<Value>, BTreeMap<String, Value>) = (Vec::new(), BTreeMap::new());
 
     // Health snapshots: a device's newest snapshot owns its identity (old labels never duplicate a host).
     let health = rows("health");
@@ -300,6 +301,9 @@ pub fn build(inp: &Value) -> Value {
             a["available"] = semver(u("available"));
             a["updater"] = u("status").as_str().filter(|s| safe(s, 32, b"_")).map_or(json!("unknown"), |s| json!(s));
             a["subscription"] = u("subscription").as_str().filter(|s| ["connected", "reconnecting", "disabled"].contains(s)).map_or(json!("unknown"), |s| json!(s));
+            if let Some(d) = tag(r, "device").filter(|d| safe_id(d)) {
+                legacy.push(json!({"device": d, "host": id, "at": at, "monitor": semver(attr(r, "version")), "installed": a["selected"], "available": a["available"]}));
+            }
         }
         if !semver(attr(r, "version")).is_null() {
             h["agentq"]["monitor"] = semver(attr(r, "version"));
@@ -549,7 +553,7 @@ pub fn build(inp: &Value) -> Value {
             }
             hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
             let x = fleet.entry(inst.clone()).or_insert_with(|| {
-                json!({"installation": inst, "host": host, "runtime": null, "version": null, "last_seen": 0, "heartbeat_at": null,
+                json!({"installation": inst, "host": host, "runtime": null, "version": null, "version_at": null, "last_seen": 0, "heartbeat_at": null,
                        "runs": if scoped { json!(0) } else { Value::Null }, "nonzero_exits": if scoped { json!(0) } else { Value::Null }, "exit_samples": 0,
                        "retrievals": if scoped { json!(0) } else { Value::Null }, "failed_retrievals": if scoped { json!(0) } else { Value::Null }, "trace_id": null})
             });
@@ -559,6 +563,7 @@ pub fn build(inp: &Value) -> Value {
                 x["host"] = json!(host);
                 x["runtime"] = aq(r, "agentq.runtime").as_str().filter(|s| safe(s, 16, b"")).map_or(Value::Null, |s| json!(s));
                 x["version"] = semver(aq(r, "agentq.version"));
+                x["version_at"] = if x["version"].is_null() { Value::Null } else { json!(at) };
                 x["trace_id"] = trace(r);
             }
             match key {
@@ -622,7 +627,7 @@ pub fn build(inp: &Value) -> Value {
         let list = |labels: &[&str]| with(labels).map_or(json!([]), |v| v.iter().map(|i| json!({"number": i["number"], "title": i["title"], "url": i["url"]})).collect());
         let mut attempts = Vec::new();
         let date = v["date"].as_u64();
-        for hb in v["hosts"].as_array().into_iter().flatten() {
+        for (index, hb) in v["hosts"].as_array().into_iter().flatten().enumerate() {
             let Some(name) = hb["title"].as_str().and_then(|t| t.strip_prefix("taskq host ")).filter(|n| safe(n, 64, b"_.-")) else { continue };
             let body = hb["body"].as_str().unwrap_or("");
             let ttl = body.lines().find_map(|l| l.strip_prefix("ttl ")?.trim().parse().ok()).unwrap_or(HEARTBEAT_TTL);
@@ -633,9 +638,17 @@ pub fn build(inp: &Value) -> Value {
                     attempts.push(json!({"host": name, "task": n, "attempt": id.trim()}));
                 }
             }
-            // age = response Date minus updated_at: board clock only, never the local one
-            let age = date.zip(hb["updated_at"].as_str().and_then(iso_secs)).map(|(d, u)| d.saturating_sub(u));
+            // Age at collection uses only the board clock.
+            let at = hb["updated_at"].as_str().and_then(iso_secs);
+            let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
+            let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
+            // taskq's own installation id (taskq.md § 4 `service`), never the host name; older heartbeats have none
+            let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+            let key = format!("{repo}:{}", service.map_or_else(|| format!("unidentified:{index}"), String::from));
+            if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| cached_age.is_some_and(|x| x < a))) {
+                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": name, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src}));
+            }
             let h = hosts.entry(name.into()).or_insert_with(|| host_row(name));
             if h["taskq"]["age_s"].as_u64().is_some_and(|a| age.is_none_or(|x| x >= a)) {
                 continue;
@@ -749,7 +762,11 @@ pub fn build(inp: &Value) -> Value {
         sources["taskq"] = t.clone();
         att_states.push(("taskq".to_string(), t));
     }
-    json!({
+    let versions = crate::version::build(inp, &fleet, &legacy, &heartbeats.into_values().collect::<Vec<_>>());
+    if inp["installations"].is_object() {
+        sources["enrollment"] = inp["installations"]["source"].clone();
+    }
+    let mut doc = json!({
         "schema": 1,
         "generated_at": now,
         "period": period,
@@ -764,7 +781,12 @@ pub fn build(inp: &Value) -> Value {
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
-    })
+        "versions": versions,
+    });
+    if inp["installations"].is_object() {
+        doc["installations"] = inp["installations"].clone();
+    }
+    doc
 }
 
 /// One open question in the S3 shape: source choice ids, order and text kept; a card that does not parse

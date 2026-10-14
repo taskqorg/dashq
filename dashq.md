@@ -79,7 +79,7 @@ Every value carries the state of its source. The page never turns missing data i
 
 ## D7. /data JSON
 - `GET /data?period=1800|7200|86400&host=H&agent=A&session=ID` returns the document the page renders; filters are optional. Invalid parameters: 400. All sources failed: 503 with `{"error"}`; partial failure is 200 with source states.
-- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`.
+- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`, `versions` (D18).
 - Session filters apply to activity and compression only; host health and resources keep host scope.
 - It holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
 - Schema changes are additive within `schema` 1; a breaking change raises it.
@@ -185,6 +185,7 @@ Accepted target: [optimization results P1–P3](docs/design/optimization-results
 ## D18. Service versions and diagnostics
 
 Accepted target: [service versions V1–V4](docs/design/service-versions.md) refines D8.2/D9. Distinguish available, selected, running and verified health per installation; coreq and each consumer retain lifecycle ownership. Read-only diagnostics use allowlisted evidence. No remote update, restart or rollback authority is added.
+- Projection (#70): `/data` `versions` `{rows, mixed}`, one row per installation and workspace from enrolled `agentq-snapshot/1`, Langfuse `agentq.installation` (installations not enrolled), legacy updater snapshots (by device) and taskq heartbeats (by `service` id and project; project is `workspace`): `running`, `selected` (`last_known` when observation is not current), `release` (version, check time, state), `reported_available`, `update` (`available|current` only from a fresh verified comparison; `error` from the producer's error flag), `health` and `lifecycle` (unknown: no producer reports health receipts or waiting/starting/checksum/rollback stages), `libraries` (engines; coreq unreported), `queue_age_s`, `coverage` and `gaps`. Version observations retain producer timestamps (enrolled: the older of snapshot time and `status_at`; Langfuse: the event that reported the version), add elapsed cache time to board age and propagate collection failures; a stale status or a service that is not `running` keeps versions `last_known`, and unconfirmed observations cannot support verified comparisons. The host filter applies to every row before `mixed`. Producer gaps (follow-ups): selected `current`, health receipt, lifecycle stage and coreq version in agentq and taskq contracts. Cases: [fixture/versions.json](fixture/versions.json). No page section yet.
 
 ## D19. First launch and partial availability
 

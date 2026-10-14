@@ -8,6 +8,7 @@ mod policy;
 mod profile;
 mod resource;
 mod source;
+mod version;
 #[allow(dead_code)] // export forwarding, backup and restore use the rest
 mod store;
 
@@ -206,15 +207,12 @@ impl App {
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
         profile::step("enrollment", t0);
         let t0 = std::time::Instant::now();
-        let mut doc = data::build(&json!({
+        let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
+            "installations": projection,
         }));
         profile::step("build", t0);
-        if let Some(p) = projection {
-            doc["sources"]["enrollment"] = p["source"].clone();
-            doc["installations"] = p;
-        }
         doc
     }
 }
