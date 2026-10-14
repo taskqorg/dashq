@@ -7,6 +7,7 @@ const fx = require('../fixture/taskq/resource-controls.json');
   const browser = await chromium.launch({headless: true});
   try {
     const html = fs.readFileSync(process.env.DASHQ_RESOURCE_EVIDENCE, 'utf8');
+    if (process.env.DASHQ_RESOURCE_SHOTS) fs.mkdirSync(process.env.DASHQ_RESOURCE_SHOTS, {recursive: true});
     for (const width of [1024, 360]) for (const size of [16, 20]) for (const theme of ['light', 'dark']) {
       const page = await browser.newPage({viewport: {width, height: 900}, colorScheme: theme});
       const errors = [];
@@ -59,7 +60,6 @@ const fx = require('../fixture/taskq/resource-controls.json');
       assert(box.x >= 0 && box.x + box.width <= width, 'dialog fits');
       assert(await page.locator('dialog').evaluate(d => d.scrollWidth <= d.clientWidth + 1), 'no horizontal dialog overflow');
       if (process.env.DASHQ_RESOURCE_SHOTS) {
-        fs.mkdirSync(process.env.DASHQ_RESOURCE_SHOTS, {recursive: true});
         await page.screenshot({path: `${process.env.DASHQ_RESOURCE_SHOTS}/resources-${width}-${size}-${theme}.png`});
       }
       // Freshness loss during review cannot submit; draft and exact target remain visible.
