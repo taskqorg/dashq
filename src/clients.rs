@@ -289,6 +289,17 @@ mod tests {
         let table = &html[html.find("<h3>agentq clients").unwrap()..];
         let table = &table[..table.find("</table>").unwrap()];
         assert!(table.contains("Last known routed") && table.contains("Last known ok") && !table.contains("s ok\""), "{table}");
+        // a stale Langfuse read with a heartbeat that was fresh when read shows last known badges, never green
+        let mut stale_src = inp.clone();
+        stale_src["now"] = json!(now + 1000);
+        let stale_src_doc = crate::data::build(&stale_src);
+        assert_eq!(stale_src_doc["sources"]["langfuse"]["state"], "stale");
+        let codex = stale_src_doc["agents"]["clients"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "inst-mac" && r["client"] == "codex").unwrap().clone();
+        assert_eq!(codex["heartbeat"]["state"], "stale");
+        let html = crate::page::render(&stale_src_doc, &json!({}));
+        let table = &html[html.find("<h3>agentq clients").unwrap()..];
+        let table = &table[..table.find("</table>").unwrap()];
+        assert!(table.contains("Last known routed") && table.contains("Last known ok") && !table.contains("s ok\""), "{table}");
         // D6: a heartbeat field of the wrong JSON shape reads unknown with its reason, never as no hook runs or no routing
         let mut odd = inp.clone();
         let m = &mut odd["langfuse"]["value"]["agentq.installation"][0]["metadata"];

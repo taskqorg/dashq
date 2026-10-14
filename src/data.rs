@@ -816,10 +816,10 @@ pub fn build(inp: &Value) -> Value {
         },
         &fleet, &activity, &inp["installations"], &mut current, &mut gaps,
     );
-    if lf_src["state"] == "unconfirmed" {
-        // a failed read shows the cached heartbeat as last known, never as current (D6)
+    if !matches!(lf_src["state"].as_str(), Some("ok" | "incomplete")) {
+        // a stale or failed Langfuse read shows the cached heartbeat as last known, never as current (D6)
         for r in clients["rows"].as_array_mut().into_iter().flatten() {
-            r["heartbeat"]["state"] = json!("unconfirmed");
+            r["heartbeat"]["state"] = lf_src["state"].clone();
         }
     }
     let taskq_src = (!taskq_states.is_empty()).then(|| worst(taskq_states.iter().map(|(n, s)| (n.clone(), s)), now));
