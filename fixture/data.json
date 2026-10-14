@@ -958,6 +958,116 @@
         "behind": true
       }
     ],
+    "clients": {
+      "window_s": 86400,
+      "incomplete": {
+        "agentq.compress.24h": false,
+        "agentq.retrieval.24h": false
+      },
+      "rows": [
+        {
+          "installation": "inst-fra",
+          "host": "fra/native",
+          "runtime": "linux",
+          "client": "codex",
+          "heartbeat": {
+            "state": "ok",
+            "at": 1791873000
+          },
+          "routing": {
+            "state": "routed",
+            "reason": "config.toml selects the agent_context provider",
+            "intended": "routed",
+            "intended_reason": "onboarded"
+          },
+          "routing_reason": null,
+          "hooks": [
+            {
+              "event": "SessionStart",
+              "state": "ok",
+              "last_ok_at": 1791874800,
+              "last_failure": null
+            },
+            {
+              "event": "Stop",
+              "state": "failed",
+              "last_ok_at": 1791870000,
+              "last_failure": {
+                "at": 1791873000,
+                "error": "stdin: stream did not contain valid UTF-8"
+              }
+            }
+          ],
+          "hooks_reason": null,
+          "hooks_configured": null,
+          "mcp": null,
+          "mcp_reason": "not enrolled: the heartbeat carries no MCP state",
+          "use": {
+            "compress": 0,
+            "unattributed": 0,
+            "hook_compress": 0,
+            "hook_compressed": 0,
+            "bytes_saved": 0,
+            "bytes_samples": 0,
+            "retrievals": 1,
+            "retrieval_scope": "installation"
+          },
+          "use_reason": null
+        },
+        {
+          "installation": "inst-fra",
+          "host": "fra/native",
+          "runtime": "linux",
+          "client": "hermes",
+          "heartbeat": {
+            "state": "ok",
+            "at": 1791873000
+          },
+          "routing": {
+            "state": "direct",
+            "reason": "routing not shipped",
+            "intended": "direct",
+            "intended_reason": "routing not shipped"
+          },
+          "routing_reason": null,
+          "hooks": [],
+          "hooks_reason": null,
+          "hooks_configured": null,
+          "mcp": null,
+          "mcp_reason": "not enrolled: the heartbeat carries no MCP state",
+          "use": {
+            "compress": 1,
+            "unattributed": 0,
+            "hook_compress": 1,
+            "hook_compressed": 1,
+            "bytes_saved": 7800,
+            "bytes_samples": 1,
+            "retrievals": 1,
+            "retrieval_scope": "installation"
+          },
+          "use_reason": null
+        },
+        {
+          "installation": "inst-win",
+          "host": "win-1/native",
+          "runtime": "windows",
+          "client": null,
+          "heartbeat": {
+            "state": "stale",
+            "at": null
+          },
+          "routing": null,
+          "routing_reason": "no heartbeat in 24 h",
+          "hooks": null,
+          "hooks_reason": "no heartbeat in 24 h",
+          "hooks_configured": null,
+          "mcp": null,
+          "mcp_reason": "no client reported",
+          "use": null,
+          "use_reason": "no client reported"
+        }
+      ]
+    },
     "activity": [
       {
         "host": "fra/native",

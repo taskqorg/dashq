@@ -255,6 +255,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
             );
         }
         let _ = writeln!(w, "</table>");
+        clients(w, &ag["clients"], &json!({"incomplete": ag["clients"]["incomplete"]["agentq.compress.24h"], "reason": src["reason"]}),
+            &json!({"incomplete": ag["clients"]["incomplete"]["agentq.retrieval.24h"], "reason": src["reason"]}), now);
         let _ = writeln!(w, "<h3>Model activity</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>");
         let ca = capped("activity");
         for a in ag["activity"].as_array().into_iter().flatten() {
@@ -312,6 +314,47 @@ pub fn render(doc: &Value, links: &Value) -> String {
 }
 
 /// D18 V1–V4: render only the safe version projection; unavailable producer receipts stay unknown.
+/// D8.4 per-client rows (#131): routing and hooks from the heartbeat, MCP from enrollment, use over 24 h.
+fn clients(w: &mut String, c: &Value, cc: &Value, cr: &Value, now: u64) {
+    let none = |why: &Value| format!("<span class=\"unknown\" title=\"unknown: {}\">—</span>", esc(why.as_str().unwrap_or("not reported")));
+    let _ = writeln!(w, "<h3>agentq clients (use over 24 h)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Client</th><th>Routing</th><th>Hooks (last failure)</th><th>MCP</th><th>Hook compress (compressed · bytes saved)</th><th>Compress records</th><th>Retrievals (installation)</th></tr>");
+    for r in c["rows"].as_array().into_iter().flatten() {
+        let client = AGENTS.iter().find(|(k, _)| r["client"] == *k).map_or_else(|| none(&r["use_reason"]), |(_, n)| n.to_string());
+        let fresh = r["heartbeat"]["state"] == "ok";
+        let stale = if fresh { String::new() } else { " <span class=\"detail\">last known</span>".into() };
+        // a stale or unconfirmed heartbeat never shows a current badge (D6)
+        let last = |s: &str| if fresh { s.to_string() } else { format!("Last known {s}") };
+        let rt = &r["routing"];
+        let routing = if rt.is_null() {
+            none(&r["routing_reason"])
+        } else {
+            let s = rt["state"].as_str().unwrap_or("unknown");
+            let class = match s { _ if !fresh => "unconfirmed", "routed" => "ok", "direct" | "bypassed" => "warn", _ => "unknown" };
+            format!("{}{}", badge(class, &last(s)), rt["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default())
+        };
+        let hooks = match r["hooks"].as_array() {
+            None => none(&r["hooks_reason"]),
+            Some(h) if h.is_empty() => format!("no hook runs{}", r["hooks_configured"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default()),
+            Some(h) => h.iter().map(|h| {
+                let s = h["state"].as_str().unwrap_or("unknown");
+                let f = &h["last_failure"];
+                let fail = if f.is_null() { String::new() } else { format!(" <span class=\"detail\">failed {}: {}</span>", at(&f["at"], now), f["error"].as_str().map_or("reason withheld".into(), esc)) };
+                format!("{} {}{fail}", text(&h["event"]), badge(if !fresh { "unconfirmed" } else if s == "failed" { "error" } else { s }, &last(s)))
+            }).collect::<Vec<_>>().join("<br>"),
+        };
+        let mcp = if r["mcp"].is_null() { none(&r["mcp_reason"]) } else { text(&r["mcp"]) };
+        let u = &r["use"];
+        let (hook, all, ret) = if u.is_null() {
+            (none(&r["use_reason"]), none(&r["use_reason"]), none(&r["use_reason"]))
+        } else {
+            let saved = if u["bytes_saved"].is_null() { format!("<span class=\"unknown\" title=\"unknown: {} of {} compressed calls measured\">—</span>", text(&u["bytes_samples"]), text(&u["hook_compressed"])) } else { format!("{} B", text(&u["bytes_saved"])) };
+            (format!("{} of {} · {saved}", num(&u["hook_compressed"], cc), num(&u["hook_compress"], cc)), format!("{}{}", num(&u["compress"], cc), if u["unattributed"] != 0 { format!(" (+{} without agent)", text(&u["unattributed"])) } else { String::new() }), num(&u["retrievals"], cr))
+        };
+        let _ = writeln!(w, "<tr><td>{}</td><td>{}{stale}</td><td>{client}</td><td>{routing}</td><td>{hooks}</td><td>{mcp}</td><td>{hook}</td><td>{all}</td><td>{ret}</td></tr>", text(&r["host"]), text(&r["installation"]));
+    }
+    let _ = writeln!(w, "</table>");
+}
+
 fn versions(w: &mut String, versions: &Value, now: u64) {
     let rows = versions["rows"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() { return; }

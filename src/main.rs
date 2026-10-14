@@ -2,6 +2,7 @@
 
 mod accounting;
 mod answer;
+mod clients;
 mod configure;
 mod data;
 mod enroll;
