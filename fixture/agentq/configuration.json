@@ -1,0 +1,1496 @@
+{
+ "about": "AgentQ snapshot payloads (agentq-snapshot/1) from taskqorg/agentq ac859d304edaf25d86969d594f970ca16cef3172 agentq/snapshot.rs project(), over the inputs of its tests profile_state_and_revision (agentq/profiles.rs), old_producer_configuration_unknown and profile_projection (agentq/snapshot.rs). Producer time 1000 unless the case is stale; projected at 1030 (stale case: 2000).",
+ "cases": {
+  "profile_state_and_revision": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "schema": 1,
+    "at": 1000,
+    "state": "fresh",
+    "revision": "00112233445566ff",
+    "defaults": {
+     "enabled": true,
+     "min_bytes": 2048,
+     "stats": "queue"
+    },
+    "truncated": false,
+    "incomplete": false,
+    "profiles": [
+     {
+      "id": "2fb28b7e6695cd83",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "4af1292b618412d6",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "direct",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "bypassed"
+      },
+      "configured": false,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": 0,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released"
+       ]
+      }
+     },
+     {
+      "id": "81742681bf6011ea",
+      "kind": "claude-code",
+      "label": "Claude Code",
+      "aliases": [
+       "claude-code-cli",
+       "claude-desktop-code"
+      ],
+      "revision": "228894ed86d3e82a",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "direct",
+      "optimization": "enabled",
+      "mcp": "unknown",
+      "hooks": "unknown",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "hook",
+       "state": "unknown"
+      },
+      "configured": false,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": false,
+      "overrides": null,
+      "conflicts": [
+       "unparseable_config"
+      ],
+      "incomplete": [
+       "unreadable_config"
+      ],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "incomplete",
+        "conflict"
+       ]
+      }
+     },
+     {
+      "id": "fcb63bd6c99d834e",
+      "kind": "hermes",
+      "label": "Hermes",
+      "aliases": [
+       "hermes"
+      ],
+      "revision": "b20e451acd8d54fb",
+      "operations": [
+       "optimization",
+       "mcp",
+       "plugin"
+      ],
+      "routing": "unsupported",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "unsupported",
+      "plugin": "enabled",
+      "unavailable": {
+       "routing": "unsupported_client",
+       "hooks": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "plugin",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": false,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released"
+       ]
+      }
+     },
+     {
+      "id": "0a30d750cd3cefde",
+      "kind": "claude-desktop-chat",
+      "label": "Claude Desktop Chat",
+      "aliases": [
+       "claude-desktop-chat"
+      ],
+      "revision": "1814df76e74eeddd",
+      "operations": [
+       "mcp"
+      ],
+      "routing": "unsupported",
+      "optimization": "unsupported",
+      "mcp": "absent",
+      "hooks": "unsupported",
+      "plugin": "unsupported",
+      "unavailable": {
+       "routing": "unsupported_client",
+       "optimization": "unsupported_client",
+       "hooks": "unsupported_client",
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": null,
+       "state": "unsupported"
+      },
+      "configured": false,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": false,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "profile_projection": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "schema": 1,
+    "at": 1000,
+    "state": "fresh",
+    "revision": "00112233445566ff",
+    "defaults": {
+     "enabled": true,
+     "min_bytes": 2048,
+     "stats": "queue"
+    },
+    "truncated": false,
+    "incomplete": true,
+    "profiles": [
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released"
+       ]
+      }
+     },
+     {
+      "id": "1111111111111111",
+      "kind": "claude-desktop-chat",
+      "label": "Claude Desktop Chat",
+      "aliases": [
+       "claude-desktop-chat"
+      ],
+      "revision": "2222222222222222",
+      "operations": [
+       "mcp"
+      ],
+      "routing": "unsupported",
+      "optimization": "unsupported",
+      "mcp": "registered",
+      "hooks": "unsupported",
+      "plugin": "unsupported",
+      "unavailable": {
+       "routing": "unsupported_client",
+       "optimization": "unsupported_client",
+       "hooks": "unsupported_client",
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": null,
+       "state": "unsupported"
+      },
+      "configured": false,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": null,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released"
+       ]
+      }
+     },
+     {
+      "id": "3333333333333333",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "unknown",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [
+       "foreign_provider",
+       "other"
+      ],
+      "incomplete": [
+       "unreadable_config"
+      ],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "incomplete",
+        "conflict"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "profile_projection_overrides": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "schema": 1,
+    "at": 1000,
+    "state": "fresh",
+    "revision": "00112233445566ff",
+    "defaults": {
+     "enabled": true,
+     "min_bytes": 2048,
+     "stats": "queue"
+    },
+    "truncated": false,
+    "incomplete": false,
+    "profiles": [
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": 3,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "project_override"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "profile_projection_stale": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "unknown",
+    "reason": "stale status"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "schema": 1,
+    "at": 1000,
+    "state": "stale",
+    "revision": "00112233445566ff",
+    "defaults": {
+     "enabled": true,
+     "min_bytes": 2048,
+     "stats": "queue"
+    },
+    "truncated": false,
+    "incomplete": false,
+    "profiles": [
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "stale"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "profile_projection_truncated": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "schema": 1,
+    "at": 1000,
+    "state": "fresh",
+    "revision": "00112233445566ff",
+    "defaults": {
+     "enabled": true,
+     "min_bytes": 2048,
+     "stats": "queue"
+    },
+    "truncated": true,
+    "incomplete": false,
+    "profiles": [
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     },
+     {
+      "id": "0123456789abcdef",
+      "kind": "codex",
+      "label": "Codex",
+      "aliases": [
+       "codex-cli",
+       "codex-desktop"
+      ],
+      "revision": "fedcba9876543210",
+      "operations": [
+       "routing",
+       "optimization",
+       "mcp",
+       "hooks"
+      ],
+      "routing": "routed",
+      "optimization": "enabled",
+      "mcp": "registered",
+      "hooks": "registered",
+      "plugin": "unsupported",
+      "unavailable": {
+       "plugin": "unsupported_client"
+      },
+      "effective": {
+       "adapter": "provider",
+       "state": "configured"
+      },
+      "configured": true,
+      "verification": {
+       "state": "unknown",
+       "reason": "no_evidence"
+      },
+      "owned": true,
+      "overrides": null,
+      "conflicts": [],
+      "incomplete": [],
+      "writes": {
+       "enabled": false,
+       "reasons": [
+        "not_released",
+        "truncated"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "old_producer_configuration_unknown": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "state": "unknown",
+    "reason": "older producer"
+   }
+  },
+  "unsupported_schema": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": "1.2.3",
+   "status_at": 1000,
+   "service": {
+    "state": "running"
+   },
+   "update": {
+    "available": null,
+    "error": true
+   },
+   "routing": {
+    "codex": "routed",
+    "claude": "unknown"
+   },
+   "engines": {
+    "rtk": {
+     "state": "ready",
+     "version": "0.51.0"
+    },
+    "headroom": {
+     "state": "unavailable",
+     "version": "0.40.0"
+    }
+   },
+   "queue": {
+    "pending": 3,
+    "oldest_age": 60,
+    "last_delivery": 990,
+    "dropped": 0,
+    "send_error": true
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "state": "unknown",
+    "reason": "unsupported schema"
+   }
+  },
+  "no_status": {
+   "schema": 1,
+   "installation": "inst",
+   "runtime": "macos",
+   "version": null,
+   "status_at": null,
+   "service": {
+    "state": "unknown",
+    "reason": "no status"
+   },
+   "update": {
+    "available": null,
+    "error": false
+   },
+   "routing": {},
+   "engines": {
+    "rtk": {
+     "state": "unknown"
+    },
+    "headroom": {
+     "state": "unknown"
+    }
+   },
+   "queue": {
+    "pending": null,
+    "oldest_age": null,
+    "last_delivery": null,
+    "dropped": null,
+    "send_error": false
+   },
+   "resource": {
+    "unknown": "no sample yet"
+   },
+   "configuration": {
+    "state": "unknown",
+    "reason": "no status"
+   }
+  }
+ }
+}

@@ -400,7 +400,8 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
 }
 
 /// Metadata only (C4): objects of short identifier keys, numbers, booleans and short single-line strings;
-/// no field named like content, commands, output, paths or secrets, and no path-like value.
+/// no field named like content, commands, output, paths or secrets, and no path-like value. Objects nest five deep;
+/// an array of scalars may sit in the fifth (AgentQ `configuration.profiles[].writes.reasons`).
 // ponytail: one shape allowlist for every schema; per-schema field catalogs when producers publish them
 fn metadata(v: &Value, depth: usize) -> bool {
     const DENY: [&str; 18] = [
@@ -412,7 +413,7 @@ fn metadata(v: &Value, depth: usize) -> bool {
         Value::String(s) => {
             depth > 0 && s.chars().count() <= 256 && !s.chars().any(char::is_control) && !s.starts_with(['/', '~', '\\']) && !s.get(1..3).is_some_and(|x| x == ":\\" || x == ":/")
         }
-        Value::Array(a) => depth > 0 && depth < 5 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
+        Value::Array(a) => depth > 0 && depth < 6 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
         Value::Object(o) => {
             depth < 5
                 && o.len() <= 256
@@ -1135,6 +1136,17 @@ mod tests {
         }
     }
 
+    /// AgentQ's published snapshots, with and without the profile projection (agentq#101), pass the allowlist whole.
+    #[test]
+    fn agentq_profile_snapshots_are_accepted() {
+        let (_d, e) = setup("agentq-profiles");
+        let cred = connect(&e, "inst-1", "github|1", "ws-1", T0);
+        let cases: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
+        let records: Vec<Value> = cases["cases"].as_object().unwrap().iter().map(|(k, p)| rec(k, T0, p.clone())).collect();
+        let n = records.len();
+        assert_eq!(states(&ingest(&e, &cred, records, T0).1), vec!["accepted"; n]);
+    }
+
     #[test]
     fn ingest_takes_ownership_from_the_grant_and_allowlists_payloads() {
         let (_d, e) = setup("ingest");
@@ -1151,6 +1163,8 @@ mod tests {
             json!({"long": "x".repeat(257)}),
             json!("not an object"),
             json!({"a": {"b": {"c": {"d": {"e": {"f": 1}}}}}}),
+            json!({"a": {"b": {"c": {"d": {"e": [[1]]}}}}}),
+            json!({"a": {"b": {"c": {"d": {"e": [{"f": 1}]}}}}}),
         ];
         let mut records = vec![rec("ev-1", T0, forged.clone())];
         records.extend(bad.iter().enumerate().map(|(i, p)| rec(&format!("bad-{i}"), T0, p.clone())));
