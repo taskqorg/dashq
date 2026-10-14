@@ -71,9 +71,10 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let w = &mut h;
     let _ = write!(
         w,
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body>\n<header>\n<h1>dashq</h1>\n<nav><a href=\"{}\">Langfuse traces</a> · <a href=\"{}\">Langfuse dashboards</a></nav>\n</header>\n<main id=\"main\">\n",
-        esc(links["traces"].as_str().unwrap_or("")),
-        esc(links["dashboards"].as_str().unwrap_or(""))
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body>\n<header>\n<h1>dashq</h1>\n{}\n</header>\n<main id=\"main\">\n",
+        if links["traces"].as_str().is_some_and(|s| !s.is_empty()) {
+            format!("<nav><a href=\"{}\">Langfuse traces</a> · <a href=\"{}\">Langfuse dashboards</a></nav>", text(&links["traces"]), text(&links["dashboards"]))
+        } else { String::new() }
     );
     let period = doc["period"].as_u64().unwrap_or(1800);
     let periods: Vec<String> = PERIODS
@@ -87,26 +88,40 @@ pub fn render(doc: &Value, links: &Value) -> String {
             if *p == period { format!("<strong>{name}</strong>") } else { format!("<a href=\"/?period={p}{}\">{name}</a>", esc(&filters)) }
         })
         .collect();
-    let _ = writeln!(w, "<p class=\"bar\">Updated <time>{}</time> · Period {} <button id=\"refresh\" type=\"button\">Refresh</button></p>", clock(now, now), periods.join(" · "));
+    let _ = writeln!(w, "<p class=\"bar\">Updated <time data-at=\"{now}\">{}</time> · Period {} <button id=\"refresh\" type=\"button\">Refresh</button></p>", clock(now, now), periods.join(" · "));
     let _ = writeln!(w, "<p id=\"banner\" class=\"banner\" role=\"alert\" hidden></p>");
     let not_ok: Vec<String> = doc["sources"]
         .as_object()
         .into_iter()
         .flatten()
-        .filter(|(_, s)| s["state"] != "ok")
+        .filter(|(_, s)| s["state"] != "ok" && s["reason"] != "not configured")
         .map(|(n, s)| {
             let name = match n.as_str() {
                 "langfuse" => "Langfuse",
                 "github" => "GitHub",
                 "enrollment" => "Connections",
                 "taskq" => "taskq",
+                "export" => "Export",
                 _ => "serverq",
             };
-            format!("<li>{} {name}: {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")))
+            format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", dur(a))))
         })
         .collect();
     if !not_ok.is_empty() {
         let _ = writeln!(w, "<ul class=\"summary\">{}</ul>", not_ok.join(""));
+    }
+
+    let configured = |name: &str| doc["sources"][name].is_object() && doc["sources"][name]["reason"] != "not configured";
+    let has_rows = |v: &Value| v.as_array().is_some_and(|a| !a.is_empty());
+    let unconfigured: Vec<&str> = [("langfuse", "Langfuse"), ("github", "GitHub boards"), ("serverq", "ServerQ report")]
+        .into_iter().filter(|(key, _)| !configured(key)).map(|(_, name)| name).collect();
+    if !unconfigured.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\" id=\"source-context\">Not configured: {}. Independent installations can connect without these sources.</p>", unconfigured.join(" · "));
+    }
+    let first_launch = unconfigured.len() == 3 && !has_rows(&doc["installations"]["rows"]);
+    if first_launch {
+        let _ = writeln!(w, "<section id=\"startup\"><h2>Connect an existing installation</h2><p>Connect TaskQ, AgentQ or ServerQ using its existing service and identity.</p><a id=\"add-service\" href=\"/connect\">＋ Add service</a><p class=\"note\">Approval waits for credential activation, a durable first snapshot and dashboard readback. No observations received yet.</p></section></main></body></html>");
+        return h;
     }
 
     // 1. Attention
@@ -129,6 +144,14 @@ pub fn render(doc: &Value, links: &Value) -> String {
             let link = i["url"].as_str().map(|u| format!(" <a href=\"{}\">issue</a>", esc(u))).unwrap_or_default();
             let since = if i["since"].is_null() { " · in this period".into() } else { format!(" · since {}", at(&i["since"], now)) };
             let mut line = format!("<li><b>{}</b>{} · {}{since}", text(&i["source"]), i["host"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default(), text(&i["what"]));
+            let source = match i["source"].as_str() { Some("serverq") => "serverq", Some("taskq") => if doc["sources"]["taskq"].is_object() { "taskq" } else { "github" }, _ => "langfuse" };
+                let observation = if i["source"] == "taskq" {
+                    doc["boards"].as_array().into_iter().flatten().find(|b| b["url"].as_str().is_some_and(|url| i["url"].as_str().is_some_and(|u| u.starts_with(&format!("{url}/")))))
+                        .map_or(&doc["sources"][source], |b| &b["source"])
+                } else { &doc["sources"][source] };
+                if key == "current" && observation["state"] != "ok" {
+                let _ = write!(line, " <span class=\"detail\">Last-known evidence · current condition unverified</span>");
+            }
             if !i["occurrences"].is_null() {
                 let _ = write!(line, " · {} occurrences", text(&i["occurrences"]));
             }
@@ -153,136 +176,146 @@ pub fn render(doc: &Value, links: &Value) -> String {
     first(w, doc, now);
     installations(w, &doc["installations"], &doc["resources"], now);
     integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
-    resources(w, &doc["resources"], now);
-    crate::optimization::render(w, doc);
+    if configured("langfuse") || has_rows(&doc["resources"]["rows"]) {
+        resources(w, &doc["resources"], now);
+    }
+    if configured("langfuse") { crate::optimization::render(w, doc); }
 
     // 2. Hosts
-    let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
-    let hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
-    if hosts.is_empty() {
-        let _ = writeln!(w, "<p class=\"note\">No host seen in any source.</p>");
-    } else {
-        let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Snapshot</th><th>taskq</th><th>Monitor</th><th>Proxy</th><th>Selected</th><th>agentq latest</th><th>Updater</th><th>serverq</th><th>Services</th></tr>");
-        for x in hosts {
-            let (s, t, a, q) = (&x["snapshot"], &x["taskq"], &x["agentq"], &x["serverq"]);
-            let state = |o: &Value, label: String| -> String {
-                let st = o["state"].as_str().unwrap_or("unknown");
-                let mut out = badge(st, &label);
-                if let Some(r) = o["reason"].as_str() {
-                    let _ = write!(out, " <span class=\"detail\">{}</span>", esc(r));
-                }
-                out
-            };
-            let unk = |v: &Value| if v.is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".to_string() } else { text(v) };
-            let ver = |v: &Value, behind: &Value| format!("{}{}", unk(v), if behind == true { " <span class=\"s warn\">behind</span>" } else { "" });
-            let snap = state(s, s["age_s"].as_u64().map_or("no snapshot".into(), |a| format!("{} old", dur(a))));
-            let taskq = format!("{} {}", ver(&t["version"], &t["behind"]), state(t, t["age_s"].as_u64().map_or("unknown".into(), |a| format!("{} old", dur(a)))));
-            // green only for a fresh report whose checks are all ok
-            let q_state = if q["state"] == "ok" { json!({"state": match q["status"].as_str() { Some("ok") => "ok", Some("warn") => "warn", _ => "unknown" }}) } else { q.clone() };
-            let serverq = state(&q_state, format!("{}{}", q["status"].as_str().unwrap_or("unknown"), q["age_s"].as_u64().map(|a| format!(", {} old", dur(a))).unwrap_or_default()));
-            let updater = format!("{} · subscription {}", unk(&a["updater"]), unk(&a["subscription"]));
-            let services: Vec<String> = x["services"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|v| {
-                    let name = format!("{}{}", text(&v["service"]), v["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default());
-                    format!("<span title=\"{}\">{}</span>", text(&v["reason"]), badge(v["state"].as_str().unwrap_or("unknown"), &name))
-                })
-                .collect();
-            let _ = writeln!(
-                w,
-                "<tr><td>{}</td><td>{snap}</td><td>{taskq}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{updater}</td><td>{serverq}</td><td>{}</td></tr>",
-                text(&x["id"]),
-                ver(&a["monitor"], &a["behind"]),
-                ver(&a["proxy"], &a["behind"]),
-                unk(&a["selected"]),
-                unk(&a["latest"]),
-                if services.is_empty() { "—".into() } else { services.join(" ") }
-            );
+    if has_rows(&doc["hosts"]) && (configured("langfuse") || configured("serverq")) {
+        let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
+        let hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
+        if hosts.is_empty() {
+            let _ = writeln!(w, "<p class=\"note\">No host seen in any source.</p>");
+        } else {
+            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Snapshot</th><th>taskq</th><th>Monitor</th><th>Proxy</th><th>Selected</th><th>agentq latest</th><th>Updater</th><th>serverq</th><th>Services</th></tr>");
+            for x in hosts {
+                let (s, t, a, q) = (&x["snapshot"], &x["taskq"], &x["agentq"], &x["serverq"]);
+                let state = |o: &Value, label: String| -> String {
+                    let st = o["state"].as_str().unwrap_or("unknown");
+                    let mut out = badge(st, &label);
+                    if let Some(r) = o["reason"].as_str() {
+                        let _ = write!(out, " <span class=\"detail\">{}</span>", esc(r));
+                    }
+                    out
+                };
+                let unk = |v: &Value| if v.is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".to_string() } else { text(v) };
+                let ver = |v: &Value, behind: &Value| format!("{}{}", unk(v), if behind == true { " <span class=\"s warn\">behind</span>" } else { "" });
+                let snap = state(s, s["age_s"].as_u64().map_or("no snapshot".into(), |a| format!("{} old", dur(a))));
+                let taskq = format!("{} {}", ver(&t["version"], &t["behind"]), state(t, t["age_s"].as_u64().map_or("unknown".into(), |a| format!("{} old", dur(a)))));
+                // green only for a fresh report whose checks are all ok
+                let q_state = if q["state"] == "ok" { json!({"state": match q["status"].as_str() { Some("ok") => "ok", Some("warn") => "warn", _ => "unknown" }}) } else { q.clone() };
+                let serverq = state(&q_state, format!("{}{}", q["status"].as_str().unwrap_or("unknown"), q["age_s"].as_u64().map(|a| format!(", {} old", dur(a))).unwrap_or_default()));
+                let updater = format!("{} · subscription {}", unk(&a["updater"]), unk(&a["subscription"]));
+                let services: Vec<String> = x["services"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|v| {
+                        let name = format!("{}{}", text(&v["service"]), v["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default());
+                        format!("<span title=\"{}\">{}</span>", text(&v["reason"]), badge(v["state"].as_str().unwrap_or("unknown"), &name))
+                    })
+                    .collect();
+                let _ = writeln!(
+                    w,
+                    "<tr><td>{}</td><td>{snap}</td><td>{taskq}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{updater}</td><td>{serverq}</td><td>{}</td></tr>",
+                    text(&x["id"]),
+                    ver(&a["monitor"], &a["behind"]),
+                    ver(&a["proxy"], &a["behind"]),
+                    unk(&a["selected"]),
+                    unk(&a["latest"]),
+                    if services.is_empty() { "—".into() } else { services.join(" ") }
+                );
+            }
+            let _ = writeln!(w, "</table>");
         }
-        let _ = writeln!(w, "</table>");
+        let _ = writeln!(w, "</section>");
     }
-    let _ = writeln!(w, "</section>");
 
     versions(w, &doc["versions"], now);
 
     // 4. Agents
-    let ag = &doc["agents"];
-    let src = &ag["source"];
-    let name = |a: &Value| AGENTS.iter().find(|(k, _)| a == *k).map_or(text(a), |(_, n)| n.to_string());
-    let _ = writeln!(w, "<section id=\"agents\">\n<h2>Agents</h2>\n{}", unknown_line(src));
-    let capped = |k: &str| -> Value { json!({"incomplete": ag["incomplete"][k], "reason": src["reason"]}) };
-    let _ = writeln!(w, "<h3>agentq fleet (one row per installation)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Version</th><th>Last seen</th><th>Heartbeat</th><th>Runs (non-zero exits)</th><th>Retrievals (failed)</th></tr>");
-    let (cn, cv) = (capped("agentq.run"), capped("agentq.retrieval"));
-    for x in ag["fleet"].as_array().into_iter().flatten() {
-        let hb = format!("{}{}", badge(x["state"].as_str().unwrap_or("unknown"), x["state"].as_str().unwrap_or("unknown")), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
-        let ver = format!("{}{}", if x["version"].is_null() { "—".into() } else { text(&x["version"]) }, if x["behind"] == true { " <span class=\"s warn\">behind</span>" } else { "" });
-        let _ = writeln!(
-            w,
-            "<tr><td>{}</td><td>{}</td><td>{ver}</td><td>{}{}</td><td>{hb}</td><td>{} ({} of {})</td><td>{} ({})</td></tr>",
-            text(&x["host"]), text(&x["installation"]), at(&x["last_seen"], now), trace(&x["trace_id"], base),
-            num(&x["runs"], &cn), num(&x["nonzero_exits"], &cn), text(&x["exit_samples"]), num(&x["retrievals"], &cv), num(&x["failed_retrievals"], &cv)
-        );
-    }
-    let _ = writeln!(w, "</table>");
-    let _ = writeln!(w, "<h3>Model activity</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>");
-    let ca = capped("activity");
-    for a in ag["activity"].as_array().into_iter().flatten() {
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>", text(&a["host"]), name(&a["agent"]), num(&a["calls"], &ca), num(&a["errors"], &ca), num(&a["sessions"], &ca), at(&a["last_at"], now), trace(&a["trace_id"], base));
-    }
-    let _ = writeln!(w, "</table>\n<h3>Model usage (sum and samples per field; fields are not added together)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Model</th><th>Calls</th><th>Usage</th><th>Reported cost</th></tr>");
-    for a in ag["activity"].as_array().into_iter().flatten() {
-        for m in a["models"].as_array().into_iter().flatten() {
-            let usage: Vec<String> = m["usage"].as_object().into_iter().flatten().map(|(k, u)| format!("{k} {} ({} samples)", text(&u["sum"]), text(&u["samples"]))).collect();
-            let cost = if m["cost"].is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".into() } else { format!("{} ({} samples)", text(&m["cost"]), text(&m["cost_samples"])) };
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{cost}</td></tr>", text(&a["host"]), name(&a["agent"]), text(&m["model"]), num(&m["calls"], &ca), if usage.is_empty() { "—".into() } else { usage.join("<br>") });
+    if configured("langfuse") {
+        let ag = &doc["agents"];
+        let src = &ag["source"];
+        let name = |a: &Value| AGENTS.iter().find(|(k, _)| a == *k).map_or(text(a), |(_, n)| n.to_string());
+        let _ = writeln!(w, "<section id=\"agents\">\n<h2>Agents</h2>\n{}", unknown_line(src));
+        let capped = |k: &str| -> Value { json!({"incomplete": ag["incomplete"][k], "reason": src["reason"]}) };
+        let _ = writeln!(w, "<h3>agentq fleet (one row per installation)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Version</th><th>Last seen</th><th>Heartbeat</th><th>Runs (non-zero exits)</th><th>Retrievals (failed)</th></tr>");
+        let (cn, cv) = (capped("agentq.run"), capped("agentq.retrieval"));
+        for x in ag["fleet"].as_array().into_iter().flatten() {
+            let hb = format!("{}{}", badge(x["state"].as_str().unwrap_or("unknown"), x["state"].as_str().unwrap_or("unknown")), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
+            let ver = format!("{}{}", if x["version"].is_null() { "—".into() } else { text(&x["version"]) }, if x["behind"] == true { " <span class=\"s warn\">behind</span>" } else { "" });
+            let _ = writeln!(
+                w,
+                "<tr><td>{}</td><td>{}</td><td>{ver}</td><td>{}{}</td><td>{hb}</td><td>{} ({} of {})</td><td>{} ({})</td></tr>",
+                text(&x["host"]), text(&x["installation"]), at(&x["last_seen"], now), trace(&x["trace_id"], base),
+                num(&x["runs"], &cn), num(&x["nonzero_exits"], &cn), text(&x["exit_samples"]), num(&x["retrievals"], &cv), num(&x["failed_retrievals"], &cv)
+            );
         }
-    }
-    let _ = writeln!(w, "</table>\n<h3>Compression (successes, normal skips and failures are disjoint)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Compressed</th><th>Normal skips</th><th>Failed</th><th>Unknown</th><th>Characters before → after</th></tr>");
-    let cc = capped("compression");
-    for c in ag["compression"].as_array().into_iter().flatten() {
-        let chars = if c["chars_before"].is_null() { "<span class=\"unknown\" title=\"unknown: not every call has before/after\">—</span>".into() } else { format!("{} → {}", text(&c["chars_before"]), text(&c["chars_after"])) };
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{chars}{}</td></tr>", text(&c["host"]), name(&c["agent"]), num(&c["compressed"], &cc), num(&c["normal_skips"], &cc), num(&c["failed"], &cc), num(&c["unknown"], &cc), trace(&c["trace_id"], base));
-    }
-    let _ = writeln!(w, "</table>\n<h3>Native RTK (estimates, not model tokens or savings)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Events</th><th>Estimated tokens before → after</th><th>Reduced · unchanged · expanded · no estimate</th><th>Origin production · qualification · unknown</th><th>Non-zero exits</th></tr>");
-    let cr = capped("native_tools");
-    for x in ag["native_rtk"].as_array().into_iter().flatten() {
-        let est = if x["input_estimate"].is_null() { "<span class=\"unknown\" title=\"unknown: no estimate\">—</span>".into() } else { format!("{} → {}", text(&x["input_estimate"]), text(&x["output_estimate"])) };
-        let o = &x["origins"];
-        let _ = writeln!(
-            w,
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{est}</td><td>{} · {} · {} · {}</td><td>{} · {} · {}</td><td>{} of {}</td></tr>",
-            text(&x["host"]), name(&x["agent"]), num(&x["calls"], &cr), text(&x["reduced"]), text(&x["unchanged"]), text(&x["expanded"]), text(&x["unknown"]), text(&o["production"]), text(&o["qualification"]), text(&o["unknown"]), text(&x["nonzero_exits"]), text(&x["exit_samples"])
-        );
-    }
-    let _ = writeln!(w, "</table>\n<details>\n<summary>Process counters</summary>\n<p class=\"note\">Counters reset when their process restarts; a reset is not a drop. Values are from the snapshot time.</p>\n<table>\n<tr><th>Host</th><th>Service</th><th>Snapshot</th><th>Counters</th></tr>");
-    for c in ag["counters"].as_array().into_iter().flatten() {
-        let m: Vec<String> = c["metrics"].as_object().into_iter().flatten().map(|(k, v)| format!("{k} {}", text(v))).collect();
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}{}</td><td>{}</td><td>{}</td></tr>", text(&c["host"]), text(&c["service"]), c["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default(), at(&c["at"], now), m.join(" · "));
-    }
-    let _ = writeln!(w, "</table>\n</details>\n</section>");
+        let _ = writeln!(w, "</table>");
+        let _ = writeln!(w, "<h3>Model activity</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>");
+        let ca = capped("activity");
+        for a in ag["activity"].as_array().into_iter().flatten() {
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>", text(&a["host"]), name(&a["agent"]), num(&a["calls"], &ca), num(&a["errors"], &ca), num(&a["sessions"], &ca), at(&a["last_at"], now), trace(&a["trace_id"], base));
+        }
+        let _ = writeln!(w, "</table>\n<h3>Model usage (sum and samples per field; fields are not added together)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Model</th><th>Calls</th><th>Usage</th><th>Reported cost</th></tr>");
+        for a in ag["activity"].as_array().into_iter().flatten() {
+            for m in a["models"].as_array().into_iter().flatten() {
+                let usage: Vec<String> = m["usage"].as_object().into_iter().flatten().map(|(k, u)| format!("{k} {} ({} samples)", text(&u["sum"]), text(&u["samples"]))).collect();
+                let cost = if m["cost"].is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".into() } else { format!("{} ({} samples)", text(&m["cost"]), text(&m["cost_samples"])) };
+                let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{cost}</td></tr>", text(&a["host"]), name(&a["agent"]), text(&m["model"]), num(&m["calls"], &ca), if usage.is_empty() { "—".into() } else { usage.join("<br>") });
+            }
+        }
+        let _ = writeln!(w, "</table>\n<h3>Compression (successes, normal skips and failures are disjoint)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Compressed</th><th>Normal skips</th><th>Failed</th><th>Unknown</th><th>Characters before → after</th></tr>");
+        let cc = capped("compression");
+        for c in ag["compression"].as_array().into_iter().flatten() {
+            let chars = if c["chars_before"].is_null() { "<span class=\"unknown\" title=\"unknown: not every call has before/after\">—</span>".into() } else { format!("{} → {}", text(&c["chars_before"]), text(&c["chars_after"])) };
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{chars}{}</td></tr>", text(&c["host"]), name(&c["agent"]), num(&c["compressed"], &cc), num(&c["normal_skips"], &cc), num(&c["failed"], &cc), num(&c["unknown"], &cc), trace(&c["trace_id"], base));
+        }
+        let _ = writeln!(w, "</table>\n<h3>Native RTK (estimates, not model tokens or savings)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Events</th><th>Estimated tokens before → after</th><th>Reduced · unchanged · expanded · no estimate</th><th>Origin production · qualification · unknown</th><th>Non-zero exits</th></tr>");
+        let cr = capped("native_tools");
+        for x in ag["native_rtk"].as_array().into_iter().flatten() {
+            let est = if x["input_estimate"].is_null() { "<span class=\"unknown\" title=\"unknown: no estimate\">—</span>".into() } else { format!("{} → {}", text(&x["input_estimate"]), text(&x["output_estimate"])) };
+            let o = &x["origins"];
+            let _ = writeln!(
+                w,
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{est}</td><td>{} · {} · {} · {}</td><td>{} · {} · {}</td><td>{} of {}</td></tr>",
+                text(&x["host"]), name(&x["agent"]), num(&x["calls"], &cr), text(&x["reduced"]), text(&x["unchanged"]), text(&x["expanded"]), text(&x["unknown"]), text(&o["production"]), text(&o["qualification"]), text(&o["unknown"]), text(&x["nonzero_exits"]), text(&x["exit_samples"])
+            );
+        }
+        let _ = writeln!(w, "</table>\n<details>\n<summary>Process counters</summary>\n<p class=\"note\">Counters reset when their process restarts; a reset is not a drop. Values are from the snapshot time.</p>\n<table>\n<tr><th>Host</th><th>Service</th><th>Snapshot</th><th>Counters</th></tr>");
+        for c in ag["counters"].as_array().into_iter().flatten() {
+            let m: Vec<String> = c["metrics"].as_object().into_iter().flatten().map(|(k, v)| format!("{k} {}", text(v))).collect();
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}{}</td><td>{}</td><td>{}</td></tr>", text(&c["host"]), text(&c["service"]), c["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default(), at(&c["at"], now), m.join(" · "));
+        }
+        let _ = writeln!(w, "</table>\n</details>\n</section>");
 
     // 5. Server checks
-    let ch = &doc["checks"];
-    let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>\n{}<p class=\"note\">Report at {}</p>", unknown_line(&ch["source"]), at(&ch["at"], now));
-    let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
-    for r in ch["results"].as_array().into_iter().flatten() {
-        let st = r["status"].as_str().unwrap_or("unknown");
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td></tr>", text(&r["check"]), badge(st, st), text(&r["detail"]));
     }
-    for m in ch["manual_rules"].as_array().into_iter().flatten() {
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
+    if configured("serverq") {
+        let ch = &doc["checks"];
+        let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>\n{}<p class=\"note\">Report at {}</p>", unknown_line(&ch["source"]), at(&ch["at"], now));
+        let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
+        for r in ch["results"].as_array().into_iter().flatten() {
+            let st = r["status"].as_str().unwrap_or("unknown");
+            let status = if ch["source"]["state"] == "ok" { badge(st, st) } else { badge("unconfirmed", &format!("Last known {st}")) };
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td></tr>", text(&r["check"]), status, text(&r["detail"]));
+        }
+        for m in ch["manual_rules"].as_array().into_iter().flatten() {
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
+        }
+        let _ = writeln!(w, "</table>\n<h3>Open incidents</h3>");
+        let open = ch["incidents"].as_array().cloned().unwrap_or_default();
+        if open.is_empty() {
+            let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");
+        }
+        for i in open {
+            let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), at(&i["first_seen"], now), at(&i["last_seen"], now), text(&i["occurrences"]));
+        }
+        let _ = writeln!(w, "</section>");
     }
-    let _ = writeln!(w, "</table>\n<h3>Open incidents</h3>");
-    let open = ch["incidents"].as_array().cloned().unwrap_or_default();
-    if open.is_empty() {
-        let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");
-    }
-    for i in open {
-        let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), at(&i["first_seen"], now), at(&i["last_seen"], now), text(&i["occurrences"]));
-    }
-    let _ = writeln!(w, "</section>\n</main>\n</body>\n</html>");
+    let _ = writeln!(w, "</main>\n</body>\n</html>");
     h
 }
 
@@ -655,6 +688,7 @@ fn bar(p: Option<f64>) -> String {
 /// 30 min line on 0–100 %; a gap of more than two buckets, an unknown value or a reset breaks the line. Fewer than
 /// two connected samples draw nothing: no chart from a single reading.
 fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &str) -> String {
+    if points.len() < 3 { return "<span class=\"trend none\">no trend yet · warmup, 3 real samples needed</span>".into(); }
     let from = to.saturating_sub(TREND);
     let mut lines: Vec<Vec<(u64, f64)>> = vec![vec![]];
     for p in points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from)) {
@@ -682,8 +716,10 @@ fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &s
 /// The combined first screen (first-screen.md, D10): servers and Boards side by side, reflowing to one column.
 fn first(w: &mut String, doc: &Value, now: u64) {
     let _ = writeln!(w, "<div class=\"first\">");
-    servers(w, &doc["resources"], now);
-    boards(w, doc["boards"].as_array().map_or(&[][..], Vec::as_slice));
+    if doc["sources"]["langfuse"]["reason"] != "not configured" || doc["resources"]["rows"].as_array().is_some_and(|a| !a.is_empty()) {
+        servers(w, &doc["resources"], now);
+    }
+    if let Some(rows) = doc["boards"].as_array().filter(|a| !a.is_empty()) { boards(w, rows); }
     let _ = writeln!(w, "</div>");
 }
 
@@ -713,7 +749,7 @@ fn servers(w: &mut String, res: &Value, now: u64) {
             text(&r["host"]),
             text(&r["runtime"]),
             text(&r["provenance"]),
-            badge(state, &age),
+            src["age_s"].as_u64().map_or_else(|| badge(state, &age), |a| format!("<span data-age-s=\"{a}\">{}</span>", badge(state, &age))),
             src["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default()
         );
         let cpu = |s: &Value| s["cpu"]["percent"].as_f64();
@@ -815,6 +851,64 @@ fn resources(w: &mut String, res: &Value, now: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D19 U1/U2: no configured product -> one real connection entry; a failed board is not first launch.
+    #[test]
+    fn startup_availability() {
+        let empty = crate::data::build(&json!({"now": 10000, "period": 1800, "projects": []}));
+        let html = render(&empty, &json!({}));
+        assert!(html.contains("Connect an existing installation") && html.contains("href=\"/connect\""));
+        for id in ["servers", "boards", "hosts", "agents", "checks", "resources"] {
+            assert!(!html.contains(&format!("id=\"{id}\"")), "unconfigured {id}");
+        }
+        let failed = crate::data::build(&json!({"now": 10000, "period": 1800, "projects": ["taskqorg/dashq"],
+            "boards": {"taskqorg/dashq": {"value": null, "at": null, "error": "timeout"}}}));
+        let html = render(&failed, &json!({}));
+        assert!(html.contains("id=\"boards\"") && html.contains("read failed (timeout)"));
+        assert!(!html.contains("id=\"servers\"") && !html.contains("id=\"agents\""));
+        assert!(crate::data::all_failed(&failed), "unconfigured sources do not mask first-ever failure");
+        let mut board_only = empty.clone();
+        let base = first_screen_doc();
+        board_only["boards"] = json!([base["boards"][0].clone()]);
+        board_only["sources"]["github"] = json!({"state": "ok", "at": 10000, "age_s": 0});
+        let html = render(&board_only, &json!({}));
+        assert!(html.contains("id=\"boards\"") && !html.contains("id=\"startup\""));
+        assert!(!html.contains("id=\"servers\"") && !html.contains("id=\"checks\""));
+        let mut fresh_empty = board_only.clone();
+        fresh_empty["boards"][0]["tasks"] = json!([]);
+        fresh_empty["boards"][0]["questions"] = json!([]);
+        fresh_empty["boards"][0]["counts"] = json!({"doing": 0, "review": 0, "ask": 0, "failed": 0, "ready": 0, "waiting": 0, "later": 0, "closed": null});
+        let mut pending = empty.clone();
+        pending["installations"] = json!({"source": {"state": "ok"}, "rows": [{"installation": "new", "workspace": "w", "product": "taskq",
+            "connection": "active", "projected": false, "host_label": "test", "runtime": "native", "observation": {"state": "unknown", "reason": "no snapshot yet"}}]});
+        assert!(render(&pending, &json!({})).contains("Pending · first snapshot readback"));
+        let mut warmup = base.clone();
+        for r in warmup["resources"]["rows"].as_array_mut().unwrap() {
+            r["history"]["points"].as_array_mut().unwrap().truncate(2);
+        }
+        assert!(!render(&warmup, &json!({})).contains("<polyline"), "two samples do not draw a trend");
+        let mut partial = base.clone();
+        partial["boards"][0]["source"]["state"] = json!("unconfirmed");
+        partial["boards"][0]["source"]["reason"] = json!("read failed (timeout)");
+        partial["sources"]["github"]["state"] = json!("unconfirmed");
+        partial["sources"]["github"]["reason"] = json!("read failed (timeout)");
+        let mut all = partial.clone();
+        for source in all["sources"].as_object_mut().unwrap().values_mut() {
+            source["state"] = json!("unconfirmed");
+            source["reason"] = json!("read failed (timeout)");
+        }
+        for b in all["boards"].as_array_mut().unwrap() { b["source"]["state"] = json!("unconfirmed"); }
+        for r in all["resources"]["rows"].as_array_mut().unwrap() { r["source"]["state"] = json!("unconfirmed"); }
+        if let Some(out) = std::env::var_os("DASHQ_STARTUP_EVIDENCE") {
+            let dir = std::path::Path::new(&out);
+            std::fs::create_dir_all(dir).unwrap();
+            for (name, doc) in [("first-launch", empty), ("first-failure", failed), ("taskq-only", board_only), ("empty-board", fresh_empty),
+                ("pending", pending), ("warmup", warmup), ("partial", partial), ("all-failed", all), ("recovery", base)] {
+                std::fs::write(dir.join(format!("{name}.html")), render(&doc, &json!({}))).unwrap();
+                std::fs::write(dir.join(format!("{name}.json")), doc.to_string()).unwrap();
+            }
+        }
+    }
 
     /// D18 V1–V4 chain: producer fixtures -> safe projection -> selectable contextual page.
     /// Stages without producer receipts remain unknown; stale versions never imply current health.

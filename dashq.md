@@ -50,7 +50,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 - Snapshot adapter ([S3 R1](docs/design/adapters.md#s3-taskq-snapshots-and-questions)): with config `taskq.binary` (absolute path of the pinned taskq), dashq runs `taskq status --json` per project in a fresh scratch folder holding only `taskq.json` and a scratch install whose `token` is the read-only token (`TASKQ_INSTALL`; taskq reads no token variable), no HOME, incident reports off, folder removed after the run; single flight, 10 s timeout, cache 60 s. Its totals, questions (S3 shape, read-only) and failure reasons replace the label counts; heartbeats stay label reads. A failed, incomplete or unknown-schema run is a failed read with its reason (D6); `sources.taskq` lists it. Absent key: labels only.
 
 ### D4.3 serverq report
-- The local `report.json` written by `serverq check` (path in config). Read on each refresh after a `stat`; no cache beyond the file.
+- The local `report.json` written by `serverq check` (path in optional `serverq` config). Read on every refresh; retain the last-good report in memory on failure with its original producer time, unconfirmed until a successful read. Absent config is unconfigured, distinct from a missing report. Absolute config paths and their acceptance fixtures use the target platform's path rules (D2).
 - Accepted: `schema` 1 with `at` (epoch seconds), `results` (`ok|warn|unknown` per check with `detail`), `incidents`, `manual_rules`. Another schema or invalid JSON: unknown with the reason.
 - Stale after 7200 s (hourly timer plus margin). Manual rules are listed as not verified, never as passed.
 
@@ -190,6 +190,7 @@ Accepted target: [service versions V1–V4](docs/design/service-versions.md) ref
 ## D19. First launch and partial availability
 
 Accepted target: [startup and outages U1–U4](docs/design/startup-outages.md) composes D6/D10–D14 and existing enrollment without new authority. Unconfigured products do not create empty panels; unavailable sources preserve last-known values and drafts, with per-source action gating. [Prototype coverage](docs/design/prototype-coverage.md) distinguishes accepted examples from remaining design and live-qualification gaps.
+- #74 read-only delivery: one first-launch entry continues to the existing `/connect` L2 flow; source context lists optional unconfigured inputs once. TaskQ-only has no empty resource/AgentQ/ServerQ panels. Failed boards retain historical counts and rows beside unknown current counters and explicit coverage. A failed page refresh preserves the page and shared component instances, marks board observations unconfirmed and shows advancing ages; recovery clears the banner without a write or incident resolution. ServerQ retains last-good evidence; Langfuse resource reads cannot stay fresh after collection failure. Trends need three real samples under U1. Shared answer and policy adapters remain read-only; [#119](https://github.com/taskqorg/dashq/issues/119) owns real action/recovery qualification after #44 and TaskQ #931. Config validation fixtures now use native absolute paths without relaxing validation.
 
 ## D20. Profiling
 Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md).

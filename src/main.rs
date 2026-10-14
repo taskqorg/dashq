@@ -131,8 +131,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key agentq_configure")?,
     };
-    let report = s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?;
-    let host = s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?;
+    let (report, host) = if v.get("serverq").is_some() {
+        (s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?,
+         s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?)
+    } else { (String::new(), String::new()) };
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     Ok(Config {
         links,
@@ -216,9 +218,16 @@ impl App {
             }
             (lf.join().unwrap_or(Value::Null), boards, releases, taskq)
         });
-        let t0 = std::time::Instant::now();
-        let serverq = source::serverq(&c.serverq_report);
-        profile::record("read.serverq", t0, serverq["error"].as_str());
+        // Read every time, but retain the last report and its producer time on failure (D19 U2).
+        let serverq = if c.serverq_report.is_empty() { Value::Null } else {
+            self.cache.get("serverq", 0, || {
+                let snap = source::serverq(&c.serverq_report);
+                match snap["error"].as_str() {
+                    Some(e) => Err((e.into(), None)),
+                    None => Ok((snap["value"].clone(), false)),
+                }
+            })
+        };
         let t0 = std::time::Instant::now();
         let host = filters["host"].as_str().map(String::from);
         // committed snapshots never wait for or depend on the optional sources above (D11)
@@ -690,13 +699,45 @@ mod tests {
         Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false }
     }
 
+    /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
+    #[test]
+    fn startup_serverq_retains_last_good() {
+        let dir = std::env::temp_dir().join(format!("dashq-startup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("report.json");
+        let observed = source::now() - 120;
+        let report = json!({"schema": 1, "at": observed, "results": {"probe": {"status": "warn", "detail": "probe failed"}},
+            "incidents": {"probe": {"state": "open", "first_seen": observed, "last_seen": observed, "occurrences": 1}}});
+        std::fs::write(&path, report.to_string()).unwrap();
+        let mut cfg = load_config_fixture();
+        cfg.serverq_report = path.to_string_lossy().into();
+        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let good = app.doc(1800, json!({}), None);
+        assert_eq!(good["sources"]["serverq"]["state"], "ok");
+        std::fs::write(&path, "invalid").unwrap();
+        let failed = app.doc(1800, json!({}), None);
+        assert_eq!(failed["sources"]["serverq"]["state"], "unconfirmed");
+        assert_eq!(failed["sources"]["serverq"]["at"], observed);
+        assert_eq!(failed["checks"]["results"], good["checks"]["results"]);
+        assert_eq!(failed["checks"]["incidents"], good["checks"]["incidents"]);
+        assert!(page::render(&failed, &json!({})).contains("current condition unverified"));
+        std::fs::write(&path, report.to_string()).unwrap();
+        let recovered = app.doc(1800, json!({}), None);
+        assert_eq!(recovered["sources"]["serverq"]["state"], "ok");
+        assert_eq!(recovered["checks"]["incidents"], good["checks"]["incidents"], "connection recovery is not incident recovery");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn config_errors_name_the_key_never_the_value() {
         let d = std::env::temp_dir().join(format!("dashq-cfg-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let p = d.join("config.json");
+        let report_path = d.join("report.json");
+        let binary_path = d.join("taskq");
+        let token_path = d.join("answer-token");
         let good = json!({"langfuse": {"base_url": "https://lf.example.com", "public_key": "pk-lf-1", "secret_key": "sk-lf-SECRET", "project_id": "p1"},
-            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": "/tmp/report.json", "host": "fra/native"}, "public_host": "dash.example.com"});
+            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": report_path, "host": "fra/native"}, "public_host": "dash.example.com"});
         let write = |v: &Value| {
             std::fs::write(&p, v.to_string()).unwrap();
             #[cfg(unix)]
@@ -724,13 +765,13 @@ mod tests {
             assert_eq!(load_config(&p).err().unwrap(), "config: mode must be 0600");
         }
         let mut t = good.clone();
-        t["taskq"] = json!({"binary": "/opt/taskq"});
+        t["taskq"] = json!({"binary": binary_path});
         write(&t);
-        assert_eq!(load_config(&p).unwrap().taskq_bin.as_deref(), Some("/opt/taskq"));
-        t["answer"] = json!({"token": "/etc/dashq/answer-token", "boards": {"taskqorg/dashq": "ws-1"}});
+        assert_eq!(load_config(&p).unwrap().taskq_bin.as_deref(), binary_path.to_str());
+        t["answer"] = json!({"token": token_path, "boards": {"taskqorg/dashq": "ws-1"}});
         write(&t);
         let a = load_config(&p).unwrap().answer.unwrap();
-        assert_eq!((a.token.to_str(), a.boards["taskqorg/dashq"].as_str()), (Some("/etc/dashq/answer-token"), "ws-1"));
+        assert_eq!((a.token.to_str(), a.boards["taskqorg/dashq"].as_str()), (token_path.to_str(), "ws-1"));
         // only configured projects are answerable, and answers need the pinned binary
         t["answer"]["boards"] = json!({"other/repo": "ws-1"});
         write(&t);
@@ -742,6 +783,9 @@ mod tests {
         t.as_object_mut().unwrap().remove("taskq");
         write(&t);
         assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq.binary");
+        write(&json!({"public_host": "dash.example.com"}));
+        let first = load_config(&p).unwrap();
+        assert!(first.langfuse.is_none() && first.github_token.is_none() && first.serverq_report.is_empty());
         assert_eq!(base64(b"ab"), "YWI=");
     }
 }

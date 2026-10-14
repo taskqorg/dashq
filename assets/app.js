@@ -1,6 +1,7 @@
 // dashq.md D5: fetch /data on load, every 60 s and on Refresh; a failure keeps the last page and shows the banner.
 'use strict';
 let busy = false;
+let ageUpdatedAt = Date.now();
 async function refresh() {
   // a reader's text selection would be lost by the swap: keep it, try again next time
   if (busy || !getSelection().isCollapsed) return;
@@ -9,7 +10,8 @@ async function refresh() {
   const shown = document.querySelector('main time')?.textContent || 'unknown';
   try {
     const data = await fetch('/data' + location.search, { cache: 'no-store' });
-    if (!data.ok) throw new Error('HTTP ' + data.status);
+    // D7's first-ever total failure still has an honest server-rendered page, never demo data.
+    if (!data.ok && data.status !== 503) throw new Error('HTTP ' + data.status);
     const page = await fetch('/' + location.search, { cache: 'no-store' });
     if (!page.ok) throw new Error('HTTP ' + page.status);
     const main = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById('main');
@@ -54,12 +56,44 @@ async function refresh() {
       e?.focus({ preventScroll: true });
       if (selection && selection[0] !== null && e?.setSelectionRange) e.setSelectionRange(...selection);
     }
-    window.scrollTo(0, y);
     bind();
+    ageUpdatedAt = Date.now();
+    const currentBanner = document.getElementById('banner');
+    currentBanner.hidden = data.ok;
+    currentBanner.textContent = data.ok ? '' : 'All source reads failed. Current state unknown; retained evidence is not confirmed.';
+    window.scrollTo(0, y);
   } catch (e) {
+    const readingY = scrollY;
     DashqResources.bind();
-    banner.textContent = 'Refresh failed (' + e.message + '), showing data from ' + shown + '.';
-    banner.hidden = false;
+    const elapsed = Math.floor((Date.now() - ageUpdatedAt) / 1000);
+    document.querySelectorAll('main [data-age-s]').forEach(e => {
+      e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
+      e.textContent = 'Last observation ' + e.dataset.ageS + ' s old · unconfirmed';
+    });
+    document.querySelectorAll('main .s.ok').forEach(e => {
+      e.classList.replace('ok', 'unconfirmed');
+      e.title = 'Last-known evidence; current source state unknown';
+    });
+    const root = document.getElementById('boards');
+    if (root) {
+      const focus = document.activeElement?.id;
+      const boards = JSON.parse(root.dataset.boards);
+      boards.forEach(b => {
+        b.source = {...b.source, state: b.source.at == null ? 'unknown' : 'unconfirmed',
+          age_s: b.source.age_s == null ? null : b.source.age_s + elapsed,
+          reason: 'Dashboard refresh unavailable; retained observation is not confirmed.'};
+      });
+      root.dataset.boards = JSON.stringify(boards);
+      renderBoards();
+      if (focus) document.getElementById(focus)?.focus({preventScroll: true});
+    }
+    ageUpdatedAt = Date.now();
+    const at = document.querySelector('main time')?.dataset.at;
+    const age = at ? ' Last page generated ' + Math.max(0, Math.floor(Date.now() / 1000) - Number(at)) + ' s ago.' : '';
+    const errorBanner = document.getElementById('banner') || banner;
+    errorBanner.textContent = 'Refresh failed (' + e.message + '), showing last-known data from ' + shown + '. Current source state unknown; incidents are unverified.' + age;
+    errorBanner.hidden = false;
+    window.scrollTo(0, readingY);
   } finally {
     busy = false;
   }
