@@ -15,7 +15,7 @@
      "status": 200, "response": {"protocol": 1, "state": "active", "generation": 1}},
     {"at": 12, "route": "/machine/ingest", "auth": "$cred",
      "request": {"protocol": 1, "records": [
-       {"schema": "serverq-report/1", "event_id": "snap-1", "observed_at": 12, "payload": {"findings": 0}},
+       {"schema": "serverq-report/1", "event_id": "snap-1", "observed_at": 12, "payload": {"schema": 1, "product": "serverq", "rules": {}}},
        {"schema": "agentq-snapshot/1", "event_id": "snap-2", "observed_at": 12, "payload": {}}]},
      "status": 200, "response": {"protocol": 1, "receipts": [
        {"event_id": "snap-1", "state": "accepted"},

@@ -835,9 +835,10 @@ pub fn build(inp: &Value) -> Value {
     if !sq_host.is_empty() && !sq.is_null() {
         let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
         let h = hosts.entry(sq_host.into()).or_insert_with(|| host_row(sq_host));
-        h["serverq"] = json!({"status": worst_status, "state": sq_src["state"], "age_s": sq_src["age_s"], "reason": sq_src["reason"]});
+        h["serverq"] = json!({"status": worst_status, "state": sq_src["state"], "at": sq_src["at"], "age_s": sq_src["age_s"], "reason": sq_src["reason"], "installation": null});
     }
     let manual: Vec<Value> = report["manual_rules"].as_array().into_iter().flatten().map(|r| json!({"rule": r, "status": "not verified"})).collect();
+    let enrolled_checks = serverq_enrolled(inp, now, &mut hosts, &mut current, &mut gaps, &mut history);
 
     for h in hosts.values_mut() {
         h["taskq"]["latest"] = latest("taskqorg/taskq");
@@ -891,7 +892,8 @@ pub fn build(inp: &Value) -> Value {
         "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
-        "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
+        "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual,
+                   "installations": enrolled_checks.into_iter().filter(|c| fhost.is_none_or(|x| c["host"] == x)).collect::<Vec<_>>()},
         "versions": versions,
         "optimization": crate::optimization::build(inp),
     });
@@ -899,6 +901,68 @@ pub fn build(inp: &Value) -> Value {
         doc["installations"] = inp["installations"].clone();
     }
     doc
+}
+
+/// Enrolled `serverq-report/1` snapshots (serverq.md § 3 projection, schema 1): one Server checks entry per
+/// installation and workspace, its hosts cell and Attention items. Producer time dates everything (serverq limit
+/// 7200 s, enroll::stale_secs); manual rules stay not verified, unknown stays unknown, a revoked grant shows nothing
+/// current. A host keeps the newest observation when several installations share its label and runtime.
+fn serverq_enrolled(inp: &Value, now: u64, hosts: &mut BTreeMap<String, Value>, current: &mut Vec<Value>, gaps: &mut Vec<Value>, history: &mut Vec<Value>) -> Vec<Value> {
+    let rule_id = |k: &str| (1..=64).contains(&k.len()) && k.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-'));
+    let mut out = Vec::new();
+    for r in inp["installations"]["rows"].as_array().into_iter().flatten() {
+        if r["product"] != "serverq" || r["connection"] == "revoked" || r["snapshot"]["schema"] != "serverq-report/1" {
+            continue;
+        }
+        let label = r["host_label"].as_str().filter(|h| safe(h, 64, b"_.-")).unwrap_or("unknown");
+        let host = format!("{label}/{}", if r["runtime"] == "wsl" { "wsl" } else { "native" });
+        let installation = r["installation"].clone();
+        let p = &r["snapshot"]["payload"];
+        let mut src = r["observation"].clone();
+        let valid = crate::enroll::serverq_payload(p);
+        if !valid {
+            src = json!({"state": "unknown", "at": src["at"], "age_s": src["age_s"], "reason": "unsupported serverq projection (schema 1 expected)", "incomplete": false});
+        }
+        let last = if src["state"] == "ok" { "" } else { " Last known: the report is not fresh." };
+        let (mut results, mut manual, mut open) = (Vec::new(), Vec::new(), Vec::new());
+        for (name, x) in p["rules"].as_object().into_iter().flatten().filter(|(k, _)| rule_id(k)) {
+            let status = x["status"].as_str().filter(|s| ["ok", "warn", "unknown", "manual"].contains(s)).unwrap_or("unknown");
+            if status == "manual" {
+                manual.push(json!({"rule": name, "status": "not verified"}));
+                continue;
+            }
+            let reason = x["reason"].as_str().filter(|s| safe(s, 64, b"-")).map_or(Value::Null, |s| json!(s));
+            let observed = x["observed_at"].as_f64().filter(|t| t.is_finite() && *t >= 0.0).map_or(Value::Null, |t| json!(t as u64));
+            let evidence: Map<String, Value> = x["evidence"].as_object().into_iter().flatten().filter(|(k, v)| safe(k, 32, b"_") && v.is_number()).map(|(k, v)| (k.clone(), v.clone())).collect();
+            let first_seen = p["incidents"][name]["first_seen"].as_f64().map(|a| a as u64);
+            let detail = format!("{}{last}", reason.as_str().unwrap_or("no reason reported"));
+            let item = json!({"source": "serverq", "host": host, "installation": installation, "what": format!("{name}: {status}"), "since": first_seen.or(observed.as_u64()).or(src["at"].as_u64()), "detail": detail, "trace_id": null});
+            match status {
+                "warn" => current.push(item),
+                "unknown" => gaps.push(item),
+                _ => {}
+            }
+            results.push(json!({"check": name, "status": status, "reason": reason, "observed_at": observed, "evidence": evidence}));
+        }
+        for (name, i) in p["incidents"].as_object().into_iter().flatten().filter(|(k, _)| rule_id(k)) {
+            let t = |k: &str| i[k].as_f64().filter(|t| t.is_finite() && *t >= 0.0).map(|a| a as u64);
+            let state = i["state"].as_str().filter(|s| ["observed", "verified"].contains(s)).unwrap_or("unknown");
+            if state != "verified" {
+                open.push(json!({"check": name, "state": state, "first_seen": t("first_seen"), "last_seen": t("last_seen"), "occurrences": i["occurrences"]}));
+            }
+            if t("last_seen").is_some_and(|l| l + 86400 >= now) {
+                history.push(json!({"source": "serverq", "host": host, "installation": installation, "what": format!("{name}: {state}"), "since": t("first_seen"), "occurrences": i["occurrences"], "trace_id": null}));
+            }
+        }
+        let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
+        let h = hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
+        if h["serverq"]["at"].as_u64().is_none_or(|a| src["at"].as_u64().is_some_and(|b| b >= a)) {
+            h["serverq"] = json!({"status": worst_status, "state": src["state"], "at": src["at"], "age_s": src["age_s"], "reason": src["reason"], "installation": installation});
+        }
+        out.push(json!({"installation": installation, "workspace": r["workspace"], "host": host, "version": p["version"].as_str().filter(|v| safe(v, 64, b".+-")),
+            "catalog": p["catalog"].as_str().filter(|c| safe(c, 64, b"")), "source": src, "at": src["at"], "results": results, "incidents": open, "manual_rules": manual}));
+    }
+    out
 }
 
 /// One open question in the S3 shape: source choice ids, order and text kept; a card that does not parse

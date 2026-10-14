@@ -98,8 +98,10 @@
       "serverq": {
         "status": "warn",
         "state": "ok",
+        "at": 1791871539,
         "age_s": 3600,
-        "reason": null
+        "reason": null,
+        "installation": null
       },
       "services": [
         {
@@ -1134,7 +1136,8 @@
         "rule": "backups-restore-drill",
         "status": "not verified"
       }
-    ]
+    ],
+    "installations": []
   },
   "versions": {
     "rows": [

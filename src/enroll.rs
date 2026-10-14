@@ -27,6 +27,29 @@ const MAX_PENDING: i64 = 1000;
 const BURST: f64 = 10.0;
 /// C5 heartbeat: a snapshot older than this is stale.
 pub const STALE_SECS: u64 = 180;
+/// ServerQ sends no heartbeat between its hourly checks: its report is stale after the serverq limit (D4.3, D6).
+pub const SERVERQ_STALE_SECS: u64 = 7200;
+
+/// Snapshots a dashboard view renders: only these receipts become `projected` (C4). Installations renders every
+/// `agentq-snapshot/1`; Server checks renders only the ServerQ payload shape data.rs `serverq_enrolled` accepts,
+/// anything else reads unknown there and stays `accepted`.
+pub fn renders(product: &str, s: &store::Snapshot) -> bool {
+    match (product, s.schema.as_str()) {
+        ("agentq", "agentq-snapshot/1") => true,
+        ("serverq", "serverq-report/1") => serverq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
+        _ => false,
+    }
+}
+
+/// serverq.md § 3 projection, schema 1: the only ServerQ payload Server checks renders.
+pub fn serverq_payload(p: &Value) -> bool {
+    p["schema"] == 1 && p["product"] == "serverq" && p["rules"].is_object()
+}
+
+/// Producer-time freshness limit of a snapshot schema.
+pub fn stale_secs(schema: &str) -> u64 {
+    if schema == "serverq-report/1" { SERVERQ_STALE_SECS } else { STALE_SECS }
+}
 /// C5 resources: a trend needs at least this many samples; fewer is history warmup.
 pub const TREND_SAMPLES: i64 = 3;
 /// C5: first-connection progress polls every 2 s for at most 60 s.
@@ -194,7 +217,7 @@ impl Enroll {
 
     /// The scoped dashboard projection; also run by the service pass so receipts become `projected` (C1.5).
     pub fn project(&self, scope: Scope) -> Result<Vec<store::Row>, store::Error> {
-        self.store.project(scope)
+        self.store.project(scope, renders)
     }
 
     /// Typed AgentQ configure enqueue for the guarded browser adapter (#63; D16). The server sets everything with
@@ -602,7 +625,7 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
                     let obs = if s.clock_uncertain {
                         json!({"state": "unknown", "at": s.observed, "age_s": null, "reason": "clock uncertain: observed in the future", "incomplete": false})
                     } else {
-                        crate::data::source(&json!({"value": true, "at": s.observed.max(0)}), now, STALE_SECS, None)
+                        crate::data::source(&json!({"value": true, "at": s.observed.max(0)}), now, stale_secs(&s.schema), None)
                     };
                     (obs, json!({"event_id": s.event_id, "schema": s.schema, "payload": serde_json::from_str::<Value>(&s.payload).unwrap_or(Value::Null)}))
                 }
@@ -620,7 +643,7 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
                 "generation": r.generation, "connection": r.connection,
-                "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation),
+                "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
                 "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
                 "capabilities": r.capabilities.as_deref().map(|s| serde_json::from_str::<Value>(s).unwrap_or(Value::Null)).unwrap_or(json!([])),
                 "scope": r.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()), "observation": obs, "history": history, "export": export, "snapshot": snapshot})
@@ -918,7 +941,7 @@ fn lifecycle(e: &Enroll, subject: &str, who: &str, q: &HashMap<String, String>, 
         return fail("200 OK", "This connection was replaced or revoked; the overview shows its current state.");
     }
     // the projection above read this generation's snapshot as current: its receipt is `projected` now
-    if row.snapshot.as_ref().is_some_and(|s| s.generation == generation) {
+    if row.snapshot.as_ref().is_some_and(|s| s.generation == generation && renders(&row.product, s)) {
         let mut x = html("303 See Other", &format!("<p><a href=\"/#{to}\">Open the overview</a></p>\n"));
         x.headers = format!("Location: /#{to}\r\n");
         return x;
@@ -1396,7 +1419,7 @@ mod tests {
         let store = &e.as_ref().unwrap().store;
         assert_eq!(store.outbox(9).unwrap().iter().map(|r| r.event_id.as_str()).collect::<Vec<_>>(), ["r1"]);
         // an export never becomes the snapshot or a history sample
-        assert_eq!(store.project(Scope::All).unwrap()[0].snapshot.as_ref().unwrap().event_id, "s1");
+        assert_eq!(store.project(Scope::All, renders).unwrap()[0].snapshot.as_ref().unwrap().event_id, "s1");
         assert_eq!(store.history("inst-1").unwrap().len(), 1);
     }
 
@@ -1544,6 +1567,130 @@ mod tests {
         // enrollment not set up: the capability stays inactive, no installations section or source
         let (_, doc) = data(&self::app(Err("not set up".into()), None), "", Some(Scope::All));
         assert!(doc.get("installations").is_none() && doc["sources"].get("enrollment").is_none());
+    }
+
+    /// Approved and acknowledged connection of a standalone product installation; returns the credential.
+    fn join(e: &Result<Enroll, String>, product: &str, inst: &str, runtime: &str, label: &str, schema: &str, now: i64) -> String {
+        let (s, d) = machine(e, "/machine/connect/device", None, json!({"protocol": 1, "product": product, "installation": inst, "runtime": runtime, "host_label": label, "schemas": [schema]}), now);
+        assert_eq!(s, 200, "{d}");
+        assert!(decide(e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", now).1.contains("Approved"));
+        let cred = machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        cred
+    }
+
+    /// A ServerQ projection fixture (serverq.md § 3) moved so its report time is `at`; every time keeps its offset.
+    fn serverq_report(fixture: &str, at: i64) -> Value {
+        let mut p: Value = serde_json::from_str(fixture).unwrap();
+        let shift = at - p["observed_at"].as_i64().unwrap();
+        fn walk(v: &mut Value, shift: i64) {
+            match v {
+                Value::Object(o) => o.iter_mut().for_each(|(k, x)| match x.as_i64() {
+                    Some(t) if ["observed_at", "first_seen", "last_seen", "verified_at"].contains(&k.as_str()) => *x = json!(t + shift),
+                    _ => walk(x, shift),
+                }),
+                _ => {}
+            }
+        }
+        walk(&mut p, shift);
+        p
+    }
+
+    /// Enrollment E1/E8 for ServerQ (#122): ServerQ-only installations on Linux (WSL) and Windows under one host label
+    /// fill their own hosts rows and Server checks, stay fresh by producer time within the serverq limit, and their
+    /// receipts read `projected` only after a view rendered them; an unsupported schema never does.
+    #[test]
+    fn serverq_snapshots_render_per_installation_and_drive_projected_receipts() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("serverq");
+        let schema = "serverq-report/1";
+        let (linux, windows) = (include_str!("../fixture/serverq/linux.json"), include_str!("../fixture/serverq/windows.json"));
+        let wsl = join(&e, "serverq", "sq-wsl", "wsl", "DESKTOP", schema, now);
+        let native = join(&e, "serverq", "sq-native", "native", "DESKTOP", schema, now);
+        // a lost identity on the same label and runtime: an older, stale report of its own
+        let lost = join(&e, "serverq", "sq-lost", "native", "DESKTOP", schema, now);
+        let other = join(&e, "taskq", "tq-1", "native", "DESKTOP", "taskq-snapshot/1", now);
+        // the right schema name around a payload the view cannot render: another payload schema, no rules
+        let v2 = join(&e, "serverq", "sq-v2", "native", "other", schema, now);
+        let bare = join(&e, "serverq", "sq-bare", "native", "other", schema, now);
+        let send = |cred: &str, id: &str, schema: &str, at: i64, payload: Value| {
+            let (s, v) = ingest(&e, cred, vec![json!({"schema": schema, "event_id": id, "observed_at": at, "payload": payload})], now);
+            assert_eq!((s, states(&v)), (200, vec!["accepted".to_string()]), "{v}");
+        };
+        send(&wsl, "r-wsl", schema, now - 180, serverq_report(linux, now - 180));
+        // ServerQ sends no heartbeat between hourly checks: 7000 s is fresh, 7300 s is stale
+        send(&native, "r-native", schema, now - 7000, serverq_report(windows, now - 7000));
+        send(&lost, "r-lost", schema, now - 7300, serverq_report(linux, now - 7300));
+        send(&other, "t-1", "taskq-snapshot/1", now, json!({"schema": 1}));
+        send(&v2, "r-v2", schema, now, json!({"schema": 2, "product": "serverq", "rules": {}}));
+        send(&bare, "r-bare", schema, now, json!({"schema": 1, "product": "serverq"}));
+        let receipt = |cred: &str, id: &str| machine(&e, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), now).1["state"].clone();
+        assert_eq!(receipt(&wsl, "r-wsl"), "accepted", "no view has read it yet");
+
+        let mut app = app(e, None);
+        app.cfg.serverq_report = String::new();
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let e = &app.enroll;
+        let receipt = |cred: &str, id: &str| machine(e, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), now).1["state"].clone();
+        for (cred, id) in [(&wsl, "r-wsl"), (&native, "r-native"), (&lost, "r-lost")] {
+            assert_eq!(receipt(cred, id), "projected", "{id}");
+        }
+        assert_eq!(receipt(&other, "t-1"), "accepted", "no view renders taskq-snapshot/1");
+        assert_eq!((receipt(&v2, "r-v2"), receipt(&bare, "r-bare")), (json!("accepted"), json!("accepted")), "an unsupported payload never reads projected");
+        let rows = doc["installations"]["rows"].as_array().unwrap();
+        let row = |inst: &str| rows.iter().find(|r| r["installation"] == inst).unwrap().clone();
+        let projected = |inst: &str| row(inst)["projected"].clone();
+        assert_eq!([projected("sq-native"), projected("tq-1"), projected("sq-v2"), projected("sq-bare")], [true, false, false, false].map(|b| json!(b)));
+        assert_eq!((row("sq-native")["observation"]["state"].as_str(), row("sq-lost")["observation"]["state"].as_str()), (Some("ok"), Some("stale")));
+
+        // hosts: one row per label and runtime; the newest observation owns a shared row
+        let host = |id: &str| doc["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).unwrap()["serverq"].clone();
+        let (h_wsl, h_native) = (host("DESKTOP/wsl"), host("DESKTOP/native"));
+        assert_eq!((h_wsl["status"].as_str(), h_wsl["state"].as_str(), h_wsl["installation"].as_str(), h_wsl["at"].as_i64()), (Some("warn"), Some("ok"), Some("sq-wsl"), Some(now - 180)));
+        // age is read at /data time, a second or more after `now` on a slow host
+        assert!(h_wsl["age_s"].as_i64().is_some_and(|a| (180..190).contains(&a)), "{h_wsl}");
+        assert_eq!((h_native["status"].as_str(), h_native["state"].as_str(), h_native["installation"].as_str()), (Some("unknown"), Some("ok"), Some("sq-native")));
+
+        // Server checks: each installation apart, per-rule status, reason and producer time
+        let checks = doc["checks"]["installations"].as_array().unwrap();
+        assert_eq!(checks.len(), 5);
+        for inst in ["sq-v2", "sq-bare"] {
+            let c = checks.iter().find(|c| c["installation"] == inst).unwrap();
+            assert_eq!((c["source"]["state"].as_str(), c["source"]["reason"].as_str()), (Some("unknown"), Some("unsupported serverq projection (schema 1 expected)")), "{c}");
+        }
+        let check = |inst: &str| checks.iter().find(|c| c["installation"] == inst).unwrap().clone();
+        let win = check("sq-native");
+        assert_eq!((win["host"].as_str(), win["version"].as_str(), win["source"]["state"].as_str()), (Some("DESKTOP/native"), Some("1.3.0"), Some("ok")));
+        assert_eq!(win["results"].as_array().unwrap().len(), 5);
+        for r in win["results"].as_array().unwrap() {
+            assert_eq!((r["status"].as_str(), r["reason"].as_str(), r["observed_at"].as_i64()), (Some("unknown"), Some("unsupported-os"), Some(now - 7000)), "{r}");
+        }
+        let manual: Vec<&str> = win["manual_rules"].as_array().unwrap().iter().map(|m| m["status"].as_str().unwrap()).collect();
+        assert_eq!(manual, ["not verified"; 4], "manual rules are never verified");
+        let lin = check("sq-wsl");
+        let rule = |name: &str| lin["results"].as_array().unwrap().iter().find(|r| r["check"] == name).unwrap().clone();
+        assert_eq!(rule("failed-services"), json!({"check": "failed-services", "status": "warn", "reason": "failed-units", "observed_at": now - 180, "evidence": {"units": 1}}));
+        assert_eq!(rule("bounded-journal")["observed_at"], now - 180 - 3600, "a cached rule keeps its own observation time");
+        assert_eq!(lin["incidents"], json!([{"check": "failed-services", "state": "observed", "first_seen": now - 180 - 7200, "last_seen": now - 180, "occurrences": 3}]));
+        assert_eq!(check("sq-lost")["source"]["state"], "stale");
+
+        // Attention: the warning is current, unknown rules are gaps, each naming its installation
+        let att = &doc["attention"];
+        assert!(att["current"].as_array().unwrap().iter().any(|i| i["installation"] == "sq-wsl" && i["what"] == "failed-services: warn" && i["host"] == "DESKTOP/wsl"));
+        assert_eq!(att["gaps"].as_array().unwrap().iter().filter(|i| i["installation"] == "sq-native" && i["detail"] == "unsupported-os").count(), 5);
+        // versions: the enrolled ServerQ version, an unknown schema stays unsupported
+        let ver = |inst: &str| doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap().clone();
+        assert_eq!((ver("sq-native")["provenance"].as_str(), ver("sq-native")["running"]["version"].as_str()), (Some("enrollment"), Some("1.3.0")));
+        assert_eq!(ver("tq-1")["provenance"], "unsupported");
+
+        // the page renders what /data says; equal host labels stay apart
+        let html = crate::page::render(&doc, &json!({}));
+        let section = &html[html.find("<section id=\"checks\">").unwrap()..];
+        for s in ["DESKTOP/wsl · ServerQ 1.3.0 · <code>sq-wsl</code>", "DESKTOP/native · ServerQ 1.3.0 · <code>sq-native</code>", "<code>sq-lost</code>", "unsupported-os", "failed-units", "Last known ok", "not verified"] {
+            assert!(section.contains(s), "{s}");
+        }
+        assert!(html.contains("<section id=\"hosts\">") && !html.contains("no serverq report for this host"));
     }
 
     #[test]
