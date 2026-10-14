@@ -31,12 +31,13 @@ pub const STALE_SECS: u64 = 180;
 pub const SERVERQ_STALE_SECS: u64 = 7200;
 
 /// Snapshots a dashboard view renders: only these receipts become `projected` (C4). Installations renders every
-/// `agentq-snapshot/1`; Server checks renders only the ServerQ payload shape data.rs `serverq_enrolled` accepts,
-/// anything else reads unknown there and stays `accepted`.
+/// `agentq-snapshot/1` and the TaskQ board summary of a schema 1 `taskq-board/1`; Server checks renders only the
+/// ServerQ payload shape data.rs `serverq_enrolled` accepts, anything else reads unknown there and stays `accepted`.
 pub fn renders(product: &str, s: &store::Snapshot) -> bool {
     match (product, s.schema.as_str()) {
         ("agentq", "agentq-snapshot/1") => true,
         ("serverq", "serverq-report/1") => serverq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
+        ("taskq", "taskq-board/1") => taskq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
         _ => false,
     }
 }
@@ -44,6 +45,11 @@ pub fn renders(product: &str, s: &store::Snapshot) -> bool {
 /// serverq.md § 3 projection, schema 1: the only ServerQ payload Server checks renders.
 pub fn serverq_payload(p: &Value) -> bool {
     p["schema"] == 1 && p["product"] == "serverq" && p["rules"].is_object()
+}
+
+/// taskq enrollment.md Observation, schema 1: the only TaskQ payload Connections renders as a board summary.
+pub fn taskq_payload(p: &Value) -> bool {
+    p["schema"] == 1 && p["board"]["repo"].is_string() && p["tasks"].is_array()
 }
 
 /// Producer-time freshness limit of a snapshot schema.
@@ -530,7 +536,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
             // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
             (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
             (Some(schema), Some(_)) if !in_board(schema, &r["payload"], g) => out[i] = Some("scope"),
-            (Some(schema), Some(observed)) if metadata(&r["payload"], 0) => {
+            (Some(schema), Some(observed)) if snapshot_metadata(schema, &r["payload"]) => {
                 let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
                 events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
                 index.push(i);
@@ -578,6 +584,24 @@ fn metadata(v: &Value, depth: usize) -> bool {
         Value::Array(a) => depth > 0 && depth < 6 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
         Value::Object(o) => depth < 5 && o.len() <= 256 && o.iter().all(|(k, x)| field(k) && metadata(x, depth + 1)),
     }
+}
+
+/// Record payload allowlist (D11). The one text exception (#125): a `taskq-board/1` choice's `text` at
+/// `tasks[].choices[].text`, the owner-approved ask-card option, still a short single-line string. Any other `text`
+/// field, and choice text in another schema, stays refused.
+fn snapshot_metadata(schema: &str, p: &Value) -> bool {
+    if schema != "taskq-board/1" || !p["tasks"].is_array() {
+        return metadata(p, 0);
+    }
+    let mut p = p.clone();
+    for t in p["tasks"].as_array_mut().into_iter().flatten() {
+        for c in t.get_mut("choices").and_then(Value::as_array_mut).into_iter().flatten() {
+            if let Some(o) = c.as_object_mut().filter(|o| o.get("text").is_some_and(|x| x.is_string() && metadata(x, 5))) {
+                o.remove("text");
+            }
+        }
+    }
+    metadata(&p, 0)
 }
 
 fn field(k: &str) -> bool {
@@ -1616,6 +1640,65 @@ mod tests {
         let cred = machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
         assert_eq!(machine(e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
         cred
+    }
+
+    /// Enrollment E1/E6 for TaskQ (#125): a schema 1 `taskq-board/1` observation, ask-card choice text included, is a
+    /// supported versions row, its board summary renders in Connections and its receipt reads `projected`; another
+    /// payload schema stays `accepted` and its versions row unsupported. Risk: the D11 choice-text exception widens to
+    /// other fields or schemas, or refuses the canonical TaskQ observation.
+    #[test]
+    fn taskq_board_snapshots_render_and_unknown_schemas_stay_unsupported() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("taskq");
+        let schema = "taskq-board/1";
+        let join_board = |inst: &str| {
+            let scope = json!({"name": schema, "value": "github:github.com/taskqorg/taskq"});
+            let d = machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": "taskq", "installation": inst, "runtime": "native", "host_label": "win", "schemas": [schema], "scope": scope}), now).1;
+            assert!(decide(&e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", now).1.contains("Approved"));
+            let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
+            assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+            cred
+        };
+        let (good, v2) = (join_board("tq-win"), join_board("tq-v2"));
+        let board = json!({"kind": "github", "host": "github.com", "repo": "taskqorg/taskq"});
+        let choices = json!([{"number": 1, "text": "Approve narrowly scoped choice content in D11 ★", "recommended": true}, {"number": 2, "text": "Defer choice support", "recommended": false}]);
+        let observation = |tasks: Value| json!({"schema": 1, "installation": "tq-win", "board": board, "observed": now, "complete": true, "reason": null, "totals": {"doing": 2, "ask": 1}, "tasks": tasks});
+        let record = |id: &str, payload: Value| json!({"schema": schema, "event_id": id, "observed_at": now, "payload": payload});
+        // text outside `tasks[].choices[].text`, or choice text that is not short single-line metadata, stays refused
+        let refused = [
+            observation(json!([{"n": 7, "state": "ask", "revision": 3, "text": "raw card", "choices": choices}])),
+            observation(json!([{"n": 7, "state": "ask", "revision": 3, "choices": [{"number": 1, "message": "x", "recommended": true}]}])),
+            observation(json!([{"n": 7, "state": "ask", "revision": 3, "choices": [{"number": 1, "text": "two
+lines", "recommended": true}]}])),
+            observation(json!([{"n": 7, "state": "ask", "revision": 3, "choices": [{"number": 1, "text": "/etc/passwd", "recommended": true}]}])),
+            observation(json!([{"n": 7, "state": "ask", "revision": 3, "choices": [{"number": 1, "text": "x".repeat(257), "recommended": true}]}])),
+            json!({"schema": 1, "board": board, "text": "free text", "tasks": []}),
+        ];
+        let records = refused.into_iter().enumerate().map(|(i, p)| record(&format!("bad-{i}"), p)).collect();
+        assert_eq!(states(&ingest(&e, &good, records, now).1), vec!["rejected:payload"; 6]);
+        for (cred, id, payload) in [
+            (&good, "b-1", observation(json!([{"n": 7, "state": "ask", "revision": 3, "choices": choices}, {"n": 8, "state": "doing", "revision": 4, "choices": []}]))),
+            (&v2, "b-2", json!({"schema": 2, "board": board, "tasks": []})),
+        ] {
+            let (s, v) = ingest(&e, cred, vec![record(id, payload)], now);
+            assert_eq!((s, states(&v)), (200, vec!["accepted".to_string()]), "{v}");
+        }
+        // the exception is TaskQ's: the same choice shape in another schema is refused
+        let agent = join(&e, "agentq", "aq-1", "native", "mac", "agentq-snapshot/1", now);
+        let (_, v) = ingest(&e, &agent, vec![json!({"schema": "agentq-snapshot/1", "event_id": "a-1", "observed_at": now, "payload": {"tasks": [{"choices": choices}]}})], now);
+        assert_eq!(states(&v), ["rejected:payload"]);
+        let app = app(e, None);
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let receipt = |cred: &str, id: &str| machine(&app.enroll, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), now).1["state"].clone();
+        assert_eq!((receipt(&good, "b-1"), receipt(&v2, "b-2")), (json!("projected"), json!("accepted")));
+        let row = doc["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "tq-win").unwrap().clone();
+        assert_eq!(row["snapshot"]["payload"]["tasks"][0]["choices"], choices);
+        let ver = |inst: &str| doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap().clone();
+        assert_eq!((ver("tq-win")["provenance"].as_str(), ver("tq-win")["observation"]["state"].as_str(), ver("tq-win")["reason"].as_str()), (Some("enrollment"), Some("ok"), None));
+        assert_eq!((ver("tq-v2")["provenance"].as_str(), ver("tq-v2")["reason"].as_str()), (Some("unsupported"), Some("unsupported snapshot schema taskq-board/1")));
+        let html = crate::page::render(&doc, &json!({}));
+        assert!(html.contains("Board github:github.com/taskqorg/taskq · doing 2 · ask 1 · 2 tasks observed"), "board summary");
     }
 
     /// A ServerQ projection fixture (serverq.md § 3) moved so its report time is `at`; every time keeps its offset.
