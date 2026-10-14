@@ -733,7 +733,12 @@ fn servers(w: &mut String, res: &Value, now: u64) {
         if !c["disk_reason"].is_null() {
             let _ = write!(w, "<div class=\"disk\"><span class=\"k\">Disks</span> {}</div>", unk(&c["disk_reason"]));
         }
-        let _ = writeln!(w, "</div></article>");
+        let _ = write!(w, "</div>");
+        if let Some(groups) = r["taskq_groups"].as_array() {
+            // UI view model only: observation transport and verified cross-product joins are a follow-up.
+            let _ = writeln!(w, "<div class=\"node-policy\" data-taskq-groups=\"{}\"></div>", esc(&serde_json::to_string(groups).unwrap()));
+        }
+        let _ = writeln!(w, "</article>");
     }
     let _ = writeln!(w, "</section>");
 }
@@ -1116,6 +1121,26 @@ mod tests {
         assert!(first.contains("<li value=\"3\">Files <span aria-label=\"recommended\">★</span></li>"));
         for absent in ["<button", "85 %", "90 %", "threshold", "<input", "<form", "demo", "simulat"] {
             assert!(!first.to_lowercase().contains(absent), "{absent}");
+        }
+    }
+
+    /// D14/#46: shared fixture groups enter the existing server row, not another node list.
+    /// This qualifies composition only; enrollment observation delivery remains a follow-up.
+    #[test]
+    fn shared_resources_fixture_in_server_row() {
+        let mut doc = first_screen_doc();
+        let fx: Value = serde_json::from_str(include_str!("../fixture/taskq/resource-controls.json")).unwrap();
+        let groups = fx["work"][0]["groups"].clone();
+        let node = doc["resources"]["rows"].as_array_mut().unwrap().last_mut().unwrap();
+        node["installation"] = groups[0]["targets"][0]["target"]["installation_id"].clone();
+        node["taskq_groups"] = groups;
+        let html = render(&doc, &json!({}));
+        assert_eq!(html.matches("data-taskq-groups=").count(), 1);
+        assert_eq!(html.matches("<article class=\"node\"").count(), 4);
+        assert!(html.contains("&quot;installation_id&quot;") && html.contains("&quot;project_id&quot;"));
+        assert!(html.contains("<polyline") && html.contains("id=\"boards\""));
+        if let Some(out) = std::env::var_os("DASHQ_RESOURCE_EVIDENCE") {
+            std::fs::write(out, html).unwrap();
         }
     }
 

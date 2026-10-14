@@ -34,6 +34,7 @@ async function refresh() {
     // boards.md hides zero counters: a counter new to a shown board was 0
     const was = e => before.has(e.id) ? before.get(e.id) : e.matches('.c') && document.getElementById(e.closest('[id]:not(.c)')?.id) ? '0' : undefined;
     main.querySelectorAll('[data-n]').forEach(e => { const n = was(e); if (n !== undefined && n !== e.dataset.n) e.classList.add('tint'); });
+    DashqResources.preserve(main);
     document.getElementById('main').replaceWith(main);
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
@@ -51,6 +52,7 @@ async function refresh() {
     window.scrollTo(0, y);
     bind();
   } catch (e) {
+    DashqResources.bind();
     banner.textContent = 'Refresh failed (' + e.message + '), showing data from ' + shown + '.';
     banner.hidden = false;
   } finally {
@@ -60,6 +62,7 @@ async function refresh() {
 function bind() {
   document.getElementById('refresh')?.addEventListener('click', refresh);
   document.querySelectorAll('.aq-edit').forEach(box => { aqRender(box); aqLoad(box); });
+  DashqResources.bind();
 }
 // agentq-settings.md G1–G3 (#63): the host plans the draft, review shows its exact diff, apply confirms that plan,
 // results come from the host and its readback. Per installation: CSRF, operations, the reviewed plan, a pending apply ID.

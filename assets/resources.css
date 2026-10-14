@@ -1,0 +1,8 @@
+/* Shell placement only; TaskQ component interiors are unchanged. */
+.node-policy { grid-column: 1 / -1; min-width: 0; }
+.node-policy > button { font: inherit; margin: .25em 0; }
+.work-dialog { box-sizing: border-box; width: min(48rem, calc(100% - 1rem)); max-height: calc(100% - 1rem); overflow: auto; padding: .75rem; border: 1px solid; color-scheme: light dark; font: inherit; }
+.work-dialog::backdrop { background: #0006; }
+.work-dialog > button { font: inherit; float: right; }
+.work-dialog > .detail { clear: both; }
+.node-policy, .work-dialog { color-scheme: light dark; }

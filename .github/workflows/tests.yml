@@ -10,7 +10,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tests/resources.cjs
       - name: cargo checks
         run: |
-          cargo test --locked
+          DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" cargo test --locked
           cargo run -- selftest
+      - name: shared resource browser chain
+        run: |
+          npm install --prefix "$RUNNER_TEMP/resource-browser" playwright@1.56.1 --no-audit --no-fund
+          export NODE_PATH="$RUNNER_TEMP/resource-browser/node_modules"
+          export PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/resource-browsers"
+          "$RUNNER_TEMP/resource-browser/node_modules/.bin/playwright" install --with-deps chromium
+          DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" node tests/resources-browser.cjs

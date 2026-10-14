@@ -39,3 +39,22 @@ DashQ's half of TaskQ's `taskq.resources/1` wire, built before the target-host a
 - Shared resources build on the answer-card asset mechanism, not the answer HTTP route. TaskQ native adoption and DashQ rendering run the same fixtures.
 - Release observation and ordinary answers independently. Enable resource writes only after installed target/guard/grant tests and exact-version evidence: duplicate/lost response, wrong node/workspace, stale policy, offline expiry, revoked grant, restart, partial results and restored baseline.
 - Existing render fidelity applies: 16/20 px, both themes, narrow widths, keyboard/touch, charts and drafts preserved. Auto is not a spending or provider-quota guarantee.
+
+## UI delivery and evidence (#46)
+
+Owner answers on #46 authorize immutable merged TaskQ source assets instead of release assets, and limit this delivery to shared UI and fixture verification. Real enrolled policy observations remain a follow-up acceptance item (#913 and #931 A4 in TaskQ); resource writes retain the separate operation-adapter gate. This does not qualify an installed host or remote policy application.
+
+The unchanged JS, CSS and shared fixtures are pinned to TaskQ commit `b243336a266e36be26670bffbdcba830844b7560`. [sources.json](../../assets/taskq/sources.json) records upstream paths and SHA-256 hashes; `node tests/resources.cjs` verifies bytes and replays the shared capacity and Work mode scenarios. These are source assets, not a released production component version.
+
+The existing server-row renderer accepts `taskq_groups` as a UI-only fixture view model. No collector or public wire schema supplies it yet. A future adapter must resolve authorized installation/generation, registered project labels and verified host joins before populating it; hostname matching is not a join. Without it, the existing explicit unavailable-policy entry remains. No fixture group enters production `/data`.
+
+`assets/resources.js` discloses the unchanged shared summaries on demand below the matching row's charts and opens `mountWork` in one responsive modal (up to 48 rem). The component retains project selection, field order, Mixed values, runtime overrides and exact target review. The production capability is always read-only and its send function rejects without transport. Fixture editing uses an explicitly injected in-memory adapter, never a remote write. A stale observation is read-only; freshness loss while editing makes the retained editor inert, including its confirmation. The modal lives outside the refreshed page section so drafts and focus survive refresh. Missing rows invalidate an open editor. Admission observations are labelled separately from AgentQ history.
+
+No second node list, runtime installer, enrollment command or connect grant is added. The existing installation enrollment and connection lifecycle remain authoritative; TaskQ independent enrollment is still pending qualification.
+
+Verification:
+- `cargo test --locked` includes `shared_resources_fixture_in_server_row`: fixture groups occur once inside the combined server column, with the existing charts and Boards retained. The original no-policy fixture stays unchanged.
+- `node tests/resources.cjs`: shared legacy/Auto, zero/absent caps, blockers, stale state, conflict, cancel, immutable retry, saved/applied, Mixed and unselected project scenarios; hashes checked.
+- `tests/resources-browser.cjs`: Chromium, 1024/360 px, 16/20 px, light/dark; read-only production capability, shared editable fixture, exact review, refresh draft/focus and stale-review hold. Browser assertions are behavior/layout evidence, not owner visual acceptance.
+
+To reproduce the browser fixture, install `playwright@1.56.1` in an OS temporary directory and install its Chromium there. Set `NODE_PATH` to that directory's `node_modules` and `PLAYWRIGHT_BROWSERS_PATH` to its browser directory. Run `DASHQ_RESOURCE_EVIDENCE=<temp>/page.html cargo test --locked shared_resources_fixture_in_server_row`, then `DASHQ_RESOURCE_EVIDENCE=<temp>/page.html node tests/resources-browser.cjs`. Optional `DASHQ_RESOURCE_SHOTS=<output>` captures review screenshots. [Captured review examples](evidence/taskq-resources/) are synthetic data, not live observations.
