@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "revision": "b243336a266e36be26670bffbdcba830844b7560",
+  "revision": "0d4b1be0a8a3a41e8d72ea96e003a5e9044d1a23",
   "files": {
     "assets/taskq/resource-controls.js": {
       "source": "src/resource-controls.js",

@@ -46,11 +46,13 @@
         send: (g, op) => cap(g).edit ? adapter.send(g, op) : Promise.resolve({state: 'rejected', reason: cap(g).reason})});
       active = {owner: el, dialog, update(gs) {
         groups = gs;
+        const selected = [...editor.querySelectorAll('[data-rsc-select]:checked')].map(e => e.dataset.rscSelect);
         binding.update(gs);
-        const denied = gs.find(g => !cap(g).edit);
-        note.textContent = 'TaskQ admission observations; separate from AgentQ history. ' + (!gs.length ? 'Policy observation unavailable; read-only.' : denied ? cap(denied).reason || 'Read-only.' : '');
+        const denied = gs.find(g => selected.includes(g.key) && !cap(g).edit);
+        const missing = selected.some(key => !gs.some(g => g.key === key));
+        note.textContent = 'TaskQ admission observations; separate from AgentQ history. ' + ((!gs.length || missing) ? 'Policy observation unavailable; read-only.' : denied ? cap(denied).reason || 'Read-only.' : '');
         // The parent retains drafts on refresh; loss of capability must also stop an already-open review.
-        editor.inert = binding.editing() && (!gs.length || !!denied);
+        editor.inert = binding.editing() && (!gs.length || missing || !!denied);
       }};
       active.update(groups);
       close.addEventListener('click', () => dialog.close());

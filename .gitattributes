@@ -1,0 +1,6 @@
+# Preserve upstream bytes for the TaskQ SHA-256 pins on every platform.
+assets/taskq/resource-controls.js -text
+assets/taskq/resource-controls.css -text
+assets/taskq/LICENSE -text
+fixture/taskq/resource-controls.json -text
+fixture/page.html -text

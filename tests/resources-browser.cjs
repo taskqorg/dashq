@@ -62,6 +62,10 @@ const fx = require('../fixture/taskq/resource-controls.json');
       if (process.env.DASHQ_RESOURCE_SHOTS) {
         await page.screenshot({path: `${process.env.DASHQ_RESOURCE_SHOTS}/resources-${width}-${size}-${theme}.png`});
       }
+      // An unselected stale project must not hold fresh selected targets or lose their draft.
+      await page.evaluate(groups => { const next = structuredClone(groups); next[2].observed_at = 0; fixtureBinding.update(next); }, fx.work[0].groups);
+      assert.equal(await page.locator('dialog .rsc-work').evaluate(el => el.parentElement.inert), false);
+      assert(await page.locator('.rsc-review').textContent().then(t => t.includes('Host maximum')));
       // Freshness loss during review cannot submit; draft and exact target remain visible.
       await page.evaluate(groups => { clockNow = 1100; fixtureBinding.update(groups); }, fx.work[0].groups);
       assert(await page.locator('dialog .rsc-work').evaluate(el => el.parentElement.inert));
