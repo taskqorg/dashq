@@ -529,6 +529,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         match (r["schema"].as_str(), r["observed_at"].as_i64()) {
             // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
             (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
+            (Some(schema), Some(_)) if !in_board(schema, &r["payload"], g) => out[i] = Some("scope"),
             (Some(schema), Some(observed)) if metadata(&r["payload"], 0) => {
                 let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
                 events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
@@ -713,6 +714,18 @@ fn capabilities(b: &Value, product: &str) -> Result<Option<String>, ()> {
 /// A request after approval may repeat its scope but never change it (A2); one without a scope is unchanged.
 fn same_board(b: &Value, g: &store::Grant) -> bool {
     b["scope"].is_null() || board(b).ok().flatten().is_some_and(|x| g.board.as_deref() == Some(x.as_str()))
+}
+
+/// A `taskq-board/1` record names the granted board (`<kind>:<host>/<repo>`, taskq enrollment); without a granted
+/// board it is outside the grant. Other schemas carry no board.
+fn in_board(schema: &str, p: &Value, g: &store::Grant) -> bool {
+    const BOARD: &str = "taskq-board/1";
+    if schema != BOARD {
+        return true;
+    }
+    let b = &p["board"];
+    let (Some(kind), Some(host), Some(repo)) = (b["kind"].as_str(), b["host"].as_str(), b["repo"].as_str()) else { return false };
+    g.board.as_deref().and_then(|x| serde_json::from_str::<Value>(x).ok()).is_some_and(|x| x == json!({"name": BOARD, "value": format!("{kind}:{host}/{repo}")}))
 }
 
 /// Names the approved scope in token, status and receipt replies; replies without one keep today's shape.
@@ -1421,6 +1434,32 @@ mod tests {
         // an export never becomes the snapshot or a history sample
         assert_eq!(store.project(Scope::All, renders).unwrap()[0].snapshot.as_ref().unwrap().event_id, "s1");
         assert_eq!(store.history("inst-1").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn board_records_outside_the_granted_board_are_refused() {
+        // Chain: taskq board grant -> ingest -> projection. Risk: a record of another board (taskq#913 probe:
+        // taskqorg/coreq under a taskqorg/taskq grant) is stored and shown under this grant.
+        let (_d, e) = setup("board-records");
+        let scope = json!({"name": "taskq-board/1", "value": "github:github.com/taskqorg/taskq"});
+        let req = |inst: &str, scope: Value| json!({"protocol": 1, "product": "taskq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["taskq-board/1"], "scope": scope});
+        let join = |inst: &str, scope: Value| {
+            let v = machine(&e, "/machine/connect/device", None, req(inst, scope), T0).1;
+            assert!(decide(&e, "github|1", v["user_code"].as_str().unwrap(), "approve", "ws-1", T0).1.contains("Approved"));
+            let t = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": v["device_code"]}), T0).1;
+            let cred = t["credential"].as_str().unwrap().to_string();
+            assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), T0).0, 200);
+            cred
+        };
+        let board = |id: &str, repo: &str| json!({"schema": "taskq-board/1", "event_id": id, "observed_at": T0, "payload": {"schema": 1, "board": {"kind": "github", "host": "github.com", "repo": repo}}});
+        let cred = join("inst-t", scope);
+        let (s, v) = ingest(&e, &cred, vec![board("in", "taskqorg/taskq"), board("out", "taskqorg/coreq"), json!({"schema": "taskq-board/1", "event_id": "none", "observed_at": T0, "payload": {"n": 1}})], T0);
+        assert_eq!((s, states(&v)), (200, vec!["accepted".to_string(), "rejected:scope".into(), "rejected:scope".into()]), "{v}");
+        let rows = e.as_ref().unwrap().project(Scope::All).unwrap();
+        assert_eq!(rows.iter().map(|r| r.snapshot.as_ref().map(|s| s.event_id.as_str())).collect::<Vec<_>>(), [Some("in")]);
+        // a grant without a board covers no board record
+        let bare = join("inst-u", Value::Null);
+        assert_eq!(states(&ingest(&e, &bare, vec![board("x", "taskqorg/taskq")], T0).1), ["rejected:scope"]);
     }
 
     #[test]
