@@ -34,6 +34,7 @@
 <li><b>Langfuse</b> · fra/native · Codex: incomplete RTK accounting · in this period<br><span class="detail">Events 2; with session id 1; with tool-call id 1; without estimate 1; unknown origin 1.</span> <a href="https://langfuse.example.com/project/p1/traces/tr-n1">trace</a></li>
 <li><b>Langfuse</b> · win-1/native · agentq installation inst-win: stale · in this period<br><span class="detail">no heartbeat in 24 h</span> <a href="https://langfuse.example.com/project/p1/traces/tr-q5">trace</a></li>
 <li><b>serverq</b> · fra/native · bounded-journal: unknown · since 06:05 UTC (60m ago)<br><span class="detail">Journal config unavailable: PermissionError</span></li>
+<li><b>langfuse</b> · win-1/native · resources of inst-win: stale · since 06:40 UTC (25m ago)<br><span class="detail">sample is 25m old (limit 15m)</span></li>
 </ul>
 <h3>Incident history (24 h, deduplicated)</h3>
 <ul class="items">
@@ -42,6 +43,14 @@
 <li><b>serverq</b> · fra/native · failed-services: observed · since 02:53 UTC (4h ago) · 4 occurrences</li>
 <li><b>serverq</b> · fra/native · disk-headroom: verified · since 10-11 06:26 UTC (2d ago) · 1 occurrences</li>
 </ul>
+</section>
+<section id="resources">
+<h2>Resources</h2>
+<table>
+<tr><th>Host</th><th>Source</th><th>Sample</th><th>CPU</th><th>RAM used / total</th><th>Disks used / free / total</th><th>History</th></tr>
+<tr id="res-inst-fra"><td>fra/native</td><td>langfuse</td><td><span class="s ok">07:00 UTC (5m ago)</span> </td><td>7.1 %</td><td>8.0 / 33.6 GB</td><td>root ext4 61.0 / 30.0 / 95.0 GB<br>other xfs <span class="unknown" title="unknown: stat failed">—</span></td><td>3 samples, 1 gaps</td></tr>
+<tr id="res-inst-win"><td>win-1/native</td><td>langfuse</td><td><span class="s warn">06:40 UTC (25m ago)</span> sample is 25m old (limit 15m)</td><td>20.5 %</td><td><span class="unknown" title="unknown: probe denied">—</span></td><td><span class="unknown" title="unknown: probe denied">—</span></td><td>1 samples, too few samples: 1 of 3, 1 gaps</td></tr>
+</table>
 </section>
 <section id="hosts">
 <h2>Hosts</h2>

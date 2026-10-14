@@ -370,6 +370,14 @@
         "since": 1791871539,
         "detail": "Journal config unavailable: PermissionError",
         "trace_id": null
+      },
+      {
+        "source": "langfuse",
+        "host": "win-1/native",
+        "what": "resources of inst-win: stale",
+        "since": 1791873600,
+        "detail": "sample is 25m old (limit 15m)",
+        "trace_id": null
       }
     ],
     "incidents": [
@@ -519,6 +527,260 @@
       "latest": null
     }
   ],
+  "resources": {
+    "window_s": 1800,
+    "from": 1791873339,
+    "to": 1791875139,
+    "bucket_s": 300,
+    "aggregation": "none",
+    "cap": 2016,
+    "rows": [
+      {
+        "source": {
+          "state": "ok",
+          "at": 1791874800,
+          "age_s": 339,
+          "reason": null,
+          "incomplete": false
+        },
+        "current": {
+          "at": 1791874800,
+          "cpu": {
+            "percent": 7.1,
+            "interval_ms": 300000,
+            "reason": null
+          },
+          "memory": {
+            "used_bytes": 7970000000,
+            "available_bytes": 25630000000,
+            "total_bytes": 33600000000,
+            "reason": null
+          },
+          "disks": [
+            {
+              "id": "a1b2c3d4e5f60718",
+              "role": "root",
+              "fstype": "ext4",
+              "used_bytes": 61000000000,
+              "free_bytes": 30000000000,
+              "total_bytes": 95000000000,
+              "reason": null
+            },
+            {
+              "id": "0f1e2d3c4b5a6978",
+              "role": "other",
+              "fstype": "xfs",
+              "used_bytes": null,
+              "free_bytes": null,
+              "total_bytes": null,
+              "reason": "stat failed"
+            }
+          ],
+          "disk_reason": null,
+          "clock_step_ms": null,
+          "event_id": "r3"
+        },
+        "history": {
+          "samples": 3,
+          "state": "ok",
+          "reason": null,
+          "incomplete": false,
+          "gaps": [
+            {
+              "from": 1791873339,
+              "to": 1791874200
+            }
+          ],
+          "resets": [
+            1791874200
+          ],
+          "points": [
+            {
+              "at": 1791874200,
+              "cpu": {
+                "percent": null,
+                "interval_ms": null,
+                "reason": "warmup"
+              },
+              "memory": {
+                "used_bytes": 7970000000,
+                "available_bytes": 25630000000,
+                "total_bytes": 33600000000,
+                "reason": null
+              },
+              "disks": [
+                {
+                  "id": "a1b2c3d4e5f60718",
+                  "role": "root",
+                  "fstype": "ext4",
+                  "used_bytes": 61000000000,
+                  "free_bytes": 30000000000,
+                  "total_bytes": 95000000000,
+                  "reason": null
+                },
+                {
+                  "id": "0f1e2d3c4b5a6978",
+                  "role": "other",
+                  "fstype": "xfs",
+                  "used_bytes": null,
+                  "free_bytes": null,
+                  "total_bytes": null,
+                  "reason": "stat failed"
+                }
+              ],
+              "disk_reason": null,
+              "clock_step_ms": null,
+              "event_id": "r1"
+            },
+            {
+              "at": 1791874500,
+              "cpu": {
+                "percent": 4.9,
+                "interval_ms": 300000,
+                "reason": null
+              },
+              "memory": {
+                "used_bytes": 7970000000,
+                "available_bytes": 25630000000,
+                "total_bytes": 33600000000,
+                "reason": null
+              },
+              "disks": [
+                {
+                  "id": "a1b2c3d4e5f60718",
+                  "role": "root",
+                  "fstype": "ext4",
+                  "used_bytes": 61000000000,
+                  "free_bytes": 30000000000,
+                  "total_bytes": 95000000000,
+                  "reason": null
+                },
+                {
+                  "id": "0f1e2d3c4b5a6978",
+                  "role": "other",
+                  "fstype": "xfs",
+                  "used_bytes": null,
+                  "free_bytes": null,
+                  "total_bytes": null,
+                  "reason": "stat failed"
+                }
+              ],
+              "disk_reason": null,
+              "clock_step_ms": null,
+              "event_id": "r2"
+            },
+            {
+              "at": 1791874800,
+              "cpu": {
+                "percent": 7.1,
+                "interval_ms": 300000,
+                "reason": null
+              },
+              "memory": {
+                "used_bytes": 7970000000,
+                "available_bytes": 25630000000,
+                "total_bytes": 33600000000,
+                "reason": null
+              },
+              "disks": [
+                {
+                  "id": "a1b2c3d4e5f60718",
+                  "role": "root",
+                  "fstype": "ext4",
+                  "used_bytes": 61000000000,
+                  "free_bytes": 30000000000,
+                  "total_bytes": 95000000000,
+                  "reason": null
+                },
+                {
+                  "id": "0f1e2d3c4b5a6978",
+                  "role": "other",
+                  "fstype": "xfs",
+                  "used_bytes": null,
+                  "free_bytes": null,
+                  "total_bytes": null,
+                  "reason": "stat failed"
+                }
+              ],
+              "disk_reason": null,
+              "clock_step_ms": null,
+              "event_id": "r3"
+            }
+          ]
+        },
+        "installation": "inst-fra",
+        "host": "fra/native",
+        "runtime": "linux",
+        "workspace": null,
+        "provenance": "langfuse"
+      },
+      {
+        "source": {
+          "state": "stale",
+          "at": 1791873600,
+          "age_s": 1539,
+          "reason": "sample is 25m old (limit 15m)",
+          "incomplete": false
+        },
+        "current": {
+          "at": 1791873600,
+          "cpu": {
+            "percent": 20.5,
+            "interval_ms": 300000,
+            "reason": null
+          },
+          "memory": {
+            "used_bytes": null,
+            "available_bytes": null,
+            "total_bytes": null,
+            "reason": "probe denied"
+          },
+          "disks": [],
+          "disk_reason": "probe denied",
+          "clock_step_ms": null,
+          "event_id": "r4"
+        },
+        "history": {
+          "samples": 1,
+          "state": "warmup",
+          "reason": "too few samples: 1 of 3",
+          "incomplete": false,
+          "gaps": [
+            {
+              "from": 1791873600,
+              "to": 1791875139
+            }
+          ],
+          "resets": [],
+          "points": [
+            {
+              "at": 1791873600,
+              "cpu": {
+                "percent": 20.5,
+                "interval_ms": 300000,
+                "reason": null
+              },
+              "memory": {
+                "used_bytes": null,
+                "available_bytes": null,
+                "total_bytes": null,
+                "reason": "probe denied"
+              },
+              "disks": [],
+              "disk_reason": "probe denied",
+              "clock_step_ms": null,
+              "event_id": "r4"
+            }
+          ]
+        },
+        "installation": "inst-win",
+        "host": "win-1/native",
+        "runtime": "windows",
+        "workspace": null,
+        "provenance": "langfuse"
+      }
+    ]
+  },
   "agents": {
     "source": {
       "state": "incomplete",

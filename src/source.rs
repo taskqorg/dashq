@@ -181,7 +181,7 @@ pub fn clock(t: u64, now: u64) -> String {
 /// The agentq events key by their span name; the legacy Node names stay until agentq#50.
 pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value, bool), Fail> {
     let filter = r#"[{"type":"string","column":"name","operator":"starts with","value":"service.health."}]"#;
-    let queries: [(&str, (&str, &str), u64); 9] = [
+    let queries: [(&str, (&str, &str), u64); 10] = [
         ("health", ("filter", filter), 86400),
         ("compression", ("name", "agent-context.compression"), period),
         ("native_tools", ("name", "agent-context.native-tool"), period),
@@ -192,9 +192,11 @@ pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value,
         ("agentq.run", ("name", "agentq.run"), period),
         ("agentq.retrieval", ("name", "agentq.retrieval"), period),
         ("agentq.incident", ("name", "agentq.incident"), 86400),
+        // resource samples (D4.4): the window is the period
+        ("agentq.resource", ("name", "agentq.resource"), period),
     ];
     let reads: Vec<Result<(Vec<Value>, bool), Fail>> = std::thread::scope(|sc| {
-        let hs: Vec<_> = queries.iter().map(|(key, q, secs)| sc.spawn(move || observations(base, auth, now, *q, *secs, *key == "activity"))).collect();
+        let hs: Vec<_> = queries.iter().map(|(key, q, secs)| sc.spawn(move || observations(base, auth, now, *q, *secs, fields(key)))).collect();
         hs.into_iter().map(|h| h.join().unwrap_or(Err(("reader panicked".into(), None)))).collect()
     });
     let mut out = json!({"truncated": []});
@@ -209,8 +211,16 @@ pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value,
     Ok((out, incomplete))
 }
 
-fn observations(base: &str, auth: &str, now: u64, (k, v): (&str, &str), secs: u64, generation: bool) -> Result<(Vec<Value>, bool), Fail> {
-    let fields = if generation { "core,basic,trace_context,metadata,model,usage" } else { "core,basic,trace_context,metadata" };
+/// Field groups per read; without `io` Langfuse cuts string metadata such as `agentq.resource.disks` at 200 characters.
+fn fields(key: &str) -> &'static str {
+    match key {
+        "activity" => "core,basic,trace_context,metadata,model,usage",
+        "agentq.resource" => "core,basic,trace_context,metadata,io",
+        _ => "core,basic,trace_context,metadata",
+    }
+}
+
+fn observations(base: &str, auth: &str, now: u64, (k, v): (&str, &str), secs: u64, fields: &str) -> Result<(Vec<Value>, bool), Fail> {
     let (mut rows, mut cursor, mut seen) = (Vec::new(), None::<String>, std::collections::HashSet::new());
     loop {
         let mut url = format!(

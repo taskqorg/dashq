@@ -763,6 +763,21 @@ impl Store {
         Ok(rows)
     }
 
+    /// `(observed, event_id, payload)` of one installation and workspace with a trusted clock since `since`, newest
+    /// `cap` in time order, and whether older samples in the window were left out.
+    pub fn samples(&self, installation: &str, workspace: &str, since: i64, cap: usize) -> Result<(Vec<(i64, String, String)>, bool), Error> {
+        let c = self.lock()?;
+        let mut q = c.prepare(
+            "SELECT observed, event_id, payload FROM history WHERE installation = ?1 AND workspace = ?2 AND observed >= ?3 AND NOT clock_uncertain
+             ORDER BY observed DESC LIMIT ?4",
+        )?;
+        let mut rows: Vec<(i64, String, String)> = q.query_map(params![installation, workspace, since, cap as i64 + 1], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<Result<_, _>>()?;
+        let capped = rows.len() > cap;
+        rows.truncate(cap);
+        rows.reverse();
+        Ok((rows, capped))
+    }
+
     /// `(installation, events)` recorded as export gaps.
     pub fn export_gaps(&self) -> Result<Vec<(String, i64)>, Error> {
         let c = self.lock()?;
@@ -883,6 +898,11 @@ mod tests {
         // late sample: history only, current value unchanged
         assert_eq!(s.accept(b"v1", &[snap("e1", NOW - 60, "old")], NOW).unwrap(), [Outcome::Accepted]);
         assert_eq!(s.snapshot("inst-1").unwrap().unwrap().payload, "new");
+        // bounded window read: newest `cap` samples in time order, capped flagged, other workspaces never mixed in
+        assert_eq!(s.samples("inst-1", "w", NOW - 3600, 1).unwrap(), (vec![(NOW, "e2".into(), "new".into())], true));
+        assert_eq!(s.samples("inst-1", "w", NOW - 3600, 5).unwrap().0.len(), 2);
+        assert_eq!(s.samples("inst-1", "w", NOW - 30, 5).unwrap(), (vec![(NOW, "e2".into(), "new".into())], false));
+        assert!(s.samples("inst-1", "other", 0, 5).unwrap().0.is_empty());
         assert_eq!(s.history("inst-1").unwrap(), [(NOW - 60, "old".into()), (NOW, "new".into())]);
         assert_eq!(s.accept(b"v1", &[snap("e0", NOW - 9 * 86400, "x")], NOW).unwrap(), [Outcome::Rejected("expired")]);
         // future time: clock-uncertain, and it never blocks the next real sample

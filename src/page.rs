@@ -181,6 +181,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = writeln!(w, "</section>");
 
     installations(w, &doc["installations"], now);
+    resources(w, &doc["resources"], now);
 
     // 2. Hosts
     let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
@@ -375,6 +376,60 @@ fn installations(w: &mut String, inst: &Value, now: u64) {
             w,
             "<tr id=\"{id}\"><td><b>{} ({})</b> · {}<br><span class=\"detail\">{} · workspace {} · generation {}</span></td><td>{connection}</td><td>{data}</td><td>{history}</td><td>{export}</td><td>{evidence}</td><td>{action}</td></tr>",
             text(&r["host_label"]), text(&r["runtime"]), text(&r["product"]), esc(inst_id), esc(ws), text(&r["generation"])
+        );
+    }
+    let _ = writeln!(w, "</table>\n</section>");
+}
+
+/// Bytes in GB with one decimal (10^9, the producers' own figures).
+fn gb(v: &Value) -> String {
+    v.as_u64().map_or("—".into(), |b| format!("{:.1}", b as f64 / 1e9))
+}
+
+/// `resources` (D4.4) as plain current values with provenance and history state; charts are D10 (#76).
+fn resources(w: &mut String, res: &Value, now: u64) {
+    let rows = res["rows"].as_array().cloned().unwrap_or_default();
+    let _ = writeln!(w, "<section id=\"resources\">\n<h2>Resources</h2>");
+    if rows.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
+        return;
+    }
+    let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Source</th><th>Sample</th><th>CPU</th><th>RAM used / total</th><th>Disks used / free / total</th><th>History</th></tr>");
+    let unk = |why: &Value| format!("<span class=\"unknown\" title=\"unknown: {}\">—</span>", esc(why.as_str().unwrap_or("not reported")));
+    for r in rows {
+        let (src, c, h) = (&r["source"], &r["current"], &r["history"]);
+        let cpu = c["cpu"]["percent"].as_f64().map_or_else(|| unk(&c["cpu"]["reason"]), |p| format!("{p:.1} %"));
+        let m = &c["memory"];
+        let ram = if m["used_bytes"].is_null() { unk(&m["reason"]) } else { format!("{} / {} GB", gb(&m["used_bytes"]), gb(&m["total_bytes"])) };
+        let mut disks: Vec<String> = c["disks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|d| {
+                let v = if d["used_bytes"].is_null() { unk(&d["reason"]) } else { format!("{} / {} / {} GB", gb(&d["used_bytes"]), gb(&d["free_bytes"]), gb(&d["total_bytes"])) };
+                format!("{} {v}", esc(&format!("{}{}", d["role"].as_str().unwrap_or("disk"), d["fstype"].as_str().map(|f| format!(" {f}")).unwrap_or_default())))
+            })
+            .collect();
+        if !c["disk_reason"].is_null() {
+            disks.push(unk(&c["disk_reason"]));
+        }
+        let state = src["state"].as_str().unwrap_or("unknown");
+        let sample = format!("{} {}", badge(state, &at(&src["at"], now)), esc(src["reason"].as_str().unwrap_or("")));
+        let gaps = h["gaps"].as_array().map_or(0, Vec::len);
+        let history = format!(
+            "{} samples{}{}{}",
+            text(&h["samples"]),
+            h["reason"].as_str().map(|x| format!(", {}", esc(x))).unwrap_or_default(),
+            if gaps > 0 { format!(", {gaps} gaps") } else { String::new() },
+            if h["incomplete"] == true { ", capped" } else { "" }
+        );
+        let _ = writeln!(
+            w,
+            "<tr id=\"res-{}\"><td>{}</td><td>{}</td><td>{sample}</td><td>{cpu}</td><td>{ram}</td><td>{}</td><td>{history}</td></tr>",
+            esc(r["installation"].as_str().unwrap_or("")),
+            text(&r["host"]),
+            text(&r["provenance"]),
+            if disks.is_empty() { "—".into() } else { disks.join("<br>") }
         );
     }
     let _ = writeln!(w, "</table>\n</section>");
