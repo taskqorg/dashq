@@ -60,35 +60,50 @@ pub fn batch(rows: &[Pending]) -> Value {
 /// Last forwarding attempt: `(time, failure reason)`; `None` before the first attempt.
 pub type Last = Mutex<Option<(i64, Option<String>)>>;
 
-/// Sends `rows` as one OTLP request: `Ok(true)` accepted, `Ok(false)` refused for good (4xx other than 429).
-fn post(base: &str, auth: &str, rows: &[Pending]) -> Result<bool, String> {
+/// Sends `rows` as one OTLP request: `Ok(Some(n))` accepted with `n` spans rejected (`partialSuccess.rejectedSpans`,
+/// a number or OTLP/JSON int64 string; an `errorMessage` with zero rejected is a warning), `Ok(None)` refused for good
+/// (4xx other than 429). An unreadable `rejectedSpans` counts every span as rejected.
+fn post(base: &str, auth: &str, rows: &[Pending]) -> Result<Option<usize>, String> {
     let headers = [format!("Authorization: {auth}"), "Content-Type: application/json".into(), "x-langfuse-ingestion-version: 4".into()];
     let r = source::send(&format!("{base}/api/public/otel/v1/traces"), &headers, Some(&batch(rows).to_string())).map_err(|(e, _)| e)?;
     match r.status {
-        200 => Ok(true),
-        s if (400..500).contains(&s) && s != 429 => Ok(false),
+        200 => Ok(Some(match &r.body["partialSuccess"]["rejectedSpans"] {
+            Value::Null => 0,
+            v => v.as_u64().or_else(|| v.as_str()?.parse().ok()).map_or(rows.len(), |n| (n as usize).min(rows.len())),
+        })),
+        s if (400..500).contains(&s) && s != 429 => Ok(None),
         s => Err(format!("HTTP {s}")),
     }
 }
 
-/// One pass: sends the oldest rows. An accepted request removes its rows from the outbox. A refused request is
+/// One pass: sends the oldest rows of the oldest row's grant, so any loss stays scoped to one installation and
+/// workspace. An accepted request removes its rows from the outbox; if Langfuse rejected `n` of them without naming
+/// which, they become one gap of `n` events over the rows' time window and are not resent. A refused request is
 /// retried row by row in the same pass and only the refused rows become export gaps, as do rows without an OTLP
 /// time. Anything else keeps the rows for the next pass under the same span IDs.
 pub fn pass(store: &Store, base: &str, auth: &str, now: i64) -> Result<(), String> {
-    let (rows, untimed): (Vec<Pending>, Vec<Pending>) = store.outbox(BATCH).map_err(|e| format!("store {e:?}"))?.into_iter().partition(|r| nanos(r.observed).is_some());
+    let (mut rows, untimed): (Vec<Pending>, Vec<Pending>) = store.outbox(BATCH).map_err(|e| format!("store {e:?}"))?.into_iter().partition(|r| nanos(r.observed).is_some());
+    if let Some(head) = rows.first().map(|r| (r.installation.clone(), r.generation)) {
+        rows.retain(|r| (&r.installation, r.generation) == (&head.0, head.1));
+    }
     let (mut sent, mut refused) = (vec![], untimed.iter().map(|r| r.id).collect::<Vec<_>>());
     if rows.is_empty() {
         return store.exported(&sent, &refused, now).map_err(|e| format!("store {e:?}"));
     }
     let mut err = None;
-    if post(base, auth, &rows)? {
-        sent = rows.iter().map(|r| r.id).collect();
-    } else {
-        for row in &rows {
-            match post(base, auth, std::slice::from_ref(row)) {
-                Ok(true) => sent.push(row.id),
-                Ok(false) => refused.push(row.id),
-                Err(e) => err = Some(e),
+    match post(base, auth, &rows)? {
+        Some(0) => sent = rows.iter().map(|r| r.id).collect(),
+        Some(n) => {
+            store.partially_exported(&rows, n as i64, now).map_err(|e| format!("store {e:?}"))?;
+            sent = rows.iter().map(|r| r.id).collect();
+        }
+        None => {
+            for row in &rows {
+                match post(base, auth, std::slice::from_ref(row)) {
+                    Ok(Some(0)) => sent.push(row.id),
+                    Ok(_) => refused.push(row.id),
+                    Err(e) => err = Some(e),
+                }
             }
         }
     }
@@ -133,7 +148,8 @@ mod tests {
 
     /// Recorded ingestion stub (PM: no Docker stacks): stores exact request bodies and upserts observations by
     /// span ID like the live readback showed. `plan` answers each request in turn: `ok`, `lost` (stored, then 500),
-    /// `500`, `refuse <id>` (400 for a request containing that DashQ ID, else ok).
+    /// `500`, `refuse <id>` (400 for a request containing that DashQ ID, else ok), `partial <n>` (200 with
+    /// `partialSuccess.rejectedSpans` as int64 string, the last n spans not stored), `warn` (200, zero rejected, a message).
     struct Stub {
         base: String,
         bodies: Arc<Mutex<Vec<String>>>,
@@ -166,15 +182,20 @@ mod tests {
                 let doc: Value = serde_json::from_str(&body).unwrap();
                 let spans = doc["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap().clone();
                 let refused = step.strip_prefix("refuse ").is_some_and(|x| spans.iter().any(|sp| meta(sp, "dashq.id") == Some(x.to_string())));
+                let dropped = step.strip_prefix("partial ").map_or(0, |n| n.parse().unwrap());
                 if !refused && step != "500" {
-                    o.lock().unwrap().extend(spans.into_iter().map(|sp| (sp["spanId"].as_str().unwrap().to_string(), sp)));
+                    o.lock().unwrap().extend(spans[..spans.len() - dropped].iter().cloned().map(|sp| (sp["spanId"].as_str().unwrap().to_string(), sp)));
                 }
                 let status = match step {
                     "500" | "lost" => "500 Internal Server Error",
                     _ if refused => "400 Bad Request",
                     _ => "200 OK",
                 };
-                let reply = "{}";
+                let reply = match step {
+                    _ if dropped > 0 => format!(r#"{{"partialSuccess":{{"rejectedSpans":"{dropped}","errorMessage":"invalid span"}}}}"#),
+                    "warn" => r#"{"partialSuccess":{"rejectedSpans":0,"errorMessage":"attribute truncated"}}"#.into(),
+                    _ => "{}".into(),
+                };
                 let mut s = s;
                 let _ = write!(s, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}", reply.len());
             }
@@ -264,7 +285,7 @@ mod tests {
         let evs: Vec<Event> = ["a", "b"].iter().map(|n| Event { id: id(n), schema: SCHEMA, observed: now - 30, kind: Kind::Export, payload }).collect();
         assert!(s.accept(b"v1", &evs, now).unwrap().iter().all(|o| *o == Outcome::Accepted));
         let rows = s.outbox(BATCH).unwrap();
-        assert_eq!(post(&base, &auth, &rows), Ok(true), "first delivery, reply treated as lost");
+        assert_eq!(post(&base, &auth, &rows), Ok(Some(0)), "first delivery, reply treated as lost");
         assert_eq!(pass(&s, &base, &auth, now), Ok(()));
         assert_eq!(s.export_counts().unwrap(), (0, 0));
         let headers = [format!("Authorization: {auth}")];
@@ -320,6 +341,31 @@ mod tests {
         let dead = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
         assert_eq!(pass(&s, &format!("http://{dead}"), "Basic x", NOW), Ok(()));
         assert_eq!(s.export_counts().unwrap(), (0, 2));
+    }
+
+    /// Chain A2/C5: a 200 whose `partialSuccess` rejects spans loses them; they become one gap of exactly that many
+    /// events in the sending grant's workspace, nothing is resent and a warning without rejections confirms the batch.
+    /// A batch never mixes grants, so the gap cannot be charged to the wrong installation.
+    #[test]
+    fn partial_success_records_scoped_gaps() {
+        let s = store("partial");
+        let other = Installation { id: "inst-2", product: "agentq", runtime: "native", label: "hel" };
+        s.grant(&other, "w2", "a", r#"["agentq-event/1"]"#, b"v2", NOW).unwrap();
+        let run = r#"{"name":"agentq.run","metadata":{}}"#;
+        assert!(s.accept(b"v1", &[event("a", run), event("b", run), event("c", run)], NOW).unwrap().iter().all(|o| *o == Outcome::Accepted));
+        assert!(s.accept(b"v2", &[event("d", run)], NOW).unwrap().iter().all(|o| *o == Outcome::Accepted));
+        let lf = stub(vec!["partial 1", "warn"]);
+        assert_eq!(pass(&s, &lf.base, "Basic x", NOW), Ok(()));
+        // inst-1's three rows left with one unnamed loss; inst-2's row waits for its own request
+        assert_eq!(s.export_counts().unwrap(), (1, 1));
+        assert_eq!(s.export_gaps().unwrap(), [("inst-1".to_string(), 1)]);
+        assert_eq!(pass(&s, &lf.base, "Basic x", NOW), Ok(()));
+        assert_eq!(s.export_counts().unwrap(), (0, 1));
+        let ws: Vec<_> = s.project(crate::store::Scope::All).unwrap().iter().map(|r| (r.installation.clone(), r.export_gap)).collect();
+        assert_eq!(ws, [("inst-1".to_string(), 1), ("inst-2".to_string(), 0)]);
+        let bodies = lf.bodies.lock().unwrap();
+        assert_eq!(bodies.len(), 2, "partial success is never resent");
+        assert_eq!(lf.observations.lock().unwrap().len(), 3);
     }
 
     #[test]

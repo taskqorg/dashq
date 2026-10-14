@@ -1042,6 +1042,24 @@ impl Store {
         })
     }
 
+    /// Removes rows of one grant that the destination accepted with `rejected` spans it did not name (OTLP
+    /// `partialSuccess`): one export gap of `rejected` events over the rows' observation window, never per row.
+    pub fn partially_exported(&self, rows: &[Pending], rejected: i64, now: i64) -> Result<(), Error> {
+        let Some(first) = rows.first() else { return Ok(()) };
+        let (lo, hi) = rows.iter().fold((i64::MAX, i64::MIN), |(lo, hi), r| (lo.min(r.observed), hi.max(r.observed)));
+        self.write(|tx| {
+            tx.execute(
+                "INSERT INTO export_gaps (installation, events, first_observed, last_observed, at, workspace)
+                 SELECT installation, ?3, ?4, ?5, ?6, workspace FROM grants WHERE installation = ?1 AND generation = ?2",
+                params![first.installation, first.generation, rejected.min(rows.len() as i64), lo, hi, now],
+            )?;
+            for r in rows {
+                tx.execute("DELETE FROM outbox WHERE id = ?1", [r.id])?;
+            }
+            Ok(())
+        })
+    }
+
     /// `(pending rows, export gap events)` for the export source.
     pub fn export_counts(&self) -> Result<(i64, i64), Error> {
         Ok(self.lock()?.query_row("SELECT (SELECT COUNT(*) FROM outbox), (SELECT COALESCE(SUM(events), 0) FROM export_gaps)", [], |r| Ok((r.get(0)?, r.get(1)?)))?)
