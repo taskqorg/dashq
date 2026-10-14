@@ -16,7 +16,7 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
 
 ```json
 {
-  "langfuse": {"base_url": "https://langfuse.example.com", "project_id": "…", "public_key": "pk-lf-…", "secret_key": "sk-lf-…"},
+  "langfuse": {"base_url": "https://langfuse.example.com", "project_id": "…", "public_key": "pk-lf-…", "secret_key": "sk-lf-…", "forward": false},
   "github": {"token": "<read-only token>"},
   "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/serverq", "taskqorg/coreq", "taskqorg/specq", "taskqorg/dashq"],
   "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"},
@@ -26,7 +26,7 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
 }
 ```
 
-`langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show. `answer` (D13) is off unless set and stays unset in production until #44 qualifies the real board: a dedicated forge credential file (0600) and the workspace of each answerable board; `dashq answerer <workspace> <subject> on|off` grants or removes the answer capability of a workspace administrator ([answers § Route](docs/design/answers.md#route-41)).
+`langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show. `langfuse.forward: true` forwards enrolled `agentq-event/1` records to that Langfuse project (D11 Forwarding); leave it off until live readback qualifies. `answer` (D13) is off unless set and stays unset in production until #44 qualifies the real board: a dedicated forge credential file (0600) and the workspace of each answerable board; `dashq answerer <workspace> <subject> on|off` grants or removes the answer capability of a workspace administrator ([answers § Route](docs/design/answers.md#route-41)).
 
 ## Deployment (D3)
 

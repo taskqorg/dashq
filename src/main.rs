@@ -5,6 +5,7 @@ mod answer;
 mod configure;
 mod data;
 mod enroll;
+mod export;
 mod optimization;
 mod page;
 mod policy;
@@ -35,6 +36,8 @@ fn tool() -> Tool {
 struct Config {
     /// `(base, auth)`; `None`: Langfuse not configured, its sections read unknown (D11: optional source).
     langfuse: Option<(String, String)>,
+    /// `langfuse.forward: true`: forward `agentq-event/1` to that project (D11, C5); off by default.
+    forward: bool,
     links: Value,
     /// `None`: GitHub not configured, boards read unknown.
     github_token: Option<String>,
@@ -71,7 +74,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         v.pointer(path).and_then(Value::as_str).filter(|x| ok(x)).map(String::from).ok_or(format!("config: bad key {}", path[1..].replace('/', ".")))
     };
     // Langfuse and GitHub are optional (D11): absent sections read `not configured`; a present one must be valid
-    let mut links = json!({});
+    let (mut links, mut forward) = (json!({}), false);
     let langfuse = match v.get("langfuse") {
         None => None,
         Some(_) => {
@@ -82,6 +85,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
             let base = base.trim_end_matches('/').to_string();
             let project_url = format!("{base}/project/{project}");
             links = json!({"traces": format!("{project_url}/traces"), "dashboards": format!("{project_url}/dashboards")});
+            forward = match v.pointer("/langfuse/forward") {
+                None => false,
+                Some(x) => x.as_bool().ok_or("config: bad key langfuse.forward")?,
+            };
             Some((base, format!("Basic {}", base64(format!("{public}:{secret}").as_bytes()))))
         }
     };
@@ -130,6 +137,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     Ok(Config {
         links,
         langfuse,
+        forward,
         github_token: token,
         projects,
         taskq_bin,
@@ -163,6 +171,7 @@ struct App {
     enroll: Result<enroll::Enroll, String>,
     answers: answer::Answers,
     resources: policy::State,
+    export: export::Last,
 }
 
 impl App {
@@ -226,6 +235,10 @@ impl App {
         let mut doc = doc;
         // the page offers review/apply only where the route is on (D16)
         doc["controls"] = json!({"agentq_configure": c.agentq_configure});
+        // outbox counts span every workspace: host-local readers only (D11)
+        if let (Some(store::Scope::All), Ok(e)) = (scope, &self.enroll) {
+            doc["sources"]["export"] = export::status(Some(e.store()), &self.export, c.langfuse.is_some() && c.forward, now);
+        }
         doc
     }
 }
@@ -373,7 +386,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default() });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -382,6 +395,28 @@ fn serve(t: &Tool, service: bool) -> ! {
                 eprintln!("projection: {x:?}");
             }
             std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+    // forwarding and retention run apart from ingestion and projection: an outage only delays export (C5)
+    let fwd = app.clone();
+    std::thread::spawn(move || {
+        let mut pruned = 0;
+        while let Ok(e) = &fwd.enroll {
+            let now = source::now() as i64;
+            if now - pruned >= 3600 {
+                pruned = now;
+                if let Err(x) = e.store().prune(now) {
+                    eprintln!("prune: {x:?}");
+                }
+            }
+            if let (Some((base, auth)), true) = (&fwd.cfg.langfuse, fwd.cfg.forward) {
+                let r = export::pass(e.store(), base, auth, now);
+                if let Err(x) = &r {
+                    eprintln!("export: {x}");
+                }
+                *fwd.export.lock().unwrap_or_else(|p| p.into_inner()) = Some((now, r.err()));
+            }
+            std::thread::sleep(Duration::from_secs(5));
         }
     });
     let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -466,7 +501,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default() }.doc(1800, json!({}), None);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -497,7 +532,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
             let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default() }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -629,7 +664,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         assert_eq!(route(&app, "POST", "/data", "", None).0, "405 Method Not Allowed");
         assert_eq!(route(&app, "GET", "/data", "period=5", None).0, "400 Bad Request");
@@ -637,7 +672,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false }
+        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false }
     }
 
     #[test]
@@ -654,13 +689,19 @@ mod tests {
         };
         write(&good);
         let c = load_config(&p).unwrap();
-        assert_eq!(c.langfuse.unwrap().1, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
+        assert_eq!(c.langfuse.as_ref().unwrap().1, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
         assert_eq!(c.links["traces"], "https://lf.example.com/project/p1/traces");
         let mut bad = good.clone();
         bad["langfuse"]["secret_key"] = json!("SECRET-but-wrong");
         write(&bad);
         let e = load_config(&p).err().unwrap();
         assert_eq!(e, "config: bad key langfuse.secret_key");
+        // forwarding is off unless the flag is a literal true
+        assert!(!c.forward);
+        let mut f = good.clone();
+        f["langfuse"]["forward"] = json!("yes");
+        write(&f);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key langfuse.forward");
         #[cfg(unix)]
         {
             write(&good);
