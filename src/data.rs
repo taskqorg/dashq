@@ -637,15 +637,16 @@ pub fn build(inp: &Value) -> Value {
                     attempts.push(json!({"host": name, "task": n, "attempt": id.trim()}));
                 }
             }
-            // Board age at collection plus elapsed cache time; never compare the two clocks.
+            // Age at collection uses only the board clock.
             let at = hb["updated_at"].as_str().and_then(iso_secs);
-            let age = date.zip(at).zip(snap["at"].as_u64()).map(|((d, u), read_at)| d.saturating_sub(u).saturating_add(now.saturating_sub(read_at)));
+            let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
+            let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
             // taskq's own installation id (taskq.md § 4 `service`), never the host name; older heartbeats have none
             let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
             let key = format!("{repo}:{}", service.map_or_else(|| format!("unidentified:{index}"), String::from));
-            if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| age.is_some_and(|x| x < a))) {
-                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": name, "at": at, "age_s": age, "ttl": ttl, "version": version, "source": src}));
+            if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| cached_age.is_some_and(|x| x < a))) {
+                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": name, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src}));
             }
             let h = hosts.entry(name.into()).or_insert_with(|| host_row(name));
             if h["taskq"]["age_s"].as_u64().is_some_and(|a| age.is_none_or(|x| x >= a)) {

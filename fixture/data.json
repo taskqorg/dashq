@@ -1054,16 +1054,16 @@
         "workspace": null,
         "host": "fra/native",
         "observation": {
-          "state": "ok",
+          "state": "incomplete",
           "at": 1791873000,
           "age_s": 2139,
-          "reason": null
+          "reason": "capped query"
         },
         "running": {
           "version": "0.5.0",
           "source": "langfuse",
           "reason": null,
-          "last_known": false
+          "last_known": true
         },
         "selected": {
           "version": null,
@@ -1079,12 +1079,12 @@
         },
         "reported_available": null,
         "update": {
-          "state": "current",
-          "reason": null
+          "state": "unknown",
+          "reason": "observation not current"
         },
         "health": {
           "state": "unknown",
-          "reason": "health receipt not reported by langfuse"
+          "reason": "observation incomplete: capped query"
         },
         "lifecycle": {
           "state": "unknown",
@@ -1115,10 +1115,10 @@
         "workspace": null,
         "host": "win-1/native",
         "observation": {
-          "state": "stale",
+          "state": "incomplete",
           "at": null,
           "age_s": null,
-          "reason": "no heartbeat in 24 h"
+          "reason": "capped query"
         },
         "running": {
           "version": "0.4.0",
@@ -1145,7 +1145,7 @@
         },
         "health": {
           "state": "unknown",
-          "reason": "observation stale: no heartbeat in 24 h"
+          "reason": "observation incomplete: capped query"
         },
         "lifecycle": {
           "state": "unknown",
@@ -1176,10 +1176,10 @@
         "workspace": null,
         "host": "fra/native",
         "observation": {
-          "state": "ok",
+          "state": "incomplete",
           "at": 1791874860,
           "age_s": 279,
-          "reason": null,
+          "reason": "capped query",
           "incomplete": false
         },
         "running": {
@@ -1192,7 +1192,7 @@
           "version": "0.4.16",
           "source": "langfuse-legacy",
           "reason": null,
-          "last_known": false
+          "last_known": true
         },
         "release": {
           "version": "0.4.17",
@@ -1207,7 +1207,7 @@
         },
         "health": {
           "state": "unknown",
-          "reason": "health receipt not reported by langfuse-legacy"
+          "reason": "observation incomplete: capped query"
         },
         "lifecycle": {
           "state": "unknown",
@@ -1235,74 +1235,12 @@
         "product": "taskq",
         "provenance": "taskq-heartbeat",
         "installation": null,
-        "workspace": null,
-        "host": "fra",
-        "observation": {
-          "state": "stale",
-          "at": 1791871239,
-          "age_s": 3900,
-          "reason": "heartbeat 65m old (ttl 5m)"
-        },
-        "running": {
-          "version": "4.2.0",
-          "source": "taskq-heartbeat",
-          "reason": null,
-          "last_known": true
-        },
-        "selected": {
-          "version": null,
-          "source": null,
-          "reason": "not reported",
-          "last_known": false
-        },
-        "release": {
-          "version": "4.2.0",
-          "at": 1791875000,
-          "state": "ok",
-          "reason": null
-        },
-        "reported_available": null,
-        "update": {
-          "state": "unknown",
-          "reason": "observation not current"
-        },
-        "health": {
-          "state": "unknown",
-          "reason": "observation stale: heartbeat 65m old (ttl 5m)"
-        },
-        "lifecycle": {
-          "state": "unknown",
-          "reason": "lifecycle stage not reported by taskq-heartbeat"
-        },
-        "libraries": {
-          "coreq": null,
-          "engines": null
-        },
-        "queue_age_s": null,
-        "connection": null,
-        "coverage": [
-          "running"
-        ],
-        "gaps": [
-          "selected",
-          "health",
-          "lifecycle",
-          "coreq",
-          "engines",
-          "queue"
-        ],
-        "reason": "older heartbeat: no service id"
-      },
-      {
-        "product": "taskq",
-        "provenance": "taskq-heartbeat",
-        "installation": null,
-        "workspace": null,
+        "workspace": "taskqorg/taskq",
         "host": "macbook-m2.local",
         "observation": {
           "state": "ok",
-          "at": 1791875079,
-          "age_s": 60,
+          "at": 1791875040,
+          "age_s": 99,
           "reason": null
         },
         "running": {
@@ -1331,6 +1269,68 @@
         "health": {
           "state": "unknown",
           "reason": "health receipt not reported by taskq-heartbeat"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by taskq-heartbeat"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": null,
+        "coverage": [
+          "running"
+        ],
+        "gaps": [
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ],
+        "reason": "older heartbeat: no service id"
+      },
+      {
+        "product": "taskq",
+        "provenance": "taskq-heartbeat",
+        "installation": null,
+        "workspace": "taskqorg/taskq",
+        "host": "fra",
+        "observation": {
+          "state": "stale",
+          "at": 1791871200,
+          "age_s": 3939,
+          "reason": "heartbeat 65m old (ttl 5m)"
+        },
+        "running": {
+          "version": "4.2.0",
+          "source": "taskq-heartbeat",
+          "reason": null,
+          "last_known": true
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "4.2.0",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "unknown",
+          "reason": "observation not current"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "observation stale: heartbeat 65m old (ttl 5m)"
         },
         "lifecycle": {
           "state": "unknown",
