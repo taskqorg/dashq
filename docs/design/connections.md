@@ -23,6 +23,8 @@ After approval display the actual pending stage: credential activation, durable 
 - Local offline disconnect: stop sending, display revocation pending until server acknowledgement; retained revoke-only retry does not resume telemetry.
 - Identity lost after reinstall: display a new installation and preserve the old one separately. No hostname merge or automatic transfer of history or authorization.
 
+Offline revocation evidence boundary (#60 owner answer): pending revocation is verified on the host. Until acknowledgement, DashQ retains the last server evidence and reports host activity unknown; it does not infer local disconnect from silence. No protocol extension.
+
 Connection refresh preserves selection, focus, scroll and approval/review state. Scope changes and destination changes retain C1/C4 review and destination-bound backlog rules. Observation scope grants no task or host-configuration actions.
 
 ## L4. Reference and gates

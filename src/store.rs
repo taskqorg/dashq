@@ -163,6 +163,10 @@ pub struct Row {
     pub samples: i64,
     /// Export events of this installation and workspace removed unsent (C5 export gap).
     pub export_gap: i64,
+    pub received_at: Option<i64>,
+    pub scopes: String,
+    pub board: Option<String>,
+    pub capabilities: Option<String>,
 }
 
 /// A pairing session as the approval page shows it.
@@ -730,7 +734,8 @@ impl Store {
                    EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation),
                    s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation,
                    (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
-                   (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace)
+                   (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
+                   (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities
                  FROM grants g JOIN installations i ON i.id = g.installation
                  LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
                  WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
@@ -755,6 +760,10 @@ impl Store {
                         snapshot,
                         samples: r.get(14)?,
                         export_gap: r.get(15)?,
+                        received_at: r.get(16)?,
+                        scopes: r.get(17)?,
+                        board: r.get(18)?,
+                        capabilities: r.get(19)?,
                     };
                     Ok(row)
                 })?
