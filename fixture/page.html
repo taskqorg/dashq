@@ -209,6 +209,13 @@
 <tr><td>fra/native</td><td>inst-fra</td><td>0.5.0</td><td>06:56 UTC (9m ago) <a href="https://langfuse.example.com/project/p1/traces/tr-q4">trace</a></td><td><span class="s ok">ok</span></td><td>2 (1 of 2)</td><td>1 (0)</td></tr>
 <tr><td>win-1/native</td><td>inst-win</td><td>0.4.0 <span class="s warn">behind</span></td><td>07:00 UTC (5m ago) <a href="https://langfuse.example.com/project/p1/traces/tr-q5">trace</a></td><td><span class="s warn">stale</span> <span class="detail">no heartbeat in 24 h</span></td><td>0 (0 of 0)</td><td>1 (1)</td></tr>
 </table>
+<h3>agentq clients (use over 24 h)</h3>
+<table>
+<tr><th>Host</th><th>Installation</th><th>Client</th><th>Routing</th><th>Hooks (last failure)</th><th>MCP</th><th>Hook compress (compressed · bytes saved)</th><th>Compress records</th><th>Retrievals (installation)</th></tr>
+<tr><td>fra/native</td><td>inst-fra</td><td>Codex</td><td><span class="s ok">routed</span> <span class="detail">config.toml selects the agent_context provider</span></td><td>SessionStart <span class="s ok">ok</span><br>Stop <span class="s bad">failed</span> <span class="detail">failed 06:30 UTC (35m ago): stdin: stream did not contain valid UTF-8</span></td><td><span class="unknown" title="unknown: not enrolled: the heartbeat carries no MCP state">—</span></td><td>0 of 0 · 0 B</td><td>0</td><td>1</td></tr>
+<tr><td>fra/native</td><td>inst-fra</td><td>Hermes</td><td><span class="s warn">direct</span> <span class="detail">routing not shipped</span></td><td>no hook runs</td><td><span class="unknown" title="unknown: not enrolled: the heartbeat carries no MCP state">—</span></td><td>1 of 1 · 7800 B</td><td>1</td><td>1</td></tr>
+<tr><td>win-1/native</td><td>inst-win <span class="detail">last known</span></td><td><span class="unknown" title="unknown: no client reported">—</span></td><td><span class="unknown" title="unknown: no heartbeat in 24 h">—</span></td><td><span class="unknown" title="unknown: no heartbeat in 24 h">—</span></td><td><span class="unknown" title="unknown: no client reported">—</span></td><td><span class="unknown" title="unknown: no client reported">—</span></td><td><span class="unknown" title="unknown: no client reported">—</span></td><td><span class="unknown" title="unknown: no client reported">—</span></td></tr>
+</table>
 <h3>Model activity</h3>
 <table>
 <tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>

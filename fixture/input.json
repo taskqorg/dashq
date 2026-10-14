@@ -70,7 +70,17 @@
       ],
       "agentq.installation": [
         {"id": "q1", "traceId": "tr-q1", "startTime": "2026-10-13T06:30:00Z",
-         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.stage": "heartbeat"}}
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.stage": "heartbeat",
+                      "attributes.agentq.routing": "{\"codex\":{\"routing\":\"routed\",\"reason\":\"config.toml selects the agent_context provider\",\"intended\":\"routed\",\"intended_reason\":\"onboarded\"},\"hermes\":{\"routing\":\"direct\",\"reason\":\"routing not shipped\",\"intended\":\"direct\",\"intended_reason\":\"routing not shipped\"}}",
+                      "attributes.agentq.hooks": "[{\"agent\":\"codex\",\"event\":\"SessionStart\",\"state\":\"ok\",\"last_ok_at\":1791874800,\"last_failure\":null},{\"agent\":\"codex\",\"event\":\"Stop\",\"state\":\"failed\",\"last_ok_at\":1791870000,\"last_failure\":{\"at\":1791873000,\"error\":\"stdin: stream did not contain valid UTF-8\"}}]"}}
+      ],
+      "agentq.compress.24h": [
+        {"id": "q8", "traceId": "tr-q8", "startTime": "2026-10-12T20:00:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.agent": "hermes", "attributes.agentq.adapter": "hook", "attributes.agentq.outcome": "compressed", "attributes.agentq.bytes_in": 9000, "attributes.agentq.bytes_out": 1200}}
+      ],
+      "agentq.retrieval.24h": [
+        {"id": "q9", "traceId": "tr-q4", "startTime": "2026-10-13T06:56:00Z",
+         "metadata": {"attributes.agentq.installation": "inst-fra", "attributes.host.name": "fra", "attributes.agentq.runtime": "linux", "attributes.agentq.version": "0.5.0", "attributes.agentq.ok": true}}
       ],
       "agentq.run": [
         {"id": "q2", "traceId": "tr-q2", "startTime": "2026-10-13T06:50:00Z",

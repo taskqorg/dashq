@@ -89,7 +89,7 @@ fn incident_title(code: &str) -> String {
     .into()
 }
 
-fn safe(s: &str, max: usize, extra: &[u8]) -> bool {
+pub(crate) fn safe(s: &str, max: usize, extra: &[u8]) -> bool {
     !s.is_empty() && s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || extra.contains(&b))
 }
 
@@ -124,7 +124,7 @@ fn trace(row: &Value) -> Value {
     row["traceId"].as_str().filter(|t| safe(t, 128, b"_-")).map_or(Value::Null, |t| json!(t))
 }
 
-fn row_at(row: &Value) -> Option<u64> {
+pub(crate) fn row_at(row: &Value) -> Option<u64> {
     row["startTime"].as_str().and_then(iso_secs)
 }
 
@@ -137,12 +137,12 @@ fn identity(row: &Value) -> (Option<String>, Option<&str>) {
     (id, agent)
 }
 
-fn aq<'a>(row: &'a Value, key: &str) -> &'a Value {
+pub(crate) fn aq<'a>(row: &'a Value, key: &str) -> &'a Value {
     &row["metadata"][format!("attributes.{key}")]
 }
 
 /// `(installation, host id)` of an agentq event; the host id joins the legacy `<host>/<runtime>`, so one host is one row.
-fn aq_identity(row: &Value) -> Option<(String, String)> {
+pub(crate) fn aq_identity(row: &Value) -> Option<(String, String)> {
     let inst = aq(row, "agentq.installation").as_str().filter(|i| safe_id(i))?;
     let host = aq(row, "host.name").as_str().filter(|h| safe(h, 64, b"_.-"))?;
     let runtime = if aq(row, "agentq.runtime") == "wsl" { "wsl" } else { "native" };
@@ -800,6 +800,22 @@ pub fn build(inp: &Value) -> Value {
             }
         }
     }
+    // Per-client use (#131): heartbeat routing and hooks, enrolled MCP, 24 h compress and retrieval records.
+    let use_gap = |k: &str| match lf_src["state"].as_str() {
+        Some("ok" | "incomplete") if capped(k) => Some(format!("capped query ({k})")),
+        Some("ok" | "incomplete") => None,
+        _ => Some(lf_src["reason"].as_str().unwrap_or("read not confirmed").to_string()),
+    };
+    let clients = crate::clients::build(
+        &crate::clients::Ctx {
+            now, heartbeats: rows("agentq.installation"), compress: rows("agentq.compress.24h"), retrieval: rows("agentq.retrieval.24h"),
+            compress_gap: use_gap("agentq.compress.24h"), retrieval_gap: use_gap("agentq.retrieval.24h"),
+            incomplete: json!({"agentq.compress.24h": capped("agentq.compress.24h"), "agentq.retrieval.24h": capped("agentq.retrieval.24h")}),
+            legacy: compression.iter().chain(&rtk).map(|c| (c["host"].as_str().unwrap_or("").to_string(), c["agent"].as_str().unwrap_or("").to_string())).collect(),
+            scoped, agent: f["agent"].as_str(),
+        },
+        &fleet, &activity, &inp["installations"], &mut current, &mut gaps,
+    );
     let taskq_src = (!taskq_states.is_empty()).then(|| worst(taskq_states.iter().map(|(n, s)| (n.clone(), s)), now));
     let gh_src = if gh_states.is_empty() { source(&Value::Null, now, GITHUB_LIMIT, None) } else { worst(gh_states.iter().map(|(n, s)| (n.clone(), s)), now) };
 
@@ -891,7 +907,7 @@ pub fn build(inp: &Value) -> Value {
         "resources": resources,
         "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
-                   "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
+                   "fleet": fleet, "clients": clients, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual,
                    "installations": enrolled_checks.into_iter().filter(|c| fhost.is_none_or(|x| c["host"] == x)).collect::<Vec<_>>()},
         "versions": versions,

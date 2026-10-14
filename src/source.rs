@@ -196,7 +196,7 @@ pub fn clock(t: u64, now: u64) -> String {
 /// The agentq events key by their span name; the legacy Node names stay until agentq#50.
 pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value, bool), Fail> {
     let filter = r#"[{"type":"string","column":"name","operator":"starts with","value":"service.health."}]"#;
-    let queries: [(&str, (&str, &str), u64); 11] = [
+    let queries: [(&str, (&str, &str), u64); 13] = [
         ("health", ("filter", filter), 86400),
         ("compression", ("name", "agent-context.compression"), period),
         ("native_tools", ("name", "agent-context.native-tool"), period),
@@ -210,15 +210,21 @@ pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value,
         ("agentq.incident", ("name", "agentq.incident"), 86400),
         // resource samples (D4.4): the window is the period
         ("agentq.resource", ("name", "agentq.resource"), period),
+        // per-client use (D8.4, #131) always counts 24 h; the 24 h period reuses its own reads
+        ("agentq.compress.24h", ("name", "agentq.compress"), 86400),
+        ("agentq.retrieval.24h", ("name", "agentq.retrieval"), 86400),
     ];
+    let reused = |key: &str| period == 86400 && key.ends_with(".24h");
     let reads: Vec<Result<(Vec<Value>, bool), Fail>> = std::thread::scope(|sc| {
-        let hs: Vec<_> = queries.iter().map(|(key, q, secs)| sc.spawn(move || observations(base, auth, now, *q, *secs, fields(key)))).collect();
+        let hs: Vec<_> = queries.iter().map(|(key, q, secs)| sc.spawn(move || if reused(key) { Ok((Vec::new(), false)) } else { observations(base, auth, now, *q, *secs, fields(key)) })).collect();
         hs.into_iter().map(|h| h.join().unwrap_or(Err(("reader panicked".into(), None)))).collect()
     });
     let mut out = json!({"truncated": []});
     for ((key, _, _), r) in queries.iter().zip(reads) {
         let (rows, capped) = r?;
-        out[*key] = Value::Array(rows);
+        let base_key = key.trim_end_matches(".24h");
+        let capped = if reused(key) { out["truncated"].as_array().unwrap().iter().any(|t| t == base_key) } else { capped };
+        out[*key] = if reused(key) { out[base_key].clone() } else { Value::Array(rows) };
         if capped {
             out["truncated"].as_array_mut().unwrap().push(json!(key));
         }
@@ -231,7 +237,8 @@ pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value,
 fn fields(key: &str) -> &'static str {
     match key {
         "activity" => "core,basic,trace_context,metadata,model,usage",
-        "agentq.resource" => "core,basic,trace_context,metadata,io",
+        // the heartbeat's `agentq.routing` and `agentq.hooks` JSON strings exceed that cut (#131)
+        "agentq.resource" | "agentq.installation" => "core,basic,trace_context,metadata,io",
         _ => "core,basic,trace_context,metadata",
     }
 }
