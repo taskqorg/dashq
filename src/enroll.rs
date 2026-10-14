@@ -17,6 +17,9 @@ pub const CLIENT: &str = "x-dashq-client";
 pub const MAX_BODY: usize = coreq::enroll::MAX_BODY;
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PRODUCTS: [&str; 3] = ["agentq", "serverq", "taskq"];
+/// Operation capabilities a device may request for separate approval (D16), with the product that owns each and
+/// the effect the approval page names.
+const CAPABILITIES: [(&str, &str, &str); 1] = [("agentq", "agentq.configure", "change AgentQ client integration settings on this host, one reviewed request at a time")];
 /// C3: new pairing sessions per source address per minute, and live sessions overall.
 const PER_MINUTE: usize = 10;
 const MAX_PENDING: i64 = 1000;
@@ -285,6 +288,10 @@ fn machine_route(e: &Enroll, r: &Req, now: i64) -> Resp {
                     let mut v = json!({"protocol": 1, "credential": credential, "installation": grant.installation, "generation": grant.generation,
                         "product": product, "workspace": grant.workspace, "schemas": serde_json::from_str::<Value>(&schemas).unwrap_or(json!([]))});
                     with_board(&mut v, &grant);
+                    // the approved subset, present only when the request named capabilities
+                    if let Some(c) = grant.capabilities.as_deref().and_then(|c| serde_json::from_str::<Value>(c).ok()) {
+                        v["capabilities"] = c;
+                    }
                     json("200 OK", v)
                 }
                 Err(x) => unavailable(x),
@@ -522,6 +529,21 @@ fn board(b: &Value) -> Result<Option<String>, ()> {
     Ok(Some(json!({"name": name, "value": value}).to_string()))
 }
 
+/// The optional operation capabilities of a device request (coreq v0.11.0): 1-4 distinct names `product` owns, as
+/// a JSON array; `Ok(None)` when absent, `Err` when malformed or another product's.
+fn capabilities(b: &Value, product: &str) -> Result<Option<String>, ()> {
+    let c = &b["capabilities"];
+    if c.is_null() {
+        return Ok(None);
+    }
+    let names: Vec<&str> = c.as_array().filter(|a| (1..=4).contains(&a.len())).and_then(|a| a.iter().map(Value::as_str).collect()).ok_or(())?;
+    let known = |n: &&str| CAPABILITIES.iter().any(|(p, k, _)| *p == product && k == n);
+    if !names.iter().all(known) || (1..names.len()).any(|i| names[..i].contains(&names[i])) {
+        return Err(());
+    }
+    Ok(Some(json!(names).to_string()))
+}
+
 /// A request after approval may repeat its scope but never change it (A2); one without a scope is unchanged.
 fn same_board(b: &Value, g: &store::Grant) -> bool {
     b["scope"].is_null() || board(b).ok().flatten().is_some_and(|x| g.board.as_deref() == Some(x.as_str()))
@@ -560,6 +582,7 @@ fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
     let ok_schema = |x: &&str| x.strip_prefix(product).and_then(|x| x.strip_prefix('-')).and_then(|x| x.split_once('/')).is_some_and(|(n, v)| id(n, 32) && !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
     let Some(schemas) = schemas.filter(|v| PRODUCTS.contains(&product) && v.iter().all(ok_schema)) else { return error("400 Bad Request", "invalid_request") };
     let Ok(board) = board(b) else { return error("400 Bad Request", "invalid_request") };
+    let Ok(caps) = capabilities(b, product) else { return error("400 Bad Request", "invalid_request") };
     if !id(s("installation"), 64) || !matches!(s("runtime"), "native" | "wsl") || !id(s("host_label"), 64) {
         return error("400 Bad Request", "invalid_request");
     }
@@ -574,7 +597,7 @@ fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
         let device = b64url(&e.random(32));
         let code: String = e.random(8).iter().map(|b| ALPHABET[(b & 31) as usize] as char).collect();
         let code = user_code(&code).expect("alphabet");
-        match e.store.pair(&sha256(&device), &code, &inst, &json!(schemas).to_string(), board.as_deref(), now, MAX_PENDING) {
+        match e.store.pair(&sha256(&device), &code, &inst, &json!(schemas).to_string(), board.as_deref(), caps.as_deref(), now, MAX_PENDING) {
             Ok(()) => {
                 return json(
                     "200 OK",
@@ -642,9 +665,11 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
             "deny" => false,
             _ => return fail("400 Bad Request", "Choose Approve or Deny."),
         };
+        // each capability is its own consent: only a ticked box grants it (D16)
+        let granted: Vec<&str> = CAPABILITIES.iter().map(|(_, k, _)| *k).filter(|k| get(&format!("capability.{k}")) == "grant").collect();
         let credential = b64url(&e.random(32));
         let sealer = |device: &[u8]| seal(e, device, &credential);
-        return match e.store.decide(&code, approve, get("workspace"), subject, &sha256(&credential), &sealer, now) {
+        return match e.store.decide(&code, approve, get("workspace"), subject, &granted, &sha256(&credential), &sealer, now) {
             Ok(Decision::Approved(g)) => {
                 // C1.5: this page follows the first projected snapshot of this generation to the overview
                 let wait = format!("/connect?wait={}&workspace={}&generation={}&since={now}", g.installation, g.workspace, g.generation);
@@ -685,6 +710,11 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     let scope = p.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()).map_or(String::new(), |b| {
         format!("<dt>Board scope</dt><dd><code>{}</code>: <code>{}</code></dd>\n", esc(b["name"].as_str().unwrap_or("")), esc(b["value"].as_str().unwrap_or("")))
     });
+    // requested capabilities are separate effects, unticked by default: approving the connection alone grants none
+    let caps: String = p.capabilities.as_deref().and_then(|c| serde_json::from_str::<Vec<String>>(c).ok()).unwrap_or_default().iter().map(|c| {
+        let effect = CAPABILITIES.iter().find(|(_, k, _)| k == c).map_or("", |(_, _, e)| e);
+        format!("<dt>Also requested</dt><dd><label><input type=\"checkbox\" name=\"capability.{0}\" value=\"grant\"> Allow <code>{0}</code>: {1}</label></dd>\n", esc(c), esc(effect))
+    }).collect();
     // pick a workspace only when there is a choice (C1)
     let ws = if let [(w, _)] = spaces.as_slice() {
         format!("<dt>Workspace</dt><dd>{0}<input type=\"hidden\" name=\"workspace\" value=\"{0}\"></dd>\n", esc(w))
@@ -695,7 +725,7 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     html(
         "200 OK",
         &format!(
-            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{scope}{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
+            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{scope}{caps}{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
             esc(&p.product),
             esc(&p.label),
             esc(&p.runtime),
@@ -852,7 +882,7 @@ mod tests {
     fn coreq_client_pairs_once_and_the_grant_survives_restart() {
         let (d, e) = setup("client");
         let host = dir("client-host");
-        let req = coreq::enroll::Request { product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"] };
+        let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
         let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
         let a = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         assert_eq!((&a["generation"], &a["workspace"], &a["product"]), (&json!(1), &json!("ws-1"), &json!("agentq")));
@@ -909,6 +939,38 @@ mod tests {
         let (_, code3) = start(&e, "inst-3", T0 + 800);
         assert!(decide(&e, "github|1", &code3, "approve", "ws-1", T0 + 1400).1.contains("unknown, expired"));
         assert_eq!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": "nope"}), T0).1["error"], "invalid_grant");
+    }
+
+    #[test]
+    fn configure_capability_needs_its_own_approval_and_never_widens() {
+        // D16 / coreq v0.11.0: a requested operation capability is a separate, unticked effect on the approval page;
+        // the token names only the approved subset, and the coreq client keeps only what it asked for and got
+        let (_d, e) = setup("capability");
+        let req = |inst: &str, product: &str, caps: Value| json!({"protocol": 1, "product": product, "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": [format!("{product}-snapshot/1")], "capabilities": caps});
+        for (product, caps) in [("serverq", json!(["agentq.configure"])), ("agentq", json!(["agentq.run"])), ("agentq", json!(["agentq.configure", "agentq.configure"])), ("agentq", json!([])), ("agentq", json!("agentq.configure"))] {
+            assert_eq!(machine(&e, "/connect/device", None, req("inst-x", product, caps.clone()), T0), (400, json!({"protocol": 1, "error": "invalid_request"})), "{product} {caps}");
+        }
+        let token = |inst: &str, ticks: &str| {
+            let (_, v) = machine(&e, "/connect/device", None, req(inst, "agentq", json!(["agentq.configure"])), T0);
+            let (device, code) = (v["device_code"].as_str().unwrap().to_string(), v["user_code"].as_str().unwrap().to_string());
+            let p = page(&e, "github|1", &code, T0).1;
+            assert!(p.contains("<input type=\"checkbox\" name=\"capability.agentq.configure\" value=\"grant\"> Allow <code>agentq.configure</code>"), "{p}");
+            assert!(decide(&e, "github|1", &code, &format!("approve{ticks}"), "ws-1", T0 + 1).1.contains("Approved"));
+            machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1
+        };
+        // approving the connection alone grants no capability; a forged extra capability is ignored
+        assert_eq!(token("inst-1", "&capability.agentq.run=grant")["capabilities"], json!([]));
+        assert_eq!(token("inst-2", "&capability.agentq.configure=grant")["capabilities"], json!(["agentq.configure"]));
+        // a request without capabilities keeps today's reply shape and page
+        let (device, code) = start(&e, "inst-3", T0);
+        assert!(!page(&e, "github|1", &code, T0).1.contains("Also requested"));
+        decide(&e, "github|1", &code, "approve&capability.agentq.configure=grant", "ws-1", T0 + 1);
+        assert!(machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), T0 + 10).1.get("capabilities").is_none());
+        // the shared client: approval without the tick leaves the active grant without the capability
+        let host = dir("capability-host");
+        let r = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &["agentq.configure"] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
+        assert_eq!(coreq::enroll::pair(&host, "https://dash.example.com", &r, &mut w).unwrap()["capabilities"], json!([]));
     }
 
     #[test]
@@ -1258,7 +1320,7 @@ mod tests {
         let now = crate::source::now() as i64;
         let (_d, e) = setup("e2e");
         let host = dir("e2e-host");
-        let req = coreq::enroll::Request { product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"] };
+        let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
         let mut w = Wire { e: &e, now, code: None, calls: vec![] };
         let conn = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
         let payload = json!({"version": "1.2.0", "cpu": {"percent": 7}});

@@ -26,6 +26,8 @@ Current work and incidents are supporting detail. Show only actual supported met
 
 Resolve the guarded browser actor, workspace, installation and profile scope server-side. Require AgentQ's explicit configuration capability, session/Origin/CSRF checks and canonical host plan/revision. Observation and `/answer` credentials cannot authorize these mutations. Reuse the existing DashQ store/authorized service connection for bounded requests and results; no local file edits passed off as remote changes.
 
+Authority follows coreq v0.11.0 operations and D16: the `agentq.configure` capability needs its own tick at approval; DashQ sets `authority` `{actor, workspace, profiles}` server-side (actor: the verified subject; workspace: the grant's; profiles: the installation's current snapshot profiles, for that workspace's administrator or the approving member only) and never reads it from the payload.
+
 Implement against AgentQ's published typed envelope and shared conformance fixtures. Preserve immutable operation identity, expiry, source revision, scope and results through restarts. Reject arbitrary fields/paths/commands; no generic remote execution channel or consumer copy of AgentQ's config logic. Store acceptance is not host success; loss, revocation and full-storage behavior follow A3/A4.
 
 ## G4. Reference and acceptance
