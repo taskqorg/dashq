@@ -930,8 +930,9 @@ impl Store {
 
     /// The dashboard projection (D11): every expected installation in `scope`, one row per installation and
     /// workspace from its newest grant there, with that workspace's current snapshot or none. Receipts of the
-    /// snapshots read here become `projected` in the same transaction, so `projected` means this read showed it.
-    pub fn project(&self, scope: Scope) -> Result<Vec<Row>, Error> {
+    /// snapshots read here that a view `renders` (product, schema) become `projected` in the same transaction, so
+    /// `projected` means this read showed it; a schema no view renders stays `accepted`.
+    pub fn project(&self, scope: Scope, renders: impl Fn(&str, &str) -> bool) -> Result<Vec<Row>, Error> {
         let subject = match scope {
             Scope::All => None,
             Scope::Subject(s) => Some(s),
@@ -979,7 +980,7 @@ impl Store {
                 .collect::<Result<_, _>>()?;
             drop(q);
             for row in &rows {
-                if let Some(s) = &row.snapshot {
+                if let Some(s) = row.snapshot.as_ref().filter(|s| renders(&row.product, &s.schema)) {
                     tx.execute(
                         "UPDATE receipts SET outcome = 'projected' WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
                         params![row.installation, s.generation, s.event_id],
@@ -1163,7 +1164,7 @@ mod tests {
         assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "{}"), export("x1", "{}")], NOW).unwrap(), [Outcome::Accepted, Outcome::Accepted]);
         // durable, not yet read through the projection; the projection read makes it `projected`
         assert_eq!(s.receipt(b"v1", "e1").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Accepted)));
-        assert_eq!(s.project(Scope::All).unwrap().len(), 2);
+        assert_eq!(s.project(Scope::All, |_, _| true).unwrap().len(), 2);
         // crash: no close, no checkpoint; committed WAL frames must be enough
         std::mem::forget(s);
         let s = Store::open(&p, LIMITS).unwrap();
@@ -1259,7 +1260,7 @@ mod tests {
         let s = Store::open(&p, LIMITS).unwrap();
         s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
         // an old gap has no workspace and shows in no scoped row
-        assert_eq!(s.project(Scope::All).unwrap()[0].export_gap, 0);
+        assert_eq!(s.project(Scope::All, |_, _| true).unwrap()[0].export_gap, 0);
         assert_eq!(s.export_gaps().unwrap(), [("inst-1".to_string(), 4)]);
     }
 
@@ -1291,7 +1292,7 @@ mod tests {
         assert_eq!(s.accept(b"v1", &[Event { observed: later, ..export("x3", "123456") }], later).unwrap(), [Outcome::Accepted]);
         assert_eq!(s.history("inst-1").unwrap(), [(later, "s2".into())]);
         assert_eq!(s.receipt(b"v1", "e1").unwrap(), None);
-        s.project(Scope::All).unwrap();
+        s.project(Scope::All, |_, _| true).unwrap();
         assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert!(s.authorize(b"v1").unwrap().is_some());
     }
@@ -1325,7 +1326,7 @@ mod tests {
         s.grant(&Installation { id: "inst-2", ..AGENT }, "w", "a", SCOPES, b"v2", NOW).unwrap();
         s.revoke("inst-2", NOW).unwrap();
         s.accept(b"v1", &[snap("e1", NOW, "{}")], NOW).unwrap();
-        s.project(Scope::All).unwrap();
+        s.project(Scope::All, |_, _| true).unwrap();
         s.backup(&d.join("backup.db")).unwrap();
         assert!(matches!(s.backup(&d.join("backup.db")), Err(Error::Io(_))));
         #[cfg(unix)]

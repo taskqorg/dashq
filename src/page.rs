@@ -182,7 +182,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
     if configured("langfuse") { crate::optimization::render(w, doc); }
 
     // 2. Hosts
-    if has_rows(&doc["hosts"]) && (configured("langfuse") || configured("serverq")) {
+    let enrolled_checks = has_rows(&doc["checks"]["installations"]);
+    if has_rows(&doc["hosts"]) && (configured("langfuse") || configured("serverq") || enrolled_checks) {
         let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
         let hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
         if hosts.is_empty() {
@@ -293,25 +294,16 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     // 5. Server checks
     }
-    if configured("serverq") {
-        let ch = &doc["checks"];
-        let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>\n{}<p class=\"note\">Report at {}</p>", unknown_line(&ch["source"]), at(&ch["at"], now));
-        let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
-        for r in ch["results"].as_array().into_iter().flatten() {
-            let st = r["status"].as_str().unwrap_or("unknown");
-            let status = if ch["source"]["state"] == "ok" { badge(st, st) } else { badge("unconfirmed", &format!("Last known {st}")) };
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td></tr>", text(&r["check"]), status, text(&r["detail"]));
+    if configured("serverq") || enrolled_checks {
+        let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>");
+        if configured("serverq") {
+            checks(w, &doc["checks"], "Report", now);
         }
-        for m in ch["manual_rules"].as_array().into_iter().flatten() {
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
-        }
-        let _ = writeln!(w, "</table>\n<h3>Open incidents</h3>");
-        let open = ch["incidents"].as_array().cloned().unwrap_or_default();
-        if open.is_empty() {
-            let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");
-        }
-        for i in open {
-            let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), at(&i["first_seen"], now), at(&i["last_seen"], now), text(&i["occurrences"]));
+        // one block per enrolled installation (serverq.md § 3 projection); equal host labels stay apart
+        for c in doc["checks"]["installations"].as_array().into_iter().flatten() {
+            let version = c["version"].as_str().map(|v| format!(" {}", esc(v))).unwrap_or_default();
+            let _ = writeln!(w, "<h3>{} · ServerQ{version} · <code>{}</code></h3>", text(&c["host"]), text(&c["installation"]));
+            checks(w, c, "Observed", now);
         }
         let _ = writeln!(w, "</section>");
     }
@@ -372,7 +364,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let id = crate::enroll::anchor(inst_id, ws);
         let revoked = r["connection"] == "revoked";
         let verified = r["projected"] == true;
-        let recent = r["received_at"].as_u64().is_some_and(|t| t <= now && now - t <= crate::enroll::STALE_SECS);
+        let recent = r["received_at"].as_u64().is_some_and(|t| t <= now && now - t <= crate::enroll::stale_secs(r["snapshot"]["schema"].as_str().unwrap_or("")));
         let (class, connection) = match r["connection"].as_str() {
             Some("revoked") => ("detail", "Revoked · history kept"),
             Some("pending") => ("detail", "Pending · credential activation"),
@@ -436,6 +428,41 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let _ = writeln!(w, "</div>");
     }
     let _ = writeln!(w, "</div>{panels}</section>");
+}
+
+/// One serverq report or enrolled projection: per-check status (last known unless fresh), reason, observation time
+/// and evidence; manual rules never verified; open incidents.
+fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
+    let _ = writeln!(w, "{}<p class=\"note\">{label} at {}</p>", unknown_line(&ch["source"]), at(&ch["at"], now));
+    let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
+    for r in ch["results"].as_array().into_iter().flatten() {
+        let st = r["status"].as_str().unwrap_or("unknown");
+        let status = if ch["source"]["state"] == "ok" { badge(st, st) } else { badge("unconfirmed", &format!("Last known {st}")) };
+        // a local report carries its own detail; a projection only fixed reasons, times and counts
+        let detail = if r.get("detail").is_some() {
+            text(&r["detail"])
+        } else {
+            let evidence: Vec<String> = r["evidence"].as_object().into_iter().flatten().map(|(k, v)| format!("{} {}", esc(k), text(v))).collect();
+            let mut parts = vec![r["reason"].as_str().map(esc).unwrap_or_else(|| if st == "ok" { "no reason needed".into() } else { "no reason reported".into() })];
+            parts.push(format!("observed {}", at(&r["observed_at"], now)));
+            if !evidence.is_empty() {
+                parts.push(evidence.join(", "));
+            }
+            parts.join(" · ")
+        };
+        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{detail}</td></tr>", text(&r["check"]), status);
+    }
+    for m in ch["manual_rules"].as_array().into_iter().flatten() {
+        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
+    }
+    let _ = writeln!(w, "</table>\n<h3>Open incidents</h3>");
+    let open = ch["incidents"].as_array().cloned().unwrap_or_default();
+    if open.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");
+    }
+    for i in open {
+        let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), at(&i["first_seen"], now), at(&i["last_seen"], now), text(&i["occurrences"]));
+    }
 }
 
 /// One projected value as glyph and word: configured/registered, partial, missing, bypassed, disabled, unknown and

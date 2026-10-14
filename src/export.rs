@@ -251,7 +251,7 @@ mod tests {
         // r1 re-sends the same span, r2 is refused for good
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Ok(()));
         assert_eq!(s.export_counts().unwrap(), (0, 1));
-        assert_eq!(s.project(crate::store::Scope::All).unwrap()[0].export_gap, 1);
+        assert_eq!(s.project(crate::store::Scope::All, |_, _| true).unwrap()[0].export_gap, 1);
 
         let bodies = lf.bodies.lock().unwrap();
         let ids = |b: &str| serde_json::from_str::<Value>(b).unwrap()["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap().iter().map(|sp| meta(sp, "dashq.id").unwrap()).collect::<Vec<_>>();
@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(s.export_gaps().unwrap(), [("inst-1".to_string(), 1)]);
         assert_eq!(pass(&s, &lf.base, "Basic x", NOW), Ok(()));
         assert_eq!(s.export_counts().unwrap(), (0, 1));
-        let ws: Vec<_> = s.project(crate::store::Scope::All).unwrap().iter().map(|r| (r.installation.clone(), r.export_gap)).collect();
+        let ws: Vec<_> = s.project(crate::store::Scope::All, |_, _| true).unwrap().iter().map(|r| (r.installation.clone(), r.export_gap)).collect();
         assert_eq!(ws, [("inst-1".to_string(), 1), ("inst-2".to_string(), 0)]);
         let bodies = lf.bodies.lock().unwrap();
         assert_eq!(bodies.len(), 2, "partial success is never resent");
