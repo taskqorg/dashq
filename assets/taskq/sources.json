@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/taskqorg/taskq",
+  "revision": "0d4b1be0a8a3a41e8d72ea96e003a5e9044d1a23",
+  "files": {
+    "assets/taskq/resource-controls.js": {
+      "source": "src/resource-controls.js",
+      "sha256": "1b434e5ab5107458252d5f0b2ba523a11b7992e1e2a2c67b88b3496318a7c4af"
+    },
+    "assets/taskq/resource-controls.css": {
+      "source": "src/resource-controls.css",
+      "sha256": "9f81ec867aaf0cf95c4abbd5c37889632e1a6034b0e33331b52c41f92b836907"
+    },
+    "fixture/taskq/resource-controls.json": {
+      "source": "tests/fixtures/resource-controls.json",
+      "sha256": "9b809eafc0317e7c3465bbf7eb8153e4dd46ade6475005131007efb0819c5cef"
+    },
+    "assets/taskq/LICENSE": {
+      "source": "LICENSE",
+      "sha256": "e89ac6292aef7d60a7a82136108b4b954a124264617b773ae32bdbd023b88225"
+    }
+  }
+}

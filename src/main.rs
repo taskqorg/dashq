@@ -335,8 +335,8 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
         return ("405 Method Not Allowed", "text/plain", b"method not allowed".to_vec());
     }
     match path {
-        "/app.js" => ("200 OK", "text/javascript; charset=utf-8", include_bytes!("../assets/app.js").to_vec()),
-        "/style.css" => ("200 OK", "text/css; charset=utf-8", include_bytes!("../assets/style.css").to_vec()),
+        "/app.js" => ("200 OK", "text/javascript; charset=utf-8", [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/app.js")].join("\n").into_bytes()),
+        "/style.css" => ("200 OK", "text/css; charset=utf-8", [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css")].join("\n").into_bytes()),
         _ => {
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
