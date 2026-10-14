@@ -919,7 +919,7 @@ fn serverq_enrolled(inp: &Value, now: u64, hosts: &mut BTreeMap<String, Value>, 
         let installation = r["installation"].clone();
         let p = &r["snapshot"]["payload"];
         let mut src = r["observation"].clone();
-        let valid = p["schema"] == 1 && p["product"] == "serverq" && p["rules"].is_object();
+        let valid = crate::enroll::serverq_payload(p);
         if !valid {
             src = json!({"state": "unknown", "at": src["at"], "age_s": src["age_s"], "reason": "unsupported serverq projection (schema 1 expected)", "incomplete": false});
         }

@@ -930,9 +930,9 @@ impl Store {
 
     /// The dashboard projection (D11): every expected installation in `scope`, one row per installation and
     /// workspace from its newest grant there, with that workspace's current snapshot or none. Receipts of the
-    /// snapshots read here that a view `renders` (product, schema) become `projected` in the same transaction, so
-    /// `projected` means this read showed it; a schema no view renders stays `accepted`.
-    pub fn project(&self, scope: Scope, renders: impl Fn(&str, &str) -> bool) -> Result<Vec<Row>, Error> {
+    /// snapshots read here that a view `renders` (product, snapshot) become `projected` in the same transaction, so
+    /// `projected` means this read showed it; a snapshot no view renders stays `accepted`.
+    pub fn project(&self, scope: Scope, renders: impl Fn(&str, &Snapshot) -> bool) -> Result<Vec<Row>, Error> {
         let subject = match scope {
             Scope::All => None,
             Scope::Subject(s) => Some(s),
@@ -980,7 +980,7 @@ impl Store {
                 .collect::<Result<_, _>>()?;
             drop(q);
             for row in &rows {
-                if let Some(s) = row.snapshot.as_ref().filter(|s| renders(&row.product, &s.schema)) {
+                if let Some(s) = row.snapshot.as_ref().filter(|s| renders(&row.product, s)) {
                     tx.execute(
                         "UPDATE receipts SET outcome = 'projected' WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
                         params![row.installation, s.generation, s.event_id],

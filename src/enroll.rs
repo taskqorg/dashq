@@ -30,9 +30,20 @@ pub const STALE_SECS: u64 = 180;
 /// ServerQ sends no heartbeat between its hourly checks: its report is stale after the serverq limit (D4.3, D6).
 pub const SERVERQ_STALE_SECS: u64 = 7200;
 
-/// Snapshot schemas a dashboard view renders, per product: only these receipts become `projected` (C4).
-pub fn renders(product: &str, schema: &str) -> bool {
-    matches!((product, schema), ("agentq", "agentq-snapshot/1") | ("serverq", "serverq-report/1"))
+/// Snapshots a dashboard view renders: only these receipts become `projected` (C4). Installations renders every
+/// `agentq-snapshot/1`; Server checks renders only the ServerQ payload shape data.rs `serverq_enrolled` accepts,
+/// anything else reads unknown there and stays `accepted`.
+pub fn renders(product: &str, s: &store::Snapshot) -> bool {
+    match (product, s.schema.as_str()) {
+        ("agentq", "agentq-snapshot/1") => true,
+        ("serverq", "serverq-report/1") => serverq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
+        _ => false,
+    }
+}
+
+/// serverq.md § 3 projection, schema 1: the only ServerQ payload Server checks renders.
+pub fn serverq_payload(p: &Value) -> bool {
+    p["schema"] == 1 && p["product"] == "serverq" && p["rules"].is_object()
 }
 
 /// Producer-time freshness limit of a snapshot schema.
@@ -632,7 +643,7 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
                 "generation": r.generation, "connection": r.connection,
-                "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, &s.schema)),
+                "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
                 "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
                 "capabilities": r.capabilities.as_deref().map(|s| serde_json::from_str::<Value>(s).unwrap_or(Value::Null)).unwrap_or(json!([])),
                 "scope": r.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()), "observation": obs, "history": history, "export": export, "snapshot": snapshot})
@@ -930,7 +941,7 @@ fn lifecycle(e: &Enroll, subject: &str, who: &str, q: &HashMap<String, String>, 
         return fail("200 OK", "This connection was replaced or revoked; the overview shows its current state.");
     }
     // the projection above read this generation's snapshot as current: its receipt is `projected` now
-    if row.snapshot.as_ref().is_some_and(|s| s.generation == generation && renders(&row.product, &s.schema)) {
+    if row.snapshot.as_ref().is_some_and(|s| s.generation == generation && renders(&row.product, s)) {
         let mut x = html("303 See Other", &format!("<p><a href=\"/#{to}\">Open the overview</a></p>\n"));
         x.headers = format!("Location: /#{to}\r\n");
         return x;
@@ -1599,6 +1610,9 @@ mod tests {
         // a lost identity on the same label and runtime: an older, stale report of its own
         let lost = join(&e, "serverq", "sq-lost", "native", "DESKTOP", schema, now);
         let other = join(&e, "taskq", "tq-1", "native", "DESKTOP", "taskq-snapshot/1", now);
+        // the right schema name around a payload the view cannot render: another payload schema, no rules
+        let v2 = join(&e, "serverq", "sq-v2", "native", "other", schema, now);
+        let bare = join(&e, "serverq", "sq-bare", "native", "other", schema, now);
         let send = |cred: &str, id: &str, schema: &str, at: i64, payload: Value| {
             let (s, v) = ingest(&e, cred, vec![json!({"schema": schema, "event_id": id, "observed_at": at, "payload": payload})], now);
             assert_eq!((s, states(&v)), (200, vec!["accepted".to_string()]), "{v}");
@@ -1608,6 +1622,8 @@ mod tests {
         send(&native, "r-native", schema, now - 7000, serverq_report(windows, now - 7000));
         send(&lost, "r-lost", schema, now - 7300, serverq_report(linux, now - 7300));
         send(&other, "t-1", "taskq-snapshot/1", now, json!({"schema": 1}));
+        send(&v2, "r-v2", schema, now, json!({"schema": 2, "product": "serverq", "rules": {}}));
+        send(&bare, "r-bare", schema, now, json!({"schema": 1, "product": "serverq"}));
         let receipt = |cred: &str, id: &str| machine(&e, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), now).1["state"].clone();
         assert_eq!(receipt(&wsl, "r-wsl"), "accepted", "no view has read it yet");
 
@@ -1621,20 +1637,28 @@ mod tests {
             assert_eq!(receipt(cred, id), "projected", "{id}");
         }
         assert_eq!(receipt(&other, "t-1"), "accepted", "no view renders taskq-snapshot/1");
+        assert_eq!((receipt(&v2, "r-v2"), receipt(&bare, "r-bare")), (json!("accepted"), json!("accepted")), "an unsupported payload never reads projected");
         let rows = doc["installations"]["rows"].as_array().unwrap();
         let row = |inst: &str| rows.iter().find(|r| r["installation"] == inst).unwrap().clone();
-        assert_eq!((&row("sq-native")["projected"], &row("tq-1")["projected"]), (&json!(true), &json!(false)));
+        let projected = |inst: &str| row(inst)["projected"].clone();
+        assert_eq!([projected("sq-native"), projected("tq-1"), projected("sq-v2"), projected("sq-bare")], [true, false, false, false].map(|b| json!(b)));
         assert_eq!((row("sq-native")["observation"]["state"].as_str(), row("sq-lost")["observation"]["state"].as_str()), (Some("ok"), Some("stale")));
 
         // hosts: one row per label and runtime; the newest observation owns a shared row
         let host = |id: &str| doc["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).unwrap()["serverq"].clone();
         let (h_wsl, h_native) = (host("DESKTOP/wsl"), host("DESKTOP/native"));
-        assert_eq!((h_wsl["status"].as_str(), h_wsl["state"].as_str(), h_wsl["installation"].as_str(), h_wsl["age_s"].as_i64()), (Some("warn"), Some("ok"), Some("sq-wsl"), Some(180)));
+        assert_eq!((h_wsl["status"].as_str(), h_wsl["state"].as_str(), h_wsl["installation"].as_str(), h_wsl["at"].as_i64()), (Some("warn"), Some("ok"), Some("sq-wsl"), Some(now - 180)));
+        // age is read at /data time, a second or more after `now` on a slow host
+        assert!(h_wsl["age_s"].as_i64().is_some_and(|a| (180..190).contains(&a)), "{h_wsl}");
         assert_eq!((h_native["status"].as_str(), h_native["state"].as_str(), h_native["installation"].as_str()), (Some("unknown"), Some("ok"), Some("sq-native")));
 
         // Server checks: each installation apart, per-rule status, reason and producer time
         let checks = doc["checks"]["installations"].as_array().unwrap();
-        assert_eq!(checks.len(), 3);
+        assert_eq!(checks.len(), 5);
+        for inst in ["sq-v2", "sq-bare"] {
+            let c = checks.iter().find(|c| c["installation"] == inst).unwrap();
+            assert_eq!((c["source"]["state"].as_str(), c["source"]["reason"].as_str()), (Some("unknown"), Some("unsupported serverq projection (schema 1 expected)")), "{c}");
+        }
         let check = |inst: &str| checks.iter().find(|c| c["installation"] == inst).unwrap().clone();
         let win = check("sq-native");
         assert_eq!((win["host"].as_str(), win["version"].as_str(), win["source"]["state"].as_str()), (Some("DESKTOP/native"), Some("1.3.0"), Some("ok")));
