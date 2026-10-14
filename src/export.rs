@@ -4,7 +4,6 @@
 use crate::source;
 use crate::store::{Pending, Store};
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// The export schema DashQ forwards: `{"name": <agentq.md § 6 span name>, "metadata": {..}}`, metadata allowlisted at ingest.
@@ -18,64 +17,77 @@ pub fn valid(p: &Value) -> bool {
     p.as_object().is_some_and(|o| o.len() == 2 && o.get("metadata").is_some_and(Value::is_object) && o.get("name").and_then(Value::as_str).is_some_and(|n| NAMES.contains(&n)))
 }
 
-/// The Langfuse observation ID: installation, generation and event ID, so a retry upserts the same observation.
+/// The DashQ observation ID: installation, generation and event ID, so a retry carries the same identity.
 /// `:` never occurs in installation or event IDs (`A-Z a-z 0-9 . _ -`, enforced at ingest), so the ID is unambiguous.
 pub fn observation(r: &Pending) -> String {
     format!("{}:{}:{}", r.installation, r.generation, r.event_id)
 }
 
-/// One `event-create` per row, timed at producer observation, never at retry time (C5).
+/// OTEL trace and span IDs (hex, 32 and 16 digits) derived from the observation ID: a retry re-sends the same span.
+pub fn span_ids(r: &Pending) -> (String, String) {
+    let h: String = ring::digest::digest(&ring::digest::SHA256, observation(r).as_bytes()).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+    (h[..32].into(), h[32..48].into())
+}
+
+/// OTLP/JSON for Langfuse v4 ingestion: one complete `event` span per row, timed at producer observation, never
+/// at retry time (C5). Metadata keys become `langfuse.observation.metadata.*` (non-strings as JSON text).
 pub fn batch(rows: &[Pending]) -> Value {
-    let events: Vec<Value> = rows
+    let attr = |k: &str, v: &Value| json!({"key": k, "value": {"stringValue": v.as_str().map_or_else(|| v.to_string(), String::from)}});
+    let spans: Vec<Value> = rows
         .iter()
         .map(|r| {
             let p: Value = serde_json::from_str(&r.payload).unwrap_or(Value::Null);
-            let (id, at) = (observation(r), source::iso(r.observed.max(0) as u64));
-            let mut meta = p["metadata"].clone();
-            meta["dashq.installation"] = json!(r.installation);
-            meta["dashq.generation"] = json!(r.generation);
-            meta["dashq.event_id"] = json!(r.event_id);
-            json!({"id": id, "timestamp": at, "type": "event-create",
-                "body": {"id": id, "traceId": id, "name": p["name"], "startTime": at, "metadata": meta}})
+            let ((trace, span), at) = (span_ids(r), (r.observed.max(0) as u64 * 1_000_000_000).to_string());
+            let mut attrs = vec![attr("langfuse.observation.type", &json!("event")), attr("langfuse.trace.name", &p["name"])];
+            let ids = [("dashq.id", json!(observation(r))), ("dashq.installation", json!(r.installation)), ("dashq.generation", json!(r.generation)), ("dashq.event_id", json!(r.event_id))];
+            for (k, v) in p["metadata"].as_object().into_iter().flatten().map(|(k, v)| (k.as_str(), v.clone())).chain(ids) {
+                attrs.push(attr(&format!("langfuse.observation.metadata.{k}"), &v));
+            }
+            json!({"traceId": trace, "spanId": span, "name": p["name"], "kind": 1, "startTimeUnixNano": at, "endTimeUnixNano": at, "attributes": attrs})
         })
         .collect();
-    json!({"batch": events})
+    json!({"resourceSpans": [{"resource": {"attributes": [attr("service.name", &json!("dashq"))]}, "scopeSpans": [{"scope": {"name": "dashq"}, "spans": spans}]}]})
 }
 
 /// Last forwarding attempt: `(time, failure reason)`; `None` before the first attempt.
 pub type Last = Mutex<Option<(i64, Option<String>)>>;
 
-/// One pass: sends the oldest rows. Accepted rows leave the outbox; rows the destination refuses for good (4xx other
-/// than 429) become export gaps; everything else stays for the next pass under the same observation ID.
+/// Sends `rows` as one OTLP request: `Ok(true)` accepted, `Ok(false)` refused for good (4xx other than 429).
+fn post(base: &str, auth: &str, rows: &[Pending]) -> Result<bool, String> {
+    let headers = [format!("Authorization: {auth}"), "Content-Type: application/json".into(), "x-langfuse-ingestion-version: 4".into()];
+    let r = source::send(&format!("{base}/api/public/otel/v1/traces"), &headers, Some(&batch(rows).to_string())).map_err(|(e, _)| e)?;
+    match r.status {
+        200 => Ok(true),
+        s if (400..500).contains(&s) && s != 429 => Ok(false),
+        s => Err(format!("HTTP {s}")),
+    }
+}
+
+/// One pass: sends the oldest rows. An accepted request removes its rows from the outbox. A refused request is
+/// retried row by row in the same pass and only the refused rows become export gaps. Anything else keeps the rows
+/// for the next pass under the same span IDs.
 pub fn pass(store: &Store, base: &str, auth: &str, now: i64) -> Result<(), String> {
     let rows = store.outbox(BATCH).map_err(|e| format!("store {e:?}"))?;
     if rows.is_empty() {
         return Ok(());
     }
-    let headers = [format!("Authorization: {auth}"), "Content-Type: application/json".into()];
-    let r = source::send(&format!("{base}/api/public/ingestion"), &headers, Some(&batch(&rows).to_string())).map_err(|(e, _)| e)?;
-    if !matches!(r.status, 200 | 207) {
-        return Err(format!("HTTP {}", r.status));
-    }
-    let ids = |k: &str| -> HashMap<String, u64> {
-        r.body[k].as_array().into_iter().flatten().filter_map(|x| Some((x["id"].as_str()?.to_string(), x["status"].as_u64().unwrap_or(0)))).collect()
-    };
-    let (ok, failed) = (ids("successes"), ids("errors"));
     let (mut sent, mut refused) = (vec![], vec![]);
-    for row in &rows {
-        let id = observation(row);
-        match failed.get(&id) {
-            Some(s) if (400..500).contains(s) && *s != 429 => refused.push(row.id),
-            Some(_) => {}
-            None if ok.contains_key(&id) => sent.push(row.id),
-            // neither confirmed nor refused: unknown, kept
-            None => {}
+    let mut err = None;
+    if post(base, auth, &rows)? {
+        sent = rows.iter().map(|r| r.id).collect();
+    } else {
+        for row in &rows {
+            match post(base, auth, std::slice::from_ref(row)) {
+                Ok(true) => sent.push(row.id),
+                Ok(false) => refused.push(row.id),
+                Err(e) => err = Some(e),
+            }
         }
     }
     store.exported(&sent, &refused, now).map_err(|e| format!("store {e:?}"))?;
-    match rows.len() - sent.len() - refused.len() {
-        0 => Ok(()),
-        n => Err(format!("{n} events not confirmed")),
+    match (rows.len() - sent.len() - refused.len(), err) {
+        (0, _) => Ok(()),
+        (n, e) => Err(format!("{n} events not confirmed{}", e.map(|e| format!(" ({e})")).unwrap_or_default())),
     }
 }
 
@@ -103,6 +115,7 @@ pub fn status(store: Option<&Store>, last: &Last, configured: bool, now: u64) ->
 mod tests {
     use super::*;
     use crate::store::{Event, Installation, Kind, LIMITS, Outcome};
+    use std::collections::HashMap;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
@@ -111,7 +124,8 @@ mod tests {
     const SECRET: &str = "sk-lf-SECRET";
 
     /// Recorded ingestion stub (PM: no Docker stacks): stores exact request bodies and upserts observations by
-    /// ID like Langfuse. `plan` answers each request in turn: `ok`, `lost` (stored, then 500), `500`, `refuse <id>`.
+    /// span ID like the live readback showed. `plan` answers each request in turn: `ok`, `lost` (stored, then 500),
+    /// `500`, `refuse <id>` (400 for a request containing that DashQ ID, else ok).
     struct Stub {
         base: String,
         bodies: Arc<Mutex<Vec<String>>>,
@@ -142,25 +156,27 @@ mod tests {
                 let body = String::from_utf8(body).unwrap();
                 b.lock().unwrap().push(body.clone());
                 let doc: Value = serde_json::from_str(&body).unwrap();
-                let (mut ok, mut err) = (vec![], vec![]);
-                for e in doc["batch"].as_array().unwrap() {
-                    let id = e["body"]["id"].as_str().unwrap().to_string();
-                    if step.strip_prefix("refuse ") == Some(id.as_str()) {
-                        err.push(json!({"id": id, "status": 400, "message": "invalid"}));
-                    } else if step != "500" {
-                        o.lock().unwrap().insert(id.clone(), e["body"].clone());
-                        ok.push(json!({"id": id, "status": 201}));
-                    }
+                let spans = doc["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap().clone();
+                let refused = step.strip_prefix("refuse ").is_some_and(|x| spans.iter().any(|sp| meta(sp, "dashq.id") == Some(x.to_string())));
+                if !refused && step != "500" {
+                    o.lock().unwrap().extend(spans.into_iter().map(|sp| (sp["spanId"].as_str().unwrap().to_string(), sp)));
                 }
-                let (status, reply) = match step {
-                    "500" | "lost" => ("500 Internal Server Error", "{}".to_string()),
-                    _ => ("207 Multi-Status", json!({"successes": ok, "errors": err}).to_string()),
+                let status = match step {
+                    "500" | "lost" => "500 Internal Server Error",
+                    _ if refused => "400 Bad Request",
+                    _ => "200 OK",
                 };
+                let reply = "{}";
                 let mut s = s;
                 let _ = write!(s, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{reply}", reply.len());
             }
         });
         Stub { base, bodies, observations }
+    }
+
+    fn meta(span: &Value, key: &str) -> Option<String> {
+        let k = format!("langfuse.observation.metadata.{key}");
+        span["attributes"].as_array()?.iter().find(|a| a["key"] == k.as_str())?["value"]["stringValue"].as_str().map(String::from)
     }
 
     fn store(name: &str) -> Store {
@@ -198,30 +214,74 @@ mod tests {
         let snap = Event { id: "s1", schema: "agentq-snapshot/1", observed: NOW, kind: Kind::Snapshot, payload: "{}" };
         assert_eq!(s.accept(b"v1", &[snap], NOW).unwrap(), [Outcome::Accepted]);
 
-        let lf = stub(vec!["500", "lost", "refuse inst-1:1:r2", "ok"]);
+        let lf = stub(vec!["500", "lost", "refuse inst-1:1:r2", "refuse inst-1:1:r2", "refuse inst-1:1:r2"]);
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Err("HTTP 500".into()));
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Err("HTTP 500".into()));
         assert_eq!(s.export_counts().unwrap(), (2, 0));
-        // the reply was lost after Langfuse stored both; the retry sends the same IDs and r2 is refused for good
+        // the reply was lost after Langfuse stored both; the retry's batch is refused, so each row goes alone:
+        // r1 re-sends the same span, r2 is refused for good
         assert_eq!(pass(&s, &lf.base, &auth, NOW), Ok(()));
         assert_eq!(s.export_counts().unwrap(), (0, 1));
         assert_eq!(s.project(crate::store::Scope::All).unwrap()[0].export_gap, 1);
 
         let bodies = lf.bodies.lock().unwrap();
-        let ids = |b: &str| serde_json::from_str::<Value>(b).unwrap()["batch"].as_array().unwrap().iter().map(|e| e["body"]["id"].as_str().unwrap().to_string()).collect::<Vec<_>>();
-        assert_eq!(bodies.len(), 3);
-        assert!(bodies.iter().all(|b| ids(b) == ["inst-1:1:r1", "inst-1:1:r2"]));
+        let ids = |b: &str| serde_json::from_str::<Value>(b).unwrap()["resourceSpans"][0]["scopeSpans"][0]["spans"].as_array().unwrap().iter().map(|sp| meta(sp, "dashq.id").unwrap()).collect::<Vec<_>>();
+        assert_eq!(bodies.iter().map(|b| ids(b)).collect::<Vec<_>>(), [&["inst-1:1:r1", "inst-1:1:r2"][..], &["inst-1:1:r1", "inst-1:1:r2"], &["inst-1:1:r1", "inst-1:1:r2"], &["inst-1:1:r1"], &["inst-1:1:r2"]]);
         // credentials travel only in the Authorization header, never in a forwarded body
         assert!(bodies.iter().all(|b| !b.contains(SECRET) && !b.contains("Basic")));
-        // readback: one observation per event despite three deliveries, producer time and event ID kept
+        // readback: one span per event despite three deliveries of r1, producer time and event ID kept
         let obs = lf.observations.lock().unwrap();
-        let r1 = &obs["inst-1:1:r1"];
         assert_eq!(obs.len(), 2);
-        assert_eq!((r1["name"].as_str(), r1["startTime"].as_str()), (Some("agentq.run"), Some(source::iso(NOW as u64 - 30).as_str())));
-        assert_eq!((r1["metadata"]["dashq.event_id"].as_str(), r1["metadata"]["runner"].as_str()), (Some("r1"), Some("cargo test")));
+        let r1 = obs.values().find(|sp| meta(sp, "dashq.event_id").as_deref() == Some("r1")).unwrap();
+        assert_eq!((r1["name"].as_str(), r1["startTimeUnixNano"].as_str()), (Some("agentq.run"), Some(((NOW as u64 - 30) * 1_000_000_000).to_string().as_str())));
+        assert_eq!((meta(r1, "runner").as_deref(), meta(r1, "exit").as_deref()), (Some("cargo test"), Some("0")));
         // a replayed ingest of a forwarded event is the same receipt, never a second export
         assert_eq!(s.accept(b"v1", &[event("r1", run)], NOW).unwrap(), [Outcome::Accepted]);
         assert_eq!(s.export_counts().unwrap(), (0, 1));
+    }
+
+    /// Chain A3 live: the exact forwarder against a real Langfuse v4 project. Each event is delivered twice (a lost
+    /// reply, then the confirming pass) and must read back as one observation. Opt-in, tagged `test: dashq#37`:
+    /// `DASHQ_LIVE_LANGFUSE=https://<host> LANGFUSE_PUBLIC_KEY=.. LANGFUSE_SECRET_KEY=.. cargo test -- --ignored live`
+    #[test]
+    #[ignore]
+    fn live_langfuse_readback_is_idempotent() {
+        let env = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} unset"));
+        let base = env("DASHQ_LIVE_LANGFUSE");
+        let auth = format!("Basic {}", crate::base64(format!("{}:{}", env("LANGFUSE_PUBLIC_KEY"), env("LANGFUSE_SECRET_KEY")).as_bytes()));
+        let s = store("live");
+        let now = source::now() as i64;
+        let id = |n: &str| &*Box::leak(format!("live-{now}-{n}").into_boxed_str());
+        let payload = r#"{"name":"agentq.run","metadata":{"test":"dashq#37","runner":"live"}}"#;
+        let evs: Vec<Event> = ["a", "b"].iter().map(|n| Event { id: id(n), schema: SCHEMA, observed: now - 30, kind: Kind::Export, payload }).collect();
+        assert!(s.accept(b"v1", &evs, now).unwrap().iter().all(|o| *o == Outcome::Accepted));
+        let rows = s.outbox(BATCH).unwrap();
+        assert_eq!(post(&base, &auth, &rows), Ok(true), "first delivery, reply treated as lost");
+        assert_eq!(pass(&s, &base, &auth, now), Ok(()));
+        assert_eq!(s.export_counts().unwrap(), (0, 0));
+        let headers = [format!("Authorization: {auth}")];
+        let read = |r: &Pending| {
+            let url = format!("{base}/api/public/v2/observations?traceId={}&fields=core,basic,metadata", span_ids(r).0);
+            source::get(&url, &headers).map_err(|e| e.0).unwrap().body["data"].as_array().cloned().unwrap_or_default()
+        };
+        // ingestion is queued: wait for both, then once more so a late duplicate would show
+        let mut found = vec![];
+        for _ in 0..24 {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            found = rows.iter().map(read).collect();
+            if found.iter().all(|f| !f.is_empty()) {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                found = rows.iter().map(read).collect();
+                break;
+            }
+        }
+        for (r, f) in rows.iter().zip(&found) {
+            assert_eq!(f.len(), 1, "{} read back {} observations", observation(r), f.len());
+            let (o, at) = (&f[0], source::iso(r.observed as u64));
+            assert_eq!((o["id"].as_str(), o["name"].as_str(), o["metadata"]["dashq.id"].as_str()), (Some(span_ids(r).1.as_str()), Some("agentq.run"), Some(observation(r).as_str())));
+            assert_eq!((o["metadata"]["test"].as_str(), o["startTime"].as_str().map(|t| t.starts_with(&at[..19]))), (Some("dashq#37"), Some(true)));
+            println!("readback {} -> span {} ok, 1 observation after 2 deliveries", observation(r), span_ids(r).1);
+        }
     }
 
     #[test]
@@ -234,11 +294,13 @@ mod tests {
         assert!(!valid(&json!({"name": "agentq.run", "extra": {}})));
     }
 
-    /// Distinct (installation, generation, event) triples never share a Langfuse observation ID.
+    /// Distinct (installation, generation, event) triples never share a DashQ ID or span.
     #[test]
     fn observation_ids_are_unambiguous() {
         let row = |i: &str, g: i64, e: &str| Pending { id: 0, installation: i.into(), generation: g, event_id: e.into(), observed: 0, payload: String::new() };
         assert_ne!(observation(&row("a-1", 1, "x")), observation(&row("a", 1, "1-x")));
         assert_eq!(observation(&row("a-1", 1, "x")), "a-1:1:x");
+        assert_ne!(span_ids(&row("a-1", 1, "x")), span_ids(&row("a", 1, "1-x")));
+        assert_eq!(span_ids(&row("a", 1, "x")).0.len(), 32);
     }
 }
