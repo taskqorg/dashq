@@ -34,7 +34,11 @@ impl Cache {
         if !s.snap.is_null() && now < s.next {
             return s.snap.clone();
         }
-        match read() {
+        let t0 = std::time::Instant::now();
+        let r = read();
+        // `langfuse:1800` is `read.langfuse` (D20)
+        crate::profile::record(&format!("read.{}", key.split(':').next().unwrap_or(key)), t0, r.as_ref().err().map(|e| e.0.as_str()));
+        match r {
             Ok((value, incomplete)) => {
                 s.snap = json!({"value": value, "at": now, "error": null, "incomplete": incomplete});
                 s.next = now + ttl;

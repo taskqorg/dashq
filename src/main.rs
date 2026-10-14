@@ -4,6 +4,7 @@ mod answer;
 mod data;
 mod enroll;
 mod page;
+mod profile;
 mod resource;
 mod source;
 #[allow(dead_code)] // export forwarding, backup and restore use the rest
@@ -20,7 +21,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -181,13 +182,16 @@ impl App {
             }
             (lf.join().unwrap_or(Value::Null), boards, releases, taskq)
         });
+        let t0 = std::time::Instant::now();
+        let serverq = source::serverq(&c.serverq_report);
+        profile::record("read.serverq", t0, serverq["error"].as_str());
         let host = filters["host"].as_str().map(String::from);
         // committed snapshots never wait for or depend on the optional sources above (D11)
         let projection = enroll::projection(&self.enroll, scope, host.as_deref(), now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
         let mut doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
-            "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": source::serverq(&c.serverq_report), "enrolled_resources": enrolled,
+            "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
         }));
         if let Some(p) = projection {
             doc["sources"]["enrollment"] = p["source"].clone();
@@ -255,14 +259,24 @@ fn handle(app: &App, mut s: TcpStream) {
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
     let c = &app.cfg;
     let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
-    if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
-        return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
-    }
-    if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
-        return respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
-    }
-    let (status, ctype, body) = route(app, method, path, query, actor(host.as_deref(), &app.cfg.public_host, get(enroll::SUBJECT)));
-    respond(&mut s, status, ctype, &body);
+    let t0 = std::time::Instant::now();
+    let (op, status) = if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.answer", x.status)
+    } else if let Some(x) = enroll::route(&app.enroll, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.enroll", x.status)
+    } else {
+        let (status, ctype, body) = route(app, method, path, query, actor(host.as_deref(), &app.cfg.public_host, get(enroll::SUBJECT)));
+        respond(&mut s, status, ctype, &body);
+        (match path {
+            "/" => "http.page",
+            "/data" => "http.data",
+            _ => return, // assets and 404 are not measured
+        }, status)
+    };
+    // page and API latency (D20): a 5xx is a failure named by its code, a 4xx is the caller's
+    profile::record(op, t0, status.starts_with('5').then(|| status.split(' ').next().unwrap_or("5xx")));
 }
 
 /// Whose installations a page request sees (D11): a request through the public name only its verified subject's
@@ -317,6 +331,7 @@ fn serve(t: &Tool, service: bool) -> ! {
         });
     }
     let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
+    profile::open(&dir);
     let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
@@ -443,6 +458,7 @@ fn main() {
             let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
             // the host administrator's local report sees every installation (D11), like a loopback page request
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            profile::open(&dir);
             let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
             println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
@@ -456,11 +472,25 @@ fn main() {
             enroll::Enroll::answerer(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
             println!("answerer: {subject} {op} in {workspace}");
         }
+        ["profile", rest @ ..] => {
+            let window = match rest {
+                [] => 86400,
+                [w] => w.strip_prefix("--window=").and_then(|w| w.parse().ok()).filter(|w| *w > 0).unwrap_or_else(|| t.die(USAGE)),
+                _ => t.die(USAGE),
+            };
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let text = std::fs::read_to_string(profile::path(&dir)).ok();
+            println!("{}", profile::report(text.as_deref(), source::now(), window));
+        }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
         ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
         ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => {
             let check = !rest.is_empty();
+            profile::open(&config_path(&t).parent().map(PathBuf::from).unwrap_or_default());
+            let t0 = std::time::Instant::now();
             let r = coreq::update::update(&t, check);
+            // coreq's error text may name hosts or files: only the outcome is recorded
+            profile::record(if check { "update.check" } else { "update" }, t0, r.as_ref().err().map(|_| "failed"));
             let u = coreq::service::unit(&t, std::path::Path::new("."), "dashq");
             let restart = restarts(&r, check, u.path.exists());
             match r {
@@ -470,7 +500,10 @@ fn main() {
             }
             // the running service keeps the old release until its unit is reloaded (#83)
             if restart {
-                coreq::service::run_all(&u.unload, true).and_then(|_| coreq::service::run_all(&u.load, false)).unwrap_or_else(|e| t.die(&format!("restart: {e}")));
+                let t0 = std::time::Instant::now();
+                let r = coreq::service::run_all(&u.unload, true).and_then(|_| coreq::service::run_all(&u.load, false));
+                profile::record("restart", t0, r.as_ref().err().map(|_| "failed"));
+                r.unwrap_or_else(|e| t.die(&format!("restart: {e}")));
                 println!("service restart: ok ({})", u.path.display());
             }
         }
