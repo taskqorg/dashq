@@ -32,7 +32,14 @@
          "service": {"state": "stopped"}, "update": {"available": null, "error": false}, "engines": {}, "queue": {}}}},
       {"installation": "inst-s1", "product": "serverq", "runtime": "native", "host_label": "fra", "workspace": "ws-1", "generation": 1, "connection": "active",
        "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
-       "snapshot": {"event_id": "snap-s1", "schema": "serverq-report/1", "payload": {"findings": 0, "version": "1.0.0"}}}
+       "snapshot": {"event_id": "snap-s1", "schema": "serverq-report/1", "payload": {"findings": 0, "version": "1.0.0"}}},
+      {"installation": "inst-t1", "product": "taskq", "runtime": "native", "host_label": "win", "workspace": "ws-1", "generation": 1, "connection": "active",
+       "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
+       "snapshot": {"event_id": "snap-t1", "schema": "taskq-board/1", "payload": {"schema": 1, "installation": "inst-t1", "board": {"kind": "github", "host": "github.com", "repo": "taskqorg/taskq"},
+         "observed": 1791875100, "complete": true, "reason": null, "totals": {"doing": 1, "ask": 0}, "tasks": [{"n": 7, "state": "doing", "revision": 3, "choices": []}]}}},
+      {"installation": "inst-t2", "product": "taskq", "runtime": "native", "host_label": "win", "workspace": "ws-2", "generation": 1, "connection": "active",
+       "observation": {"state": "ok", "at": 1791875100, "age_s": 39, "reason": null, "incomplete": false},
+       "snapshot": {"event_id": "snap-t2", "schema": "taskq-board/2", "payload": {"schema": 2}}}
     ]
   },
   "cases": {
@@ -44,6 +51,8 @@
     "stale status in fresh snapshot": {"installation": "inst-relay", "expect": {"/observation/state": "stale", "/observation/at": 1791860000, "/running/last_known": true, "/update/state": "unknown", "/update/reason": "observation not current"}},
     "service not running": {"installation": "inst-stop", "expect": {"/observation/state": "unknown", "/observation/reason": "service stopped", "/running/version": "0.4.16", "/running/last_known": true, "/update/state": "unknown"}},
     "unsupported": {"installation": "inst-s1", "expect": {"/product": "serverq", "/provenance": "unsupported", "/running/version": null, "/reason": "unsupported snapshot schema serverq-report/1", "/release/reason": "release source not configured"}},
+    "taskq board": {"installation": "inst-t1", "expect": {"/product": "taskq", "/provenance": "enrollment", "/running/version": null, "/gaps/0": "running", "/observation/state": "ok"}},
+    "unknown taskq schema": {"installation": "inst-t2", "expect": {"/provenance": "unsupported", "/reason": "unsupported snapshot schema taskq-board/2"}},
     "mixed-version": {"installation": null, "expect": {"/mixed/0/product": "agentq", "/mixed/0/running": ["0.4.0", "0.4.10", "0.4.16", "0.5.0"], "/mixed/1/product": "taskq", "/mixed/1/running": ["4.1.2", "4.2.0"]}}
   }
 }

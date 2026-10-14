@@ -31,12 +31,13 @@ pub const STALE_SECS: u64 = 180;
 pub const SERVERQ_STALE_SECS: u64 = 7200;
 
 /// Snapshots a dashboard view renders: only these receipts become `projected` (C4). Installations renders every
-/// `agentq-snapshot/1`; Server checks renders only the ServerQ payload shape data.rs `serverq_enrolled` accepts,
-/// anything else reads unknown there and stays `accepted`.
+/// `agentq-snapshot/1` and the TaskQ board summary of a schema 1 `taskq-board/1`; Server checks renders only the
+/// ServerQ payload shape data.rs `serverq_enrolled` accepts, anything else reads unknown there and stays `accepted`.
 pub fn renders(product: &str, s: &store::Snapshot) -> bool {
     match (product, s.schema.as_str()) {
         ("agentq", "agentq-snapshot/1") => true,
         ("serverq", "serverq-report/1") => serverq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
+        ("taskq", "taskq-board/1") => taskq_payload(&serde_json::from_str(&s.payload).unwrap_or(Value::Null)),
         _ => false,
     }
 }
@@ -44,6 +45,11 @@ pub fn renders(product: &str, s: &store::Snapshot) -> bool {
 /// serverq.md § 3 projection, schema 1: the only ServerQ payload Server checks renders.
 pub fn serverq_payload(p: &Value) -> bool {
     p["schema"] == 1 && p["product"] == "serverq" && p["rules"].is_object()
+}
+
+/// taskq enrollment.md Observation, schema 1: the only TaskQ payload Connections renders as a board summary.
+pub fn taskq_payload(p: &Value) -> bool {
+    p["schema"] == 1 && p["board"]["repo"].is_string() && p["tasks"].is_array()
 }
 
 /// Producer-time freshness limit of a snapshot schema.
@@ -1577,6 +1583,36 @@ mod tests {
         let cred = machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
         assert_eq!(machine(e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
         cred
+    }
+
+    /// Enrollment E1/E6 for TaskQ (#125): a schema 1 `taskq-board/1` observation is a supported versions row, its board
+    /// summary renders in Connections and its receipt reads `projected`; another payload schema stays `accepted` and
+    /// its versions row unsupported.
+    #[test]
+    fn taskq_board_snapshots_render_and_unknown_schemas_stay_unsupported() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("taskq");
+        let schema = "taskq-board/1";
+        let good = join(&e, "taskq", "tq-win", "native", "win", schema, now);
+        let v2 = join(&e, "taskq", "tq-v2", "native", "other", schema, now);
+        let board = json!({"kind": "github", "host": "github.com", "repo": "taskqorg/taskq"});
+        for (cred, id, payload) in [
+            (&good, "b-1", json!({"schema": 1, "installation": "tq-win", "board": board, "observed": now, "complete": true, "reason": null, "totals": {"doing": 2, "ask": 1}, "tasks": [{"n": 7, "state": "doing", "revision": 3, "choices": []}]})),
+            (&v2, "b-2", json!({"schema": 2, "board": board, "tasks": []})),
+        ] {
+            let (s, v) = ingest(&e, cred, vec![json!({"schema": schema, "event_id": id, "observed_at": now, "payload": payload})], now);
+            assert_eq!((s, states(&v)), (200, vec!["accepted".to_string()]), "{v}");
+        }
+        let app = app(e, None);
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let receipt = |cred: &str, id: &str| machine(&app.enroll, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), now).1["state"].clone();
+        assert_eq!((receipt(&good, "b-1"), receipt(&v2, "b-2")), (json!("projected"), json!("accepted")));
+        let ver = |inst: &str| doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap().clone();
+        assert_eq!((ver("tq-win")["provenance"].as_str(), ver("tq-win")["observation"]["state"].as_str(), ver("tq-win")["reason"].as_str()), (Some("enrollment"), Some("ok"), None));
+        assert_eq!(ver("tq-v2")["provenance"], "unsupported");
+        let html = crate::page::render(&doc, &json!({}));
+        assert!(html.contains("Board github:github.com/taskqorg/taskq · doing 2 · ask 1 · 1 tasks observed"), "board summary");
     }
 
     /// A ServerQ projection fixture (serverq.md § 3) moved so its report time is `at`; every time keeps its offset.

@@ -14,6 +14,8 @@ fn gaps(product: &str, provenance: &str) -> &'static [&'static str] {
     match provenance {
         // serverq.md § 3 projection: version and report time only
         "enrollment" if product == "serverq" => &["selected", "health", "lifecycle", "coreq", "engines", "queue"],
+        // taskq enrollment.md Observation: board projection only, no version or service state
+        "enrollment" if product == "taskq" => &["running", "selected", "health", "lifecycle", "coreq", "engines", "queue"],
         // agentq#101 snapshot: version, status_at, service.state, update.{available,error}, engines, queue
         "enrollment" => &["selected", "health", "lifecycle", "coreq"],
         // agentq.md § 6 events: agentq.version and time only
@@ -159,14 +161,14 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
         let schema = match product {
             "agentq" => "agentq-snapshot/1",
             "serverq" => "serverq-report/1",
+            "taskq" => "taskq-board/1",
             _ => "",
         };
         let ok = !schema.is_empty() && (r["snapshot"].is_null() || (r["snapshot"]["schema"] == schema && p["schema"] == 1));
-        let serverq = product == "serverq";
         let prov = if ok { "enrollment" } else { "unsupported" };
         // a fresh snapshot may carry an old status: status_at dates the versions, and a service that is not
         // running leaves its version last known (V2)
-        if ok && !serverq && !r["snapshot"].is_null() && obs["state"] == "ok" {
+        if ok && product == "agentq" && !r["snapshot"].is_null() && obs["state"] == "ok" {
             obs = match p["status_at"].as_u64() {
                 Some(t) => source(
                     &json!({"value": true, "at": t.min(obs["at"].as_u64().unwrap_or(t))}),

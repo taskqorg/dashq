@@ -403,6 +403,15 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
                 let _ = writeln!(w, "<p class=\"detail\">Resource history unavailable · trends need 3 real samples. CPU unknown until a real baseline arrives.</p>");
             }
         }
+        let p = &r["snapshot"]["payload"];
+        if r["product"] == "taskq" && !revoked && crate::enroll::taskq_payload(p) {
+            let b = &p["board"];
+            let totals = match p["totals"].as_object() {
+                Some(t) if p["complete"] == true => t.iter().map(|(k, v)| format!("{} {}", esc(k), num(v, &json!({"reason": "not reported"})))).collect::<Vec<_>>().join(" · "),
+                _ => format!("Totals unknown · {}", p["reason"].as_str().map(esc).unwrap_or_else(|| "incomplete".into())),
+            };
+            let _ = writeln!(w, "<p>Board {}:{}/{} · {totals} · {} tasks observed</p>", text(&b["kind"]), text(&b["host"]), text(&b["repo"]), p["tasks"].as_array().map_or(0, Vec::len));
+        }
         let x = &r["export"];
         let export = match x["state"].as_str() {
             Some("gap") => format!("gap · {}", text(&x["reason"])),
