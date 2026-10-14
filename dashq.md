@@ -165,3 +165,7 @@ Accepted target: [finding tasks H1–H5](docs/design/finding-tasks.md) narrowly 
 ## D16. AgentQ integration settings
 
 Accepted target: [client integration G1–G4](docs/design/agentq-settings.md) adds a separately authorized typed AgentQ configuration adapter to D1/D2. AgentQ owns discovery, plans, revision checks, journaled apply, readback and native-client verification; DashQ supplies scoped presentation and delivery. Observation credentials and `/answer` gain no authority. Release remains gated by real host and consumer qualification.
+
+## D17. AgentQ optimization results
+
+Accepted target: [optimization results P1–P3](docs/design/optimization-results.md) refines D8.4 with AgentQ-owned accounting definitions, honest coverage and a separate paired-experiment view. Read-only; it adds no configuration authority, optimizer or experiment runner. Existing metadata/privacy and source-failure rules remain.
