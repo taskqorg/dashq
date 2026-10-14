@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const PERIODS: [u64; 3] = [1800, 7200, 86400];
 pub const AGENTS: [(&str, &str); 3] = [("codex", "Codex"), ("claude-code", "Claude Code"), ("hermes", "Hermes")];
+/// Open TaskQ states in counter order (TaskQ task-counters.md); `waiting` is shown as Blocked, Closed follows.
+pub const COUNTS: [&str; 7] = ["doing", "review", "ask", "failed", "ready", "waiting", "later"];
 const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
@@ -650,6 +652,12 @@ pub fn build(inp: &Value) -> Value {
             "in_work": issues.map(|_| json!(with(&["q-doing", "q-review"]).unwrap().len())), "waiting": count(&["q-ask"]), "ready": count(&["q-ready"]),
             "questions": list(&["q-ask"]), "failed": list(&["q-failed"]), "attempts": attempts, "latest": latest(repo),
         });
+        // TaskQ counter order (task-counters.md); `waiting` is Blocked; Closed has no authoritative total yet: unknown
+        let mut counts = json!({"closed": null});
+        for k in COUNTS {
+            counts[k] = count(&[&format!("q-{k}")]);
+        }
+        board["counts"] = counts;
         // taskq-snapshot (adapters.md S3 R1) replaces counts, questions and failures when configured; heartbeats stay
         if let Some(ts) = inp["taskq"].get(repo) {
             let tsrc = source(ts, now, GITHUB_LIMIT, None);
@@ -662,6 +670,9 @@ pub fn build(inp: &Value) -> Value {
             board["in_work"] = total(&["doing", "review"]);
             board["waiting"] = total(&["ask"]);
             board["ready"] = total(&["ready"]);
+            for k in COUNTS {
+                board["counts"][k] = total(&[k]);
+            }
             board["questions"] = pick(&|t| t["state"] == "ask" || (t["state"] == "review" && t["question"].is_object()), &question);
             board["failed"] = pick(&|t| t["state"] == "failed", &|t| json!({"number": t["n"], "title": t["title"], "url": t["url"], "reason": t["failed"]}));
         }

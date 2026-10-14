@@ -133,6 +133,8 @@ Approved design; not implemented by this specification change. Apply [shared das
 
 Still unresolved: production warning thresholds, collection/retention qualification and Attention grouping depth for multiple real incidents. Demo host capacities, filesystem names, freshness and 85/90% thresholds are invented examples, not approved inventory or policy. Do not fabricate data while these remain unavailable.
 
+- Implemented (#76): Attention (current problems; gaps and history on demand) above `Servers` and `Boards`, side by side above 60 em and one column below. Each node row: identity, sample age, a Work mode entry naming its missing TaskQ policy adapter, CPU and RAM 30 min lines on 0–100 % (none from fewer than two connected samples), RAM and per-filesystem bars, pp change from the previous sample. Boards: `/data` `boards[].counts` in TaskQ counter order (zero hidden, unknown `?`, Closed unknown), the pinned provider Board asset, questions read-only with one open. Refresh tints changed values for 1.3 s (none under reduced motion), keeps disclosures, focus, scroll and skips while text is selected. Counter tokens approximate the parent until TaskQ releases its blocks (#43, #46). Evidence: [1024/16 light](docs/design/evidence/first-screen-1024-16-light.png), [360/20 dark](docs/design/evidence/first-screen-360-20-dark.png).
+
 Acceptance: review the first viewport and deeper content with representative live data, missing history, warnings and long labels; verify readable large text, both themes, reduced motion and multiple automatic refreshes. Record which data and UI requirements are implemented, unverified or blocked by a source gap.
 
 ## D12. Security

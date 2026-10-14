@@ -62,45 +62,6 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-/// Questions read only (S3, S7): text, then the source choices with `k`; ★ marks the recommendation. No answer control.
-fn questions(b: &Value) -> String {
-    let v: Vec<String> = b["questions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|q| {
-            let mut out = issue(q);
-            if q["state"] == "review" {
-                out += " <span class=\"s unknown\">review</span>";
-            }
-            if let Some(t) = q["text"].as_str() {
-                let _ = write!(out, "<br><span class=\"detail\">{}</span>", esc(t));
-            }
-            let choices: Vec<String> = q["choices"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|c| format!("<li value=\"{}\">{}{}</li>", text(&c["k"]), text(&c["text"]), if q["recommended"] == c["k"] { " <span aria-label=\"recommended\">★</span>" } else { "" }))
-                .collect();
-            if !choices.is_empty() {
-                let _ = write!(out, "<ol class=\"choices\">{}</ol>", choices.join(""));
-            }
-            out
-        })
-        .collect();
-    if v.is_empty() { "—".into() } else { v.join("<br>") }
-}
-
-fn failures(b: &Value) -> String {
-    let v: Vec<String> = b["failed"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|i| format!("{}{}", issue(i), i["reason"].as_str().filter(|r| !r.is_empty()).map(|r| format!("<br><span class=\"detail\">{}</span>", esc(r))).unwrap_or_default()))
-        .collect();
-    if v.is_empty() { "—".into() } else { v.join("<br>") }
-}
-
 /// `links`: `{traces, dashboards}` Langfuse project URLs.
 pub fn render(doc: &Value, links: &Value) -> String {
     let now = doc["generated_at"].as_u64().unwrap_or(0);
@@ -153,10 +114,14 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = writeln!(w, "<section id=\"attention\">\n<h2>Attention</h2>");
     for (key, title) in [("current", "Current problems"), ("gaps", "Observation gaps"), ("incidents", "Incident history (24 h, deduplicated)")] {
         let items = att[key].as_array().cloned().unwrap_or_default();
-        let _ = writeln!(w, "<h3>{title}</h3>");
+        // incident history is history, not a current problem: on demand (D10 last)
+        // compact (D10): current problems stay open; gaps and history are counted and open on demand
+        let n = if items.is_empty() { String::new() } else { format!(" ({})", items.len()) };
+        let (open, close, end) = if key == "current" { ("<h3>".to_string(), "</h3>", "") } else { (format!("<details id=\"attention-{key}\"><summary>"), "</summary>", "</details>") };
+        let _ = writeln!(w, "{open}{title}{n}{close}");
         if items.is_empty() {
             let none = if att["source"]["state"] == "ok" || key == "incidents" { "None observed." } else { "None observed; some sources are not ok (above)." };
-            let _ = writeln!(w, "<p class=\"note\">{none}</p>");
+            let _ = writeln!(w, "<p class=\"note\">{none}</p>{end}");
             continue;
         }
         let _ = writeln!(w, "<ul class=\"items\">");
@@ -168,18 +133,19 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 let _ = write!(line, " · {} occurrences", text(&i["occurrences"]));
             }
             if let Some(d) = i["detail"].as_str().filter(|d| !d.is_empty()) {
-                let _ = write!(line, "<br><span class=\"detail\">{}</span>", esc(d));
+                let _ = write!(line, " <span class=\"detail\">— {}</span>", esc(d));
             }
             if let Some(nf) = i["native_failure"].as_object() {
                 let fields: Vec<String> = nf.iter().map(|(k, v)| format!("{k} {}", if v.is_null() { "unknown".into() } else { text(v) })).collect();
-                let _ = write!(line, "<br><span class=\"detail\">Last native failure receipt (at snapshot time, not a countdown): {}</span>", fields.join(" · "));
+                let _ = write!(line, "<details><summary>Last native failure receipt</summary><span class=\"detail\">At snapshot time, not a countdown: {}</span></details>", fields.join(" · "));
             }
             let _ = writeln!(w, "{line}{}{link}</li>", trace(&i["trace_id"], base));
         }
-        let _ = writeln!(w, "</ul>");
+        let _ = writeln!(w, "</ul>{end}");
     }
     let _ = writeln!(w, "</section>");
 
+    first(w, doc, now);
     installations(w, &doc["installations"], now);
     integrations(w, &doc["installations"]);
     resources(w, &doc["resources"], now);
@@ -232,28 +198,6 @@ pub fn render(doc: &Value, links: &Value) -> String {
         let _ = writeln!(w, "</table>");
     }
     let _ = writeln!(w, "</section>");
-
-    // 3. Boards
-    let _ = writeln!(w, "<section id=\"boards\">\n<h2>Boards</h2>");
-    let _ = writeln!(w, "<table>\n<tr><th>Project</th><th>Tasks</th><th>Questions</th><th>Failed</th><th>Live attempts</th></tr>");
-    for b in doc["boards"].as_array().into_iter().flatten() {
-        let src = &b["source"];
-        let attempts: Vec<String> = b["attempts"].as_array().into_iter().flatten().map(|a| format!("{}: #{} {}", text(&a["host"]), text(&a["task"]), text(&a["attempt"]))).collect();
-        let _ = writeln!(
-            w,
-            "<tr><td><a href=\"{}\">{}</a>{}</td><td>In work {} · Waiting for answer {} · Ready {}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            esc(b["url"].as_str().unwrap_or("")),
-            text(&b["project"]),
-            unknown_line(src),
-            num(&b["in_work"], src),
-            num(&b["waiting"], src),
-            num(&b["ready"], src),
-            questions(b),
-            failures(b),
-            if attempts.is_empty() { "—".into() } else { attempts.join("<br>") }
-        );
-    }
-    let _ = writeln!(w, "</table>\n</section>");
 
     // 4. Agents
     let ag = &doc["agents"];
@@ -566,6 +510,216 @@ fn integrations(w: &mut String, inst: &Value) {
     let _ = writeln!(w, "<p class=\"detail\">AgentQ owns integrations. Client login, model and approval policy stay with the client.</p>\n</section>");
 }
 
+/// Trend window of the server grid (overview.md: 30 min on a shared 0–100 % scale), whatever the period.
+const TREND: u64 = 1800;
+/// TaskQ provider Board asset at the pinned design revision (first-screen-reference.sources.json).
+const GITHUB: &str = include_str!("../assets/github.svg");
+
+fn pct(used: &Value, total: &Value) -> Option<f64> {
+    used.as_f64().zip(total.as_f64().filter(|t| *t > 0.0)).map(|(u, t)| u / t * 100.0)
+}
+
+/// A current value with an `id` and `data-n` so a refresh can tint what changed, plus its percentage-point change
+/// from the previous sample.
+fn value(id: &str, shown: &str, now: Option<f64>, prev: Option<f64>) -> String {
+    let d = match now.zip(prev).map(|(a, b)| a - b) {
+        Some(d) if d.abs() >= 0.05 => format!(" <small class=\"d\" title=\"change since the previous sample\">{}{:.1} pp</small>", if d > 0.0 { "+" } else { "−" }, d.abs()),
+        _ => String::new(),
+    };
+    format!("<span class=\"v\" id=\"{id}\" data-n=\"{}\">{shown}</span>{d}", now.map_or("".into(), |n| format!("{n:.1}")))
+}
+
+/// Capacity bar on 0–100 %; SVG geometry, not inline style (CSP).
+fn bar(p: Option<f64>) -> String {
+    p.map_or(String::new(), |p| format!("<svg class=\"cap\" viewBox=\"0 0 100 6\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><rect width=\"100\" height=\"6\" rx=\"2\"/><rect class=\"fill\" width=\"{:.1}\" height=\"6\" rx=\"2\"/></svg>", p.clamp(0.0, 100.0)))
+}
+
+/// 30 min line on 0–100 %; a gap of more than two buckets, an unknown value or a reset breaks the line. Fewer than
+/// two connected samples draw nothing: no chart from a single reading.
+fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &str) -> String {
+    let from = to.saturating_sub(TREND);
+    let mut lines: Vec<Vec<(u64, f64)>> = vec![vec![]];
+    for p in points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from)) {
+        let at = p["at"].as_u64().unwrap();
+        let last = lines.last_mut().unwrap();
+        if last.last().is_some_and(|(a, _)| at - a > 2 * crate::resource::BUCKET) {
+            lines.push(vec![]);
+        }
+        match f(p) {
+            Some(v) => lines.last_mut().unwrap().push((at, v.clamp(0.0, 100.0))),
+            None => lines.push(vec![]),
+        }
+    }
+    let lines: Vec<String> = lines
+        .iter()
+        .filter(|l| l.len() > 1)
+        .map(|l| format!("<polyline points=\"{}\"/>", l.iter().map(|(a, v)| format!("{:.1},{:.1}", (a - from) as f64 / TREND as f64 * 120.0, 32.0 - v / 100.0 * 32.0)).collect::<Vec<_>>().join(" ")))
+        .collect();
+    if lines.is_empty() {
+        return "<span class=\"trend none\">no trend yet</span>".into();
+    }
+    format!("<svg class=\"trend\" viewBox=\"0 0 120 32\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"{label}, last 30 min, 0–100 %\">{}</svg>", lines.join(""))
+}
+
+/// The combined first screen (first-screen.md, D10): servers and Boards side by side, reflowing to one column.
+fn first(w: &mut String, doc: &Value, now: u64) {
+    let _ = writeln!(w, "<div class=\"first\">");
+    servers(w, &doc["resources"], now);
+    boards(w, doc["boards"].as_array().map_or(&[][..], Vec::as_slice));
+    let _ = writeln!(w, "</div>");
+}
+
+/// The shared host grid: identity and sample age, policy entry, CPU, RAM and every filesystem of one installation.
+fn servers(w: &mut String, res: &Value, now: u64) {
+    let rows = res["rows"].as_array().cloned().unwrap_or_default();
+    let _ = writeln!(w, "<section id=\"servers\">\n<h2>Servers</h2>");
+    if rows.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
+        return;
+    }
+    let to = res["to"].as_u64().unwrap_or(now);
+    let _ = writeln!(w, "<p class=\"note\">Trends: last 30 min, 0–100 %. Disks: current use. — unknown (hover for the reason).</p>");
+    let unk = |why: &Value| format!("<span class=\"unknown\" title=\"unknown: {}\">—</span>", esc(why.as_str().unwrap_or("not reported")));
+    for r in rows {
+        let inst = esc(r["installation"].as_str().unwrap_or(""));
+        let (src, c, h) = (&r["source"], &r["current"], &r["history"]);
+        let points = h["points"].as_array().map_or(&[][..], Vec::as_slice);
+        // the sample before the current one, for pp changes
+        let prev = points.len().checked_sub(2).map(|i| &points[i]).unwrap_or(&Value::Null);
+        let state = src["state"].as_str().unwrap_or("unknown");
+        let age = src["age_s"].as_u64().map_or("no sample".into(), |a| format!("{} old", dur(a)));
+        let warm = h["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default();
+        let _ = writeln!(
+            w,
+            "<article class=\"node\" id=\"node-{inst}\"><div class=\"who\"><b>{}</b> <small>{} · {}</small> {}{}{warm}<br><span class=\"policy detail\">Work mode: no TaskQ policy adapter</span></div>",
+            text(&r["host"]),
+            text(&r["runtime"]),
+            text(&r["provenance"]),
+            badge(state, &age),
+            src["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default()
+        );
+        let cpu = |s: &Value| s["cpu"]["percent"].as_f64();
+        let cpu_now = cpu(c);
+        let shown = cpu_now.map_or_else(|| unk(&c["cpu"]["reason"]), |p| format!("{p:.1} %"));
+        let _ = writeln!(w, "<div class=\"m\"><span class=\"k\">CPU</span> {}{}</div>", value(&format!("cpu-{inst}"), &shown, cpu_now, cpu(prev)), trend(points, to, &cpu, "CPU"));
+        let ram = |s: &Value| pct(&s["memory"]["used_bytes"], &s["memory"]["total_bytes"]);
+        let m = &c["memory"];
+        let shown = if m["used_bytes"].is_null() { unk(&m["reason"]) } else { format!("{} / {} GB · {:.0} %", gb(&m["used_bytes"]), gb(&m["total_bytes"]), ram(c).unwrap_or(0.0)) };
+        let _ = writeln!(w, "<div class=\"m\"><span class=\"k\">RAM</span> {}{}{}</div>", value(&format!("ram-{inst}"), &shown, ram(c), ram(prev)), bar(ram(c)), trend(points, to, &ram, "RAM"));
+        let _ = write!(w, "<div class=\"m disks\">");
+        for d in c["disks"].as_array().into_iter().flatten() {
+            let id = d["id"].as_str().unwrap_or("");
+            let p = pct(&d["used_bytes"], &d["total_bytes"]);
+            let before = prev["disks"].as_array().into_iter().flatten().find(|x| x["id"] == id).and_then(|x| pct(&x["used_bytes"], &x["total_bytes"]));
+            let name = esc(&format!("{}{}", d["role"].as_str().unwrap_or("disk"), d["fstype"].as_str().map(|f| format!(" {f}")).unwrap_or_default()));
+            let shown = if p.is_none() { unk(&d["reason"]) } else { format!("{} / {} GB · {:.0} %", gb(&d["used_bytes"]), gb(&d["total_bytes"]), p.unwrap_or(0.0)) };
+            let _ = write!(w, "<div class=\"disk\"><span class=\"k\" title=\"filesystem {}\">{name}</span> {}{}</div>", esc(id), value(&format!("disk-{inst}-{}", esc(id)), &shown, p, before), bar(p));
+        }
+        if !c["disk_reason"].is_null() {
+            let _ = write!(w, "<div class=\"disk\"><span class=\"k\">Disks</span> {}</div>", unk(&c["disk_reason"]));
+        }
+        let _ = writeln!(w, "</div></article>");
+    }
+    let _ = writeln!(w, "</section>");
+}
+
+/// Project boards beside the servers (boards.md): TaskQ counter order with zero hidden and unknown as `?`, the provider
+/// Board link, then questions, failures and live attempts on demand. Answers stay in TaskQ until the shared card (#43).
+fn boards(w: &mut String, boards: &[Value]) {
+    let names = ["Doing", "Review", "Ask", "Failed", "Ready", "Blocked", "Later", "Closed"];
+    let keys: Vec<&str> = crate::data::COUNTS.iter().copied().chain(["closed"]).collect();
+    let strip = |label: &str, counts: &[Option<u64>]| -> String {
+        let caps: String = counts
+            .iter()
+            .zip(names)
+            .zip(&keys)
+            .filter(|((n, _), _)| *n != &Some(0))
+            .map(|((n, name), k)| {
+                let v = n.map_or("?".into(), |n| n.to_string());
+                let what = if n.is_some() { v.clone() } else { "unknown".into() };
+                format!("<span class=\"c {k}\" title=\"{name}: {what}\" aria-label=\"{name}: {what}\">{name} {v}</span>")
+            })
+            .collect();
+        format!("<span class=\"counts\" aria-label=\"{} counters\">{caps}</span>", esc(label))
+    };
+    let _ = writeln!(w, "<section id=\"boards\">\n<h2>Boards</h2>");
+    // the aggregate sums known counts only; a project without a value for a state makes it partial
+    let mut agg = vec![Some(0u64); keys.len()];
+    let mut partial = vec![];
+    for b in boards {
+        let mut gap = false;
+        for (i, k) in keys.iter().enumerate() {
+            match b["counts"][k].as_u64() {
+                Some(n) => agg[i] = agg[i].map(|a| a + n),
+                None if *k != "closed" => gap = true,
+                None => {}
+            }
+        }
+        if gap {
+            partial.push(esc(b["project"].as_str().unwrap_or("")));
+        }
+    }
+    agg[keys.len() - 1] = None;
+    let _ = writeln!(
+        w,
+        "<div class=\"proj all\"><div class=\"ph\"><b>All boards</b>{}</div>{}</div>",
+        strip("All boards", &agg),
+        if partial.is_empty() { String::new() } else { format!("<p class=\"detail\">Partial: no counts from {}.</p>", partial.join(", ")) }
+    );
+    // one representative question open by default, preferably one awaiting an answer; a refresh keeps the reader's own choice
+    let all: Vec<&Value> = boards.iter().flat_map(|b| b["questions"].as_array().into_iter().flatten()).collect();
+    let open_q = all.iter().find(|q| q["state"] == "ask").or(all.first()).map(|q| q["url"].clone());
+    for b in boards {
+        let project = b["project"].as_str().unwrap_or("");
+        let id = format!("board-{}", esc(&project.replace('/', "-")));
+        let src = &b["source"];
+        let counts: Vec<Option<u64>> = keys.iter().map(|k| b["counts"][k].as_u64()).collect();
+        let age = src["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", dur(a)));
+        let st = src["state"].as_str().unwrap_or("unknown");
+        let fresh = if st == "ok" { format!("<small>{age}</small>") } else { format!("{} <span class=\"detail\">{}</span>", badge(st, &age), esc(src["reason"].as_str().unwrap_or(""))) };
+        let url = esc(b["url"].as_str().unwrap_or(""));
+        let _ = writeln!(
+            w,
+            "<div class=\"proj\" id=\"{id}\"><div class=\"ph\"><a href=\"{url}\">{}</a> <a class=\"board\" href=\"{url}\" aria-label=\"{0} Board on GitHub\" title=\"Board\">{GITHUB}</a> {fresh}{}</div>",
+            esc(project),
+            strip(project, &counts)
+        );
+        let qs = b["questions"].as_array().map_or(&[][..], Vec::as_slice);
+        for q in qs {
+            let _ = writeln!(
+                w,
+                "<details class=\"q\" id=\"q-{id}-{}\"{}><summary><span class=\"s unknown\">{}</span> {}</summary>",
+                text(&q["number"]),
+                if open_q.as_ref() == Some(&q["url"]) { " open" } else { "" },
+                if q["state"] == "review" { "Review" } else { "Ask" },
+                issue(q)
+            );
+            if let Some(t) = q["text"].as_str() {
+                let _ = writeln!(w, "<p>{}</p>", esc(t));
+            }
+            let choices: Vec<String> = q["choices"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|c| format!("<li value=\"{}\">{}{}</li>", text(&c["k"]), text(&c["text"]), if q["recommended"] == c["k"] { " <span aria-label=\"recommended\">★</span>" } else { "" }))
+                .collect();
+            if !choices.is_empty() {
+                let _ = writeln!(w, "<ol class=\"choices\">{}</ol>", choices.join(""));
+            }
+            let _ = writeln!(w, "<p class=\"detail\">Answer on the issue: answering is not enabled on this page.</p></details>");
+        }
+        for f in b["failed"].as_array().into_iter().flatten() {
+            let _ = writeln!(w, "<details class=\"q\" id=\"f-{id}-{}\"><summary><span class=\"s bad\">Failed</span> {}</summary><p>{}</p></details>", text(&f["number"]), issue(f), f["reason"].as_str().filter(|r| !r.is_empty()).map_or("No reason recorded.".into(), esc));
+        }
+        let attempts: Vec<String> = b["attempts"].as_array().into_iter().flatten().map(|a| format!("{} #{}", text(&a["host"]), text(&a["task"]))).collect();
+        if !attempts.is_empty() {
+            let _ = writeln!(w, "<p class=\"detail\">Live: {}</p>", attempts.join(" · "));
+        }
+        let _ = writeln!(w, "</div>");
+    }
+    let _ = writeln!(w, "</section>");
+}
+
 /// Bytes in GB with one decimal (10^9, the producers' own figures).
 fn gb(v: &Value) -> String {
     v.as_u64().map_or("—".into(), |b| format!("{:.1}", b as f64 / 1e9))
@@ -574,7 +728,7 @@ fn gb(v: &Value) -> String {
 /// `resources` (D4.4) as plain current values with provenance and history state; charts are D10 (#76).
 fn resources(w: &mut String, res: &Value, now: u64) {
     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-    let _ = writeln!(w, "<section id=\"resources\">\n<h2>Resources</h2>");
+    let _ = writeln!(w, "<section id=\"resources\">\n<h2>Resource samples</h2>");
     if rows.is_empty() {
         let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
         return;
@@ -677,6 +831,87 @@ mod tests {
         }
         assert!(w.contains("Active task and progress are not supplied by this AgentQ projection."));
         assert!(w.contains("0.51.0 · ready") && w.contains("Host minimum 2048 bytes"));
+    }
+
+    /// first-screen.md F-A1 fixture: the pinned fixture plus two synthetic nodes (one long name with three filesystems,
+    /// one warming up) and three boards (known zero, labels only, unknown).
+    pub fn first_screen_doc() -> Value {
+        let mut doc = crate::fixture_doc();
+        let now = doc["generated_at"].as_u64().unwrap();
+        let cpu = [12, 35, 61, 58, 72, 40, 44];
+        let lf: Vec<Value> = (0..7u64)
+            .map(|i| {
+                let at = now - 1800 + 300 * i;
+                let iso = crate::source::iso(at);
+                json!({"id": format!("b{i}"), "traceId": format!("b{i}"), "startTime": iso, "metadata": {
+                    "attributes.agentq.installation": "inst-build", "attributes.host.name": "build-runner-with-a-rather-long-hostname-eu-central-1", "attributes.agentq.runtime": "linux",
+                    "attributes.agentq.resource.cpu_percent": cpu[i as usize], "attributes.agentq.resource.memory_used_bytes": 10_000_000_000u64 + i * 900_000_000,
+                    "attributes.agentq.resource.memory_total_bytes": 16_000_000_000u64,
+                    "attributes.agentq.resource.disks": format!("[{{\"id\":\"r00t\",\"role\":\"root\",\"fstype\":\"ext4\",\"used_bytes\":{},\"free_bytes\":10000000000,\"total_bytes\":100000000000}},{{\"id\":\"d474\",\"role\":\"other\",\"fstype\":\"xfs\",\"used_bytes\":400000000000,\"free_bytes\":600000000000,\"total_bytes\":1000000000000}},{{\"id\":\"b4ck\",\"role\":\"other\",\"fstype\":\"zfs\",\"used_bytes\":1900000000000,\"free_bytes\":100000000000,\"total_bytes\":2000000000000}}]", 88_000_000_000u64 + i * 100_000_000)}})
+            })
+            .chain([json!({"id": "m1", "traceId": "m1", "startTime": crate::source::iso(now - 120), "metadata": {"attributes.agentq.installation": "inst-mac", "attributes.host.name": "mac", "attributes.agentq.runtime": "macos", "attributes.agentq.resource.cpu_percent": 9.5, "attributes.agentq.resource.memory_used_bytes": 12_000_000_000u64, "attributes.agentq.resource.memory_total_bytes": 24_000_000_000u64, "attributes.agentq.resource.disks": "[{\"id\":\"m0\",\"role\":\"root\",\"fstype\":\"apfs\",\"used_bytes\":300000000000,\"free_bytes\":200000000000,\"total_bytes\":500000000000}]"}})])
+            .collect();
+        let refs: Vec<&Value> = lf.iter().collect();
+        let extra = crate::resource::build(&refs, false, &json!([]), now, 1800, None);
+        doc["resources"]["rows"].as_array_mut().unwrap().extend(extra["rows"].as_array().unwrap().iter().cloned());
+        let ok = json!({"state": "ok", "at": now - 20, "age_s": 20, "reason": null, "incomplete": false});
+        let zero = json!({"doing": 0, "review": 0, "ask": 0, "failed": 0, "ready": 0, "waiting": 0, "later": 0, "closed": null});
+        let mut labels = zero.clone();
+        labels["doing"] = json!(1);
+        labels["waiting"] = json!(3);
+        let none = json!({"doing": null, "review": null, "ask": null, "failed": null, "ready": null, "waiting": null, "later": null, "closed": null});
+        for (p, counts, src) in [("taskqorg/coreq", labels, ok.clone()), ("taskqorg/specq", zero, ok), ("taskqorg/serverq", none, json!({"state": "unknown", "at": null, "age_s": null, "reason": "read failed (timeout)", "incomplete": false}))] {
+            doc["boards"].as_array_mut().unwrap().push(json!({"project": p, "url": format!("https://github.com/{p}/issues"), "source": src, "counts": counts, "questions": [], "failed": [], "attempts": []}));
+        }
+        doc
+    }
+
+    /// first-screen.md F-A1/F-A5, overview.md, boards.md: four nodes beside six boards; trends only from two or more
+    /// connected samples on 0–100 %; unknown stays `—` with its reason; zero counters hidden, unknown `?`, Closed
+    /// unknown; no demo control, simulated value or threshold mark.
+    #[test]
+    fn first_screen_renders_servers_beside_boards() {
+        let doc = first_screen_doc();
+        let html = render(&doc, &json!({}));
+        if let Some(out) = std::env::var_os("DASHQ_FIRST_EVIDENCE") {
+            let css = include_str!("../assets/style.css");
+            std::fs::write(out, html.replace("<link rel=\"stylesheet\" href=\"/style.css\">", &format!("<style>{css}</style>")).replace("<script src=\"/app.js\" defer></script>\n", "")).unwrap();
+        }
+        let first = &html[html.find("<div class=\"first\">").unwrap()..html.find("<section id=\"resources\">").unwrap()];
+        // Attention above both columns, servers before Boards, deeper views after
+        assert!(html.find("id=\"attention\"").unwrap() < html.find("class=\"first\"").unwrap() && first.find("id=\"servers\"").unwrap() < first.find("id=\"boards\"").unwrap());
+        for id in ["agents", "hosts", "checks", "resources"] {
+            assert!(html.contains(&format!("<section id=\"{id}\">")), "{id}");
+        }
+        assert_eq!(first.matches("<article class=\"node\"").count(), 4);
+        assert_eq!(first.matches("<div class=\"proj\" id=").count(), 6);
+        let node = |id: &str| first.split("<article").find(|a| a.contains(&format!("id=\"node-{id}\""))).unwrap().to_string();
+        // 7 samples: CPU and RAM lines on 0–100 %, three filesystems with bars, pp change from the previous sample
+        let build = node("inst-build");
+        assert_eq!(build.matches("<polyline").count(), 2, "{build}");
+        assert!(build.contains("aria-label=\"CPU, last 30 min, 0–100 %\"") && build.contains("id=\"cpu-inst-build\" data-n=\"44.0\">44.0 %</span> <small class=\"d\" title=\"change since the previous sample\">+4.0 pp</small>"), "{build}");
+        assert_eq!(build.matches("class=\"disk\"").count(), 3);
+        assert!(build.contains("1900.0 / 2000.0 GB · 95 %") && build.contains("<rect class=\"fill\" width=\"95.0\""));
+        // one sample: values, no chart; a stat failure stays unknown with its reason
+        let mac = node("inst-mac");
+        assert!(mac.contains("no trend yet") && !mac.contains("<polyline") && mac.contains("9.5 %"), "{mac}");
+        assert!(node("inst-fra").contains("title=\"unknown: stat failed\">—</span>"));
+        assert_eq!(first.matches("Work mode: no TaskQ policy adapter</span>").count(), 4);
+        // counters: TaskQ order, zero hidden, unknown `?`, Closed unknown and quiet
+        let board = |p: &str| first.split("<div class=\"proj").find(|b| b.contains(&format!("aria-label=\"{p} counters\""))).unwrap().to_string();
+        let coreq = board("taskqorg/coreq");
+        assert!(coreq.contains(">Doing 1</span><span class=\"c waiting\" title=\"Blocked: 3\" aria-label=\"Blocked: 3\">Blocked 3</span><span class=\"c closed\" title=\"Closed: unknown\""), "{coreq}");
+        assert!(!board("taskqorg/specq").contains("class=\"c doing\""));
+        assert!(board("taskqorg/serverq").contains(">Doing ?</span>") && board("taskqorg/serverq").contains("read failed (timeout)"));
+        assert!(board("All boards").contains("Partial: no counts from taskqorg/agentq, taskqorg/dashq, taskqorg/serverq."), "{}", board("All boards"));
+        assert!(board("taskqorg/taskq").contains("href=\"https://github.com/taskqorg/taskq/issues\" aria-label=\"taskqorg/taskq Board on GitHub\""));
+        // one representative question open; choices keep their numbers and the recommendation
+        assert_eq!(first.matches("<details class=\"q\" id=\"q-").count(), 2);
+        assert_eq!(first.matches("\" open><summary>").count(), 1);
+        assert!(first.contains("<li value=\"3\">Files <span aria-label=\"recommended\">★</span></li>"));
+        for absent in ["<button", "85 %", "90 %", "threshold", "<input", "<form", "demo", "simulat"] {
+            assert!(!first.to_lowercase().contains(absent), "{absent}");
+        }
     }
 
     #[test]
