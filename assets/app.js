@@ -2,7 +2,8 @@
 'use strict';
 let busy = false;
 async function refresh() {
-  if (busy) return;
+  // a reader's text selection would be lost by the swap: keep it, try again next time
+  if (busy || !getSelection().isCollapsed) return;
   busy = true;
   const banner = document.getElementById('banner');
   const shown = document.querySelector('main time')?.textContent || 'unknown';
@@ -19,6 +20,11 @@ async function refresh() {
     const open = new Map([...document.querySelectorAll('main details')].map(d => [key(d), d.open]));
     const focus = document.activeElement?.id;
     const y = window.scrollY;
+    // overview.md: the final number at once, a brief local tint where it changed; row and Attention swap together
+    const before = new Map([...document.querySelectorAll('main [data-n]')].map(e => [e.id, e.dataset.n]));
+    // boards.md hides zero counters: a counter new to a shown board was 0
+    const was = e => before.has(e.id) ? before.get(e.id) : e.matches('.c') && document.getElementById(e.closest('[id]:not(.c)')?.id) ? '0' : undefined;
+    main.querySelectorAll('[data-n]').forEach(e => { const n = was(e); if (n !== undefined && n !== e.dataset.n) e.classList.add('tint'); });
     document.getElementById('main').replaceWith(main);
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });

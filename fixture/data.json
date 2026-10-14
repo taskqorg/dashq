@@ -486,7 +486,17 @@
           "attempt": "6139993856"
         }
       ],
-      "latest": "4.2.0"
+      "latest": "4.2.0",
+      "counts": {
+        "closed": null,
+        "doing": 1,
+        "review": 1,
+        "ask": 1,
+        "failed": 1,
+        "ready": 1,
+        "waiting": 0,
+        "later": 0
+      }
     },
     {
       "project": "taskqorg/agentq",
@@ -505,7 +515,17 @@
       "questions": [],
       "failed": [],
       "attempts": [],
-      "latest": "0.4.17"
+      "latest": "0.4.17",
+      "counts": {
+        "closed": null,
+        "doing": null,
+        "review": null,
+        "ask": null,
+        "failed": null,
+        "ready": null,
+        "waiting": null,
+        "later": null
+      }
     },
     {
       "project": "taskqorg/dashq",
@@ -524,7 +544,17 @@
       "questions": [],
       "failed": [],
       "attempts": [],
-      "latest": null
+      "latest": null,
+      "counts": {
+        "closed": null,
+        "doing": null,
+        "review": null,
+        "ask": null,
+        "failed": null,
+        "ready": null,
+        "waiting": null,
+        "later": null
+      }
     }
   ],
   "resources": {
