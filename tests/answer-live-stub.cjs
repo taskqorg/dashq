@@ -1,5 +1,6 @@
 // Chain D13 live gate (#44): tests/answer-live.cjs against a stub DashQ /answer + board. Risk: the live run writes
 // after a failed guard or prerequisite, misses a duplicate write, or reports a run with skipped checks as qualified.
+// Rows without fresh TaskQ evidence matching TASKQ_BIN must stop before any POST.
 // Run: node tests/answer-live-stub.cjs (in `cargo test`). The stub enforces revision like TaskQ; `guard: false` breaks
 // only DashQ's guard, as a misconfigured deployment would.
 const assert = require('node:assert/strict'), fs = require('node:fs'), http = require('node:http');
@@ -7,7 +8,7 @@ const {run} = require('./answer-live.cjs');
 const BOARD = 'o/test', OTHER = 'o/other', TASK = 7, S = 'github|1', HOST = 'dash.example';
 const asset = f => fs.readFileSync(__dirname + '/../assets/taskq/' + f, 'utf8');
 
-function stub({guard = true, app = ['project-blocks.js', 'answer-card.js'].map(asset).join('\n')} = {}) {
+function stub({guard = true, rows = [{product: 'taskq', workspace: BOARD, running: {version: '4.1.0', last_known: false}, observation: {state: 'ok'}}], app = ['project-blocks.js', 'answer-card.js'].map(asset).join('\n')} = {}) {
   const st = {rev: 100, writes: 0, comments: [], ops: new Map(), revoked: false};
   const json = (res, code, v) => { res.writeHead(code, {'content-type': 'application/json'}); res.end(JSON.stringify(v)); };
   const refuse = (res, code) => json(res, code, {outcome: 'rejected', op_id: null});
@@ -16,7 +17,7 @@ function stub({guard = true, app = ['project-blocks.js', 'answer-card.js'].map(a
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/data') return json(res, 200, {boards: [{project: BOARD, tasks: [{n: TASK, revision: st.rev, state: st.writes ? 'doing' : 'ask'}]}],
-      versions: {rows: [{product: 'taskq', workspace: BOARD, running: '4.1.0'}]}});
+      versions: {rows}});
     if (u.pathname === '/app.js') return res.end(app);
     if (u.pathname === '/style.css') return res.end(['project-blocks.css', 'answer-card.css'].map(asset).join('\n'));
     if (req.method === 'GET') { const g = guard && who(req, u.searchParams.get('board')); return g ? refuse(res, g) : json(res, 200, {csrf: 't'}); }
@@ -36,7 +37,7 @@ function stub({guard = true, app = ['project-blocks.js', 'answer-card.js'].map(a
       json(res, ...reply);
     });
   });
-  const exec = (bin, args) => args[0] === 'version' ? 'dashq 0.0.0-stub' : args[0] === 'answerer' ? (st.revoked = args[3] === 'off', '')
+  const exec = (bin, args) => args[0] === 'version' ? 'dashq 0.0.0-stub' : args[0] === 'service' ? '{"version": "4.1.0"}' : args[0] === 'answerer' ? (st.revoked = args[3] === 'off', '')
     : bin === 'gh' ? JSON.stringify(st.comments) : 'stubsha';
   return new Promise(r => server.listen(0, '127.0.0.1', () => r({st, server, exec, url: 'http://127.0.0.1:' + server.address().port})));
 }
@@ -61,11 +62,20 @@ async function go(name, env, opts, want) {
   await go('served component differs from the pin: no POST', FULL, {app: 'old'}, (r, st) => {
     assert.match(r.checks['served component matches pin'], /^FAIL.*answer-card\.js/); assert.equal(r.posts, 0); assert.equal(st.writes, 0);
   });
+  const row = {product: 'taskq', workspace: BOARD, running: {version: '4.1.0', last_known: false}, observation: {state: 'ok'}};
+  for (const [why, rows] of [['no heartbeat', []], ['stale heartbeat', [{...row, running: {version: '4.1.0', last_known: true}, observation: {state: 'stale'}}]],
+    ['other version', [{...row, running: {version: '4.0.9', last_known: false}}]], ['unknown version', [{...row, running: {version: null}}]]])
+    await go('TaskQ version evidence: ' + why + ': no POST', FULL, {rows}, (r, st) => {
+      assert.match(r.checks['taskq version evidence'], /^FAIL/); assert.equal(r.result, 'failed'); assert.equal(r.posts, 0); assert.equal(st.writes, 0);
+    });
+  await go('TASKQ_BIN is not the reported version: no POST', {...FULL, TASKQ_BIN: __dirname + '/answer-live.cjs'}, {}, (r, st) => {
+    assert.match(r.checks['taskq version evidence'], /^FAIL/); assert.equal(r.posts, 0); assert.equal(st.writes, 0);
+  });
   for (const answer of [{}, {CHOICE: '', TEXT: 'Use the stub'}])
     await go('correct deployment, every check: one write ' + (answer.TEXT ? '(text)' : '(choice)'), {...FULL, ...answer}, {}, (r, st) => {
       assert.equal(r.result, 'qualified', JSON.stringify(r.checks));
       assert.equal(st.writes, 1); assert.equal(st.comments.length, 1); assert.equal(st.revoked, false);
-      assert.equal(r.dashq.version, 'dashq 0.0.0-stub'); assert.deepEqual(r.taskq.heartbeat, ['4.1.0']); assert.equal(r.component.files['answer-card.js'].length, 64);
+      assert.equal(r.dashq.version, 'dashq 0.0.0-stub'); assert.equal(r.taskq.version, '4.1.0'); assert.equal(r.component.files['answer-card.js'].length, 64);
     });
   await go('optional checks unset: incomplete, never qualified', {}, {}, (r, st) => {
     assert.equal(r.result, 'incomplete'); assert.equal(st.writes, 1);

@@ -5,7 +5,7 @@
 //   DASHQ_PUBLIC_HOST=dash.example BOARD=owner/repo TASK=N SUBJECT='github|1' DASHQ_BIN=/path/dashq TASKQ_BIN=/path/taskq
 //   [CHOICE=K | TEXT='..'] [OTHER_SUBJECT=..] [OTHER_BOARD=owner/repo2] [WORKSPACE=w] [GH=1] node tests/answer-live.cjs
 // The task must be `ask` with that choice (or free text); `review` takes choices only. Prints one JSON record.
-// Safety: versions, the served component pin and the task are checked before any POST; every refusal probe carries a
+// Safety: fresh TaskQ version evidence bound to TASKQ_BIN, the served component pin and the task are checked before any POST; every refusal probe carries a
 // stale revision and its own op ID, so even a broken guard cannot write; the first failed check stops the run.
 // Exit 0: every check ran and passed. 1: a check failed (nothing after it ran). 2: passed, but some checks did not run.
 // Regression: tests/answer-live-stub.cjs (in `cargo test`) runs this against broken and correct stub servers.
@@ -41,8 +41,13 @@ async function run(env, {exec = (bin, args) => execFileSync(bin, args).toString(
     const root = path.join(__dirname, '..');
     record.dashq = {version: exec(env.DASHQ_BIN, ['version']).trim(), binary_sha256: sha(fs.readFileSync(env.DASHQ_BIN)),
       checkout: exec('git', ['-C', root, 'rev-parse', 'HEAD']).trim()};
+    // TaskQ: the board's heartbeat must be fresh and name the version TASKQ_BIN reports and carries
     const versions = ((await data())?.versions?.rows || []).filter(r => r.product === 'taskq' && r.workspace === board);
-    record.taskq = {binary_sha256: sha(fs.readFileSync(env.TASKQ_BIN)), heartbeat: versions.map(r => r.running ?? null)};
+    const bin = fs.readFileSync(env.TASKQ_BIN), service = JSON.parse(exec(env.TASKQ_BIN, ['service', 'status'])).version;
+    record.taskq = {version: service, binary_sha256: sha(bin), heartbeat: versions.map(r => ({version: r.running?.version ?? null,
+      last_known: r.running?.last_known ?? null, observation: r.observation?.state ?? null}))};
+    check('taskq version evidence', typeof service === 'string' && bin.includes(service) && versions.length > 0 && record.taskq.heartbeat
+      .every(h => h.version === service && h.last_known === false && h.observation === 'ok'), record.taskq);
     const pin = JSON.parse(fs.readFileSync(path.join(root, 'assets/taskq/provenance.json')));
     const served = (await text('/app.js')) + (await text('/style.css'));
     record.component = {repository: pin.repository, commit: pin.commit, release: pin.release, files: pin.files};
