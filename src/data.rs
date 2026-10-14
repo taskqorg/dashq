@@ -722,6 +722,13 @@ pub fn build(inp: &Value) -> Value {
         };
     }
 
+    // Resources (D4.4): enrolled history first, Langfuse samples otherwise; a stale or missing sample is a gap.
+    let resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, fhost);
+    for r in resources["rows"].as_array().into_iter().flatten().filter(|r| r["source"]["state"] != "ok") {
+        gaps.push(json!({"source": r["provenance"], "host": r["host"], "what": format!("resources of {}: {}", r["installation"].as_str().unwrap_or(""), r["source"]["state"].as_str().unwrap_or("")),
+            "since": r["source"]["at"], "detail": r["source"]["reason"], "trace_id": null}));
+    }
+
     let hostf = |v: &Vec<Value>| -> Vec<Value> { v.iter().filter(|i| fhost.is_none_or(|x| i["host"] == x || i["host"].is_null())).cloned().collect() };
     history.sort_by_key(|i| std::cmp::Reverse(i["since"].as_u64()));
     let mut sources = json!({"langfuse": lf_src, "github": gh_src, "serverq": sq_src});
@@ -741,6 +748,7 @@ pub fn build(inp: &Value) -> Value {
         "attention": {"source": worst(att_states.iter().map(|(n, s)| (n.clone(), s)), now),
                       "current": hostf(&current), "gaps": hostf(&gaps), "incidents": hostf(&history)},
         "boards": boards,
+        "resources": resources,
         "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},

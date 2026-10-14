@@ -4,6 +4,7 @@ mod answer;
 mod data;
 mod enroll;
 mod page;
+mod resource;
 mod source;
 #[allow(dead_code)] // export forwarding, backup and restore use the rest
 mod store;
@@ -181,12 +182,14 @@ impl App {
             (lf.join().unwrap_or(Value::Null), boards, releases, taskq)
         });
         let host = filters["host"].as_str().map(String::from);
-        let mut doc = data::build(&json!({
-            "now": source::now(), "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
-            "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": source::serverq(&c.serverq_report),
-        }));
         // committed snapshots never wait for or depend on the optional sources above (D11)
-        if let Some(p) = enroll::projection(&self.enroll, scope, host.as_deref(), source::now()) {
+        let projection = enroll::projection(&self.enroll, scope, host.as_deref(), now);
+        let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
+        let mut doc = data::build(&json!({
+            "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
+            "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": source::serverq(&c.serverq_report), "enrolled_resources": enrolled,
+        }));
+        if let Some(p) = projection {
             doc["sources"]["enrollment"] = p["source"].clone();
             doc["installations"] = p;
         }

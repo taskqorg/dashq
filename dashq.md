@@ -53,6 +53,12 @@ Each source has its own cache, single flight (one read in progress, callers shar
 - Accepted: `schema` 1 with `at` (epoch seconds), `results` (`ok|warn|unknown` per check with `detail`), `incidents`, `manual_rules`. Another schema or invalid JSON: unknown with the reason.
 - Stale after 7200 s (hourly timer plus margin). Manual rules are listed as not verified, never as passed.
 
+### D4.4 Resource samples
+- Producer contract: agentq.md § 6 Resource samples (`agentq.resource`, one per 300 s bucket). Enrolled history (D11) is read first; Langfuse `agentq.resource` observations (with the `io` field group, else Langfuse cuts `agentq.resource.disks`) serve installations without enrolled samples. Each row names its `provenance`.
+- Window = the period; raw samples, no aggregation; at most 2016 per installation (7 days of buckets), newest kept, a cut marks the row `incomplete`. Langfuse reads keep D4.1 pagination and cap.
+- Per sample: CPU percent, RAM used/available/total bytes, per filesystem `id`, role, fstype, used/free/total bytes. A missing, invalid or inconsistent value is `null` with the producer's or dashq's reason; nothing is derived from other fields or the legacy disk-headroom summary.
+- Current = newest sample; stale after 900 s. History shows `gaps` (over two buckets without a sample, or a stale tail), `resets` (`warmup` or `counter reset` CPU baselines) and `warmup` below three samples. A row that is not `ok` joins Attention gaps.
+
 ## D5. Refresh
 - Redesign target: [shared dashboard rules W4–W6](https://github.com/taskqorg/specq/blob/main/design/dashboards.md) and D10. The mechanism below is the current baseline, not proof of stable in-place updates.
 - The page fetches `/data` on load, every 60 s and on the Refresh button. No live push.
@@ -72,8 +78,8 @@ Every value carries the state of its source. The page never turns missing data i
 
 ## D7. /data JSON
 - `GET /data?period=1800|7200|86400&host=H&agent=A&session=ID` returns the document the page renders; filters are optional. Invalid parameters: 400. All sources failed: 503 with `{"error"}`; partial failure is 200 with source states.
-- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `agents`, `checks`.
-- Session filters apply to activity and compression only; host health keeps host scope.
+- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`.
+- Session filters apply to activity and compression only; host health and resources keep host scope.
 - It holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
 - Schema changes are additive within `schema` 1; a breaking change raises it.
 - Agents read it with `dashq report` on the host, or through the guard with the owner's session.

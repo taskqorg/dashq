@@ -478,6 +478,34 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
     Some(json!({"source": src("ok", None), "rows": rows}))
 }
 
+/// Resource history of projected `rows` (already scoped) since `since`: input of `resource::build`. Only samples
+/// carrying `agentq.resource.*` fields count; other snapshot schemas share the history table.
+pub fn resource_samples(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
+    let Ok(e) = e else { return json!([]) };
+    let out: Vec<Value> = rows
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            let (inst, ws) = (r["installation"].as_str()?, r["workspace"].as_str()?);
+            let (samples, incomplete, error) = match e.store.samples(inst, ws, since, crate::resource::CAP) {
+                Ok((s, capped)) => (s, capped, Value::Null),
+                Err(_) => (Vec::new(), false, json!("store unavailable")),
+            };
+            let samples: Vec<Value> = samples
+                .into_iter()
+                .filter_map(|(at, id, p)| {
+                    let payload: Value = serde_json::from_str(&p).ok()?;
+                    payload.as_object()?.keys().any(|k| k.starts_with("agentq.resource.")).then(|| json!({"at": at.max(0), "event_id": id, "payload": payload}))
+                })
+                .collect();
+            let host = format!("{}/{}", r["host_label"].as_str()?, r["runtime"].as_str()?);
+            Some(json!({"installation": inst, "workspace": ws, "host": host, "runtime": r["runtime"], "samples": samples, "incomplete": incomplete, "error": error}))
+        })
+        .collect();
+    json!(out)
+}
+
 /// The optional board scope of a device request (coreq#36): `{"name": "<id>/<version>", "value": "<short line>"}`;
 /// `Ok(None)` when absent, `Err` when malformed.
 fn board(b: &Value) -> Result<Option<String>, ()> {
