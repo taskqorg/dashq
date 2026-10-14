@@ -1,8 +1,10 @@
 # dashq.md D2 Release: static Linux binary per arch, SHA256SUMS, latest.json. A failing selftest publishes nothing.
+# Pull requests run the same build and selftest (required checks on main); only a tag publishes.
 name: release
 on:
   push:
     tags: ['v*']
+  pull_request:
 permissions:
   contents: read
 jobs:
@@ -26,12 +28,13 @@ jobs:
       - run: rustup update stable --no-self-update && rustup default stable && rustup target add "$TARGET"
       - name: Tag equals Cargo.toml version
         run: |
-          ver="${GITHUB_REF_NAME#v}"
-          grep -q "^version = \"$ver\"" Cargo.toml
+          ver="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          test -n "$ver"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "${GITHUB_REF_NAME#v}" = "$ver"; fi
           echo "VER=$ver" >> "$GITHUB_ENV"
       # Tests need headless Chrome (snapshot PNG): ubuntu-latest ships it, the arm runner does not.
-      # The arm artifact is still gated by its own selftest below.
-      - if: matrix.name == 'linux-x86_64'
+      # The arm artifact is still gated by its own selftest below. On a pull request tests.yml runs them.
+      - if: matrix.name == 'linux-x86_64' && github.ref_type == 'tag'
         run: cargo test --locked
       - run: cargo build --locked --release --target "$TARGET"
       - name: Selftest and stage
@@ -41,11 +44,13 @@ jobs:
           "$bin" selftest
           mkdir dist
           cp "$bin" "dist/dashq-$VER-${{ matrix.name }}"
-      - uses: actions/upload-artifact@v4
+      - if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
           path: dist/*
   publish:
+    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     permissions:
