@@ -284,8 +284,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
 fn versions(w: &mut String, versions: &Value, now: u64) {
     let rows = versions["rows"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() { return; }
-    // A tuple, not the host or row index: Windows/WSL and separate workspaces retain their own selection.
-    let id = |r: &Value| format!("version-{}", enc(&json!([r["product"], r["provenance"], r["installation"], r["workspace"]]).to_string()));
+    // Known installations keep identity across host renames; legacy rows without an ID use host within source/workspace.
+    let id = |r: &Value| format!("version-{}", enc(&json!([r["product"], r["provenance"], r["installation"], r["workspace"], if r["installation"].is_null() { &r["host"] } else { &Value::Null }]).to_string()));
     let value = |v: &Value| if v.is_null() { "Not reported".into() } else { text(v) };
     let version = |v: &Value| format!("{}{}", v["version"].as_str().map_or_else(|| format!("<span class=\"muted\" title=\"Unknown: {}\">—</span>", esc(v["reason"].as_str().unwrap_or("not reported"))), esc), if v["last_known"] == true { "<small>Last known</small>" } else { "" });
     let _ = writeln!(w, "<section id=\"qversions\"><div class=\"app\"><div class=\"line spread\"><h2>Services</h2><small>Versions · updates · diagnostics</small></div><small>Host-managed updates · observation only</small><div class=\"inventory\"><div class=\"row rowhead\"><span>Service / installation</span><span>Running</span><span>Selected</span><span>Available</span><span>State / observation</span></div>");
@@ -905,6 +905,28 @@ mod tests {
         versions(&mut html, &doc["versions"], doc["generated_at"].as_u64().unwrap());
         let rows = doc["versions"]["rows"].as_array().unwrap();
         assert_eq!(html.matches("class=\"row version-select\"").count(), rows.len());
+        // Legacy TaskQ hosts in the same workspace have no installation ID.
+        let keys = |page: &str| page.split(" aria-controls=\"").skip(1)
+            .map(|s| s.split('"').next().unwrap().to_owned()).collect::<Vec<_>>();
+        let ids = keys(&html);
+        assert_eq!(ids.iter().collect::<std::collections::BTreeSet<_>>().len(), rows.len(), "each service controls its own detail");
+        let legacy: Vec<_> = rows.iter().enumerate().filter(|(_, r)| r["product"] == "taskq" && r["installation"].is_null()).collect();
+        assert_eq!(legacy.len(), 2);
+        assert_eq!(legacy[0].1["workspace"], legacy[1].1["workspace"]);
+        for (i, r) in &legacy {
+            let detail = html.split(&format!("id=\"{}\"", ids[*i])).nth(1).unwrap().split("</h3>").next().unwrap();
+            assert!(detail.contains(&format!("taskq · {}", r["host"].as_str().unwrap())));
+        }
+        let mut reordered = doc["versions"].clone();
+        reordered["rows"].as_array_mut().unwrap().reverse();
+        // Fresh values and renamed known hosts must not replace installation identity.
+        for row in reordered["rows"].as_array_mut().unwrap() {
+            row["running"]["version"] = json!("9.9.9");
+            if !row["installation"].is_null() { row["host"] = json!("renamed"); }
+        }
+        let mut refreshed = String::new();
+        versions(&mut refreshed, &reordered, 0);
+        assert_eq!(keys(&refreshed), ids.into_iter().rev().collect::<Vec<_>>());
         assert_eq!(html.matches("aria-pressed=\"true\"").count(), 1);
         assert_eq!(html.matches(" hidden>").count(), rows.len() - 1);
         for case in cases["cases"].as_object().unwrap().values() {
