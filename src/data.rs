@@ -109,7 +109,7 @@ fn num(v: &Value) -> Option<f64> {
     v.as_f64().filter(|n| n.is_finite() && *n >= 0.0)
 }
 
-fn semver(v: &Value) -> Value {
+pub fn semver(v: &Value) -> Value {
     v.as_str().filter(|s| s.split('.').count() == 3 && s.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))).map_or(Value::Null, |s| json!(s))
 }
 
@@ -271,6 +271,7 @@ pub fn build(inp: &Value) -> Value {
     let mut hosts: BTreeMap<String, Value> = BTreeMap::new();
     let (mut current, mut gaps, mut history) = (Vec::new(), Vec::new(), Vec::new());
     let mut counters = Vec::new();
+    let (mut legacy, mut heartbeats): (Vec<Value>, BTreeMap<String, Value>) = (Vec::new(), BTreeMap::new());
 
     // Health snapshots: a device's newest snapshot owns its identity (old labels never duplicate a host).
     let health = rows("health");
@@ -300,6 +301,9 @@ pub fn build(inp: &Value) -> Value {
             a["available"] = semver(u("available"));
             a["updater"] = u("status").as_str().filter(|s| safe(s, 32, b"_")).map_or(json!("unknown"), |s| json!(s));
             a["subscription"] = u("subscription").as_str().filter(|s| ["connected", "reconnecting", "disabled"].contains(s)).map_or(json!("unknown"), |s| json!(s));
+            if let Some(d) = tag(r, "device").filter(|d| safe_id(d)) {
+                legacy.push(json!({"device": d, "host": id, "at": at, "monitor": semver(attr(r, "version")), "installed": a["selected"], "available": a["available"]}));
+            }
         }
         if !semver(attr(r, "version")).is_null() {
             h["agentq"]["monitor"] = semver(attr(r, "version"));
@@ -636,6 +640,12 @@ pub fn build(inp: &Value) -> Value {
             // age = response Date minus updated_at: board clock only, never the local one
             let age = date.zip(hb["updated_at"].as_str().and_then(iso_secs)).map(|(d, u)| d.saturating_sub(u));
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
+            // taskq's own installation id (taskq.md § 4 `service`), never the host name; older heartbeats have none
+            let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
+            let key = service.map_or(format!("host:{name}"), String::from);
+            if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| age.is_some_and(|x| x < a))) {
+                heartbeats.insert(key, json!({"service": service, "host": name, "age_s": age, "ttl": ttl, "version": version}));
+            }
             let h = hosts.entry(name.into()).or_insert_with(|| host_row(name));
             if h["taskq"]["age_s"].as_u64().is_some_and(|a| age.is_none_or(|x| x >= a)) {
                 continue;
@@ -749,7 +759,11 @@ pub fn build(inp: &Value) -> Value {
         sources["taskq"] = t.clone();
         att_states.push(("taskq".to_string(), t));
     }
-    json!({
+    let versions = crate::version::build(inp, &fleet, &legacy, &heartbeats.into_values().collect::<Vec<_>>());
+    if inp["installations"].is_object() {
+        sources["enrollment"] = inp["installations"]["source"].clone();
+    }
+    let mut doc = json!({
         "schema": 1,
         "generated_at": now,
         "period": period,
@@ -764,7 +778,12 @@ pub fn build(inp: &Value) -> Value {
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
-    })
+        "versions": versions,
+    });
+    if inp["installations"].is_object() {
+        doc["installations"] = inp["installations"].clone();
+    }
+    doc
 }
 
 /// One open question in the S3 shape: source choice ids, order and text kept; a card that does not parse
