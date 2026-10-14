@@ -375,12 +375,12 @@ mod tests {
         }
     }
 
-    /// Chain: cached board heartbeat retains producer time, ages, and remains separate by project (V1).
+    /// Chain: cached board heartbeat retains producer time and its pre-release version, ages, and remains separate by project (V1).
     #[test]
     fn cached_heartbeat_time_and_project_identity() {
         let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
         inp["boards"]["taskqorg/taskq"]["value"]["hosts"][0]["body"] =
-            json!("version 4.1.2\nservice abcdef123456");
+            json!("version 4.2.0-dev.1791961334\nservice abcdef123456");
         inp["boards"]["taskqorg/agentq"] = inp["boards"]["taskqorg/taskq"].clone();
         let before = crate::data::build(&inp);
         let rows: Vec<_> = before["versions"]["rows"]
@@ -392,6 +392,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_ne!(rows[0]["workspace"], rows[1]["workspace"]);
         assert_eq!(rows[0]["observation"]["at"], json!(1791875040));
+        assert_eq!(rows[0]["running"]["version"], "4.2.0-dev.1791961334");
         inp["now"] = json!(inp["now"].as_u64().unwrap() + 400);
         let after = crate::data::build(&inp);
         for old in rows {
