@@ -241,7 +241,7 @@ fn html(status: &'static str, body: &str) -> Resp {
 /// `head`: extra head lines, e.g. the 2 s progress refresh.
 fn html_head(status: &'static str, head: &str, body: &str) -> Resp {
     let page = format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n{head}<title>DashQ · Connect</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n</head>\n<body>\n<main>\n<h1>Connect a product</h1>\n{body}</main>\n</body>\n</html>\n"
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n{head}<title>DashQ · Connect</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n</head>\n<body>\n<main class=\"connections connect-page\">\n<h1>Connect a product</h1>\n{body}</main>\n</body>\n</html>\n"
     );
     Resp { status, ctype: "text/html; charset=utf-8", body: page.into_bytes(), headers: String::new(), forms: true }
 }
@@ -477,10 +477,14 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             let export = if r.export_gap > 0 {
                 json!({"gap_events": r.export_gap, "state": "gap", "reason": format!("events expired before export: {}", r.export_gap)})
             } else {
-                json!({"gap_events": 0, "state": "ok", "reason": null})
+                json!({"gap_events": 0, "state": if r.product == "agentq" { "unknown" } else { "not_applicable" }, "reason": if r.product == "agentq" { "export forwarding not qualified" } else { "no Langfuse export required" }})
             };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
-                "generation": r.generation, "connection": r.connection, "observation": obs, "history": history, "export": export, "snapshot": snapshot})
+                "generation": r.generation, "connection": r.connection,
+                "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation),
+                "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
+                "capabilities": r.capabilities.as_deref().map(|s| serde_json::from_str::<Value>(s).unwrap_or(Value::Null)).unwrap_or(json!([])),
+                "scope": r.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()), "observation": obs, "history": history, "export": export, "snapshot": snapshot})
         })
         .collect();
     Some(json!({"source": src("ok", None), "rows": rows}))
@@ -633,7 +637,7 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     };
     let fail = |status, msg: &str| html(status, &format!("<p>{}</p>\n<p><a href=\"/connect\">Enter another code</a></p>\n", esc(msg)));
     let Ok(spaces) = e.store.workspaces(subject) else { return fail("503 Service Unavailable", "The connection store is unavailable; nothing was changed.") };
-    let who = format!("<p>Signed in as <strong>{}</strong>.</p>\n", esc(subject));
+    let who = format!("<p class=\"detail\">Destination <strong>https://{}</strong></p><p>Signed in as <strong>{}</strong>.</p>\n", esc(&e.public_host), esc(subject));
     if spaces.is_empty() {
         return html("403 Forbidden", &format!("{who}<p>This account is not a member of any workspace. Ask a workspace administrator to add it.</p>\n"));
     }
@@ -676,10 +680,10 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
                 html_head(
                     "200 OK",
                     &format!("<meta http-equiv=\"refresh\" content=\"2; url={}\">\n", esc(&wait)),
-                    &format!("{who}<p>Approved: installation <code>{}</code> is connected to workspace <strong>{}</strong>. Return to the command; it finishes on its own.</p>\n<p><a href=\"{}\">Waiting for its first snapshot…</a></p>\n", esc(&g.installation), esc(&g.workspace), esc(&wait)),
+                    &format!("{who}<p>Approved: installation <code>{}</code> is approved for workspace <strong>{}</strong>. Waiting for credential activation, then a durable snapshot and dashboard readback. Return to the command; it finishes on its own.</p>\n<p><a href=\"{}\">Waiting for its first snapshot…</a></p>\n", esc(&g.installation), esc(&g.workspace), esc(&wait)),
                 )
             }
-            Ok(Decision::Already) => fail("200 OK", "This code is already approved; nothing new was granted."),
+            Ok(Decision::Already) => html("200 OK", &format!("{who}<p>This code is already approved; nothing new was granted. Keep the existing host command running.</p><p><a href=\"/\">Open the overview and check pending readback</a></p>")),
             Ok(Decision::Denied) => fail("200 OK", "Denied: no access was granted."),
             Ok(Decision::Invalid) => fail("400 Bad Request", "This code is unknown, expired or already used. Start the connection again on the host."),
             Ok(Decision::NotMember) => fail("403 Forbidden", "This account is not a member of that workspace."),
@@ -693,9 +697,10 @@ fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
         return lifecycle(e, subject, &who, &q, now);
     }
     let code = qget("code").to_string();
-    let entry = format!("{who}<form method=\"get\" action=\"/connect\">\n<label>Code shown by the command <input name=\"code\" autocomplete=\"off\" autofocus required></label>\n<button>Continue</button>\n</form>\n");
+    let entry = format!("<form method=\"get\" action=\"/connect\">\n<label>Code shown by the command <input name=\"code\" autocomplete=\"off\" autofocus required></label>\n<button>Continue</button>\n</form>\n");
     if code.is_empty() {
-        return html("200 OK", &entry);
+        let commands: String = PRODUCTS.iter().map(|p| format!("<p><code>{p} enroll https://{}</code></p>", esc(&e.public_host))).collect();
+        return html("200 OK", &format!("{who}<h2>Add service / reconnect</h2><p>Run the matching command on the existing installation:</p><div class=\"connect-panel\">{commands}</div><p>Reuse the existing service and identity. A headless host prints the same approval link and code. A revoked connection needs new browser approval; lost identity creates a separate installation, never a hostname merge.</p><p>Retry an interrupted enrollment on that host with the same destination; do not start another approval while readback is pending.</p>{entry}<p><a href=\"/\">Back to overview</a></p>"));
     }
     let Some(code) = user_code(&code) else { return fail("400 Bad Request", "That code is not valid.") };
     let p = match e.store.pending(&code, now) {
@@ -779,16 +784,18 @@ fn lifecycle(e: &Enroll, subject: &str, who: &str, q: &HashMap<String, String>, 
         x.headers = format!("Location: /#{to}\r\n");
         return x;
     }
+    let stage = if row.connection == "pending" { "Waiting for credential activation" } else { "Waiting for the first snapshot" };
     let since: i64 = get("since").parse().unwrap_or(0);
     if (0..WAIT_SECS).contains(&(now - since)) {
         let again = format!("/connect?wait={inst}&workspace={ws}&generation={generation}&since={since}");
         return html_head(
             "200 OK",
             &format!("<meta http-equiv=\"refresh\" content=\"2; url={}\">\n", esc(&again)),
-            &format!("{who}<p role=\"status\">Approved. Waiting for the first snapshot from <strong>{} ({})</strong>; checked every 2 s for up to 60 s.</p>\n<p><a href=\"/#{to}\">Open the overview now</a></p>\n", esc(&row.label), esc(&row.runtime)),
+            &format!("{who}<p role=\"status\">Approved. {stage} from <strong>{} ({})</strong>; checked every 2 s for up to 60 s.</p>\n<p><a href=\"/#{to}\">Open the overview now</a></p>\n", esc(&row.label), esc(&row.runtime)),
         );
     }
-    fail("200 OK", "No snapshot arrived within 60 s. The connection is approved; the overview shows the installation as \"no snapshot yet\" until its host sends one.")
+    let retry = format!("/connect?wait={inst}&workspace={ws}&generation={generation}&since={now}");
+    html("200 OK", &format!("{who}<p role=\"status\">No snapshot arrived within 60 s. {stage}; dashboard readback not confirmed.</p><p>Recovery uses the same connection. No new grant is needed; keep the host command running or retry it with the same destination.</p><p><a href=\"{}\">Check again for 60 s</a> · <a href=\"/#{to}\">Open the overview</a></p>", esc(&retry)))
 }
 
 #[cfg(test)]
@@ -1474,4 +1481,142 @@ mod tests {
             assert_eq!(Enroll::open(&d, HOST).err().unwrap(), "dashq.key: mode must be 0600");
         }
     }
+    /// L1-L3: approval -> activation -> durable snapshot -> matching projection; receipt age is not
+    /// producer freshness, reconnect cannot borrow an old generation, and lost identity never merges.
+    #[test]
+    fn connections_lifecycle_reference_chain() {
+        let now = crate::source::now() as i64;
+        let (_, e) = setup("connections-reference");
+        let emit = |name: &str, html: &str| {
+            if let Some(dir) = std::env::var_os("DASHQ_CONNECTION_EVIDENCE") {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(Path::new(&dir).join(format!("{name}.html")), html).unwrap();
+            }
+        };
+        emit("entry", &get(&e, "github|1", "/connect", now).2);
+        let (device, code) = start(&e, "inst-reference", now);
+        let review = page(&e, "github|1", &code, now).1;
+        emit("approval", &review);
+        let (_, approved) = decide(&e, "github|1", &code, "approve", "ws-1", now);
+        assert!(!approved.contains("is connected"), "approval alone is not connection: {approved}");
+        assert!(review.contains("https://dash.example.com") && review.contains("observation only"));
+        emit("approved", &approved);
+        let wait = format!("/connect?wait=inst-reference&workspace=ws-1&generation=1&since={now}");
+        let pending = get(&e, "github|1", &wait, now + 2).2;
+        assert!(pending.contains("credential activation"));
+        emit("activation", &pending);
+        let cred = machine(&e, "/connect/token", None, json!({"protocol": 1, "device_code": device}), now + 5).1["credential"].as_str().unwrap().to_string();
+        machine(&e, "/connect/ack", Some(&cred), json!({"protocol": 1}), now + 5);
+        let pending = get(&e, "github|1", &wait, now + 6).2;
+        assert!(pending.contains("Waiting for the first snapshot"));
+        emit("snapshot", &pending);
+        let timeout = get(&e, "github|1", &wait, now + 61).2;
+        assert!(timeout.contains("Check again for 60 s") && !timeout.contains("http-equiv=\"refresh\""));
+        emit("timeout", &timeout);
+        let payload = json!({"version": "1.2.3", "agentq.resource.cpu_unknown": "warmup"});
+        ingest(&e, &cred, vec![rec("reference-1", now - 1000, payload.clone())], now);
+        // Same delivery retry retains one installation and snapshot; its original observation time stays old.
+        ingest(&e, &cred, vec![rec("reference-1", now - 1000, payload)], now + 11);
+        assert_eq!(get(&e, "github|1", &wait, now + 12).0, "303 See Other");
+        let p = projection(&e, Some(Scope::Subject("github|1")), None, (now + 12) as u64).unwrap();
+        let r = &p["rows"][0];
+        assert_eq!(p["rows"].as_array().unwrap().len(), 1);
+        assert_eq!((&r["projected"], &r["observation"]["state"], &r["export"]["state"]), (&json!(true), &json!("stale"), &json!("unknown")));
+        assert_eq!(r["received_at"], now);
+        assert_eq!(r["history"]["samples"], 1);
+        let app = app(e, None);
+        let e = &app.enroll;
+        let render = || String::from_utf8(crate::route(&app, "GET", "/", "", Some(Scope::Subject("github|1"))).2).unwrap();
+        let stale = render();
+        assert!(stale.contains("✓ Connected") && stale.contains("stale") && stale.contains("export forwarding not qualified"));
+        emit("stale", &stale);
+        emit("revoke", &get(e, "github|1", "/connect?revoke=inst-reference&workspace=ws-1", now).2);
+        revoke(e, "github|1", "github|1", "inst-reference", "ws-1", now + 13);
+        emit("revoked", &render());
+        assert_eq!(ingest(e, &cred, vec![rec("old-credential", now, json!({}))], now + 14).0, 401);
+        let next = connect(e, "inst-reference", "github|1", "ws-1", now + 20);
+        let p = projection(e, Some(Scope::Subject("github|1")), None, (now + 21) as u64).unwrap();
+        assert_eq!(p["rows"].as_array().unwrap().len(), 1);
+        assert_eq!((&p["rows"][0]["generation"], &p["rows"][0]["projected"]), (&json!(2), &json!(false)));
+        assert!(!render().contains("✓ Connected"), "new generation cannot inherit the previous readback");
+        let wait2 = format!("/connect?wait=inst-reference&workspace=ws-1&generation=2&since={now}");
+        assert_eq!(get(e, "github|1", &wait2, now + 21).0, "200 OK", "old history is not new readback");
+        ingest(e, &next, vec![rec("reference-2", now, json!({"version": "1.2.3", "agentq.resource.cpu_unknown": "warmup"}))], now);
+        assert_eq!(get(e, "github|1", &wait2, now + 22).0, "303 See Other");
+        emit("connected", &render());
+        connect(e, "inst-lost-identity", "github|1", "ws-1", now + 25);
+        let p = projection(e, Some(Scope::Subject("github|1")), None, (now + 26) as u64).unwrap();
+        assert_eq!(p["rows"].as_array().unwrap().len(), 2, "equal host labels keep distinct identities");
+        emit("identity", &render());
+        // Standalone products do not require AgentQ or Langfuse and keep their own scope.
+        for product in ["serverq", "taskq"] {
+            let schema = format!("{product}-snapshot/1");
+            let (_, d) = machine(e, "/connect/device", None, json!({"protocol": 1, "product": product, "installation": product, "runtime": "wsl", "host_label": "same-long-host-label", "schemas": [schema], "scope": {"name": "board/1", "value": "example/project"}}), now + 30);
+            decide(e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", now + 31);
+        }
+        let p = projection(e, Some(Scope::Subject("github|1")), None, (now + 32) as u64).unwrap();
+        for r in p["rows"].as_array().unwrap().iter().filter(|r| r["product"] != "agentq") {
+            assert_eq!(r["export"]["state"], "not_applicable");
+            assert_eq!(r["scope"]["value"], "example/project");
+        }
+        emit("list", &render());
+        let mut quiet = app.doc(1800, json!({}), Some(Scope::Subject("github|1")));
+        quiet["generated_at"] = json!(now + 400);
+        quiet["installations"] = projection(e, Some(Scope::Subject("github|1")), None, (now + 400) as u64).unwrap();
+        let quiet = crate::page::render(&quiet, &json!({}));
+        assert!(quiet.contains("No recent receipt") && quiet.contains("Host activity unknown"));
+        emit("no-contact", &quiet);
+        let store = &e.as_ref().unwrap().store;
+        store.accept(&sha256(&next), &[Event { id: "export-gap", schema: "agentq-snapshot/1", observed: now, kind: Kind::Export, payload: "{}" }], now).unwrap();
+        store.prune(now + 7 * 86400 + 1).unwrap();
+        let gap = render();
+        assert!(gap.contains("gap · events expired before export: 1") && gap.contains("✓ Connected"));
+        emit("export-gap", &gap);
+        // Separately approved operations from D16 stay separate from the observation scope.
+        let (_, d) = machine(e, "/connect/device", None, json!({"protocol": 1, "product": "agentq", "installation": "inst-scoped", "runtime": "native", "host_label": "scoped-host", "schemas": ["agentq-snapshot/1"], "capabilities": ["agentq.configure"]}), now + 40);
+        let code = d["user_code"].as_str().unwrap();
+        emit("approval-capability", &page(e, "github|1", code, now + 41).1);
+        decide(e, "github|1", code, "approve&capability.agentq.configure=grant", "ws-1", now + 41);
+        let p = projection(e, Some(Scope::Subject("github|1")), None, (now + 42) as u64).unwrap();
+        let r = p["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "inst-scoped").unwrap();
+        assert_eq!(r["capabilities"], json!(["agentq.configure"]));
+        assert!(render().contains("Separately approved operations</dt><dd>agentq.configure"));
+    }
+
+    /// L3/E7 owner boundary: the real coreq client retains a revoke-only request offline. DashQ
+    /// cannot know that local state; acknowledgement, restart and new approval preserve one identity.
+    #[test]
+    fn connections_offline_revoke_host_and_server_chain() {
+        struct Offline;
+        impl coreq::enroll::Wire for Offline {
+            fn post(&mut self, _: &str, route: &str, _: Option<&str>, _: &Value) -> Result<(u16, Value), String> {
+                assert_eq!(route, "/connection/revoke");
+                Err("offline".into())
+            }
+            fn now(&self) -> u64 { T0 as u64 }
+            fn sleep(&mut self, _: u64) {}
+            fn show(&mut self, _: &str, _: &str) { panic!("no new approval") }
+        }
+        let (d, e) = setup("offline-life");
+        let host = dir("offline-life-host");
+        let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "same-host", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![] };
+        let grant = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        assert_eq!(coreq::enroll::disconnect(&host, &mut Offline), Err("1 revoke pending".into()));
+        assert!(coreq::enroll::active(&host).unwrap().is_none());
+        assert_eq!(coreq::enroll::stamp(&host, "agentq-snapshot/1", "off", T0 as u64, json!({})), Err("disconnected".into()));
+        assert_eq!(projection(&e, Some(Scope::All), None, T0 as u64).unwrap()["rows"][0]["connection"], "active");
+        coreq::enroll::retry_revokes(&host, &mut w).unwrap();
+        coreq::enroll::retry_revokes(&host, &mut w).unwrap();
+        assert_eq!(w.calls.iter().filter(|s| *s == "/connection/revoke").count(), 1);
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        assert_eq!(projection(&e, Some(Scope::All), None, T0 as u64).unwrap()["rows"][0]["connection"], "revoked");
+        let mut w = Wire { e: &e, now: T0 + 60, code: None, calls: vec![] };
+        let new = coreq::enroll::pair(&host, "https://dash.example.com", &req, &mut w).unwrap();
+        assert_eq!(new["installation"], grant["installation"]);
+        assert_eq!(new["generation"], 2);
+        assert_eq!(e.as_ref().unwrap().project(Scope::All).unwrap().len(), 1);
+    }
+
 }

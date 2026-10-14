@@ -146,7 +146,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = writeln!(w, "</section>");
 
     first(w, doc, now);
-    installations(w, &doc["installations"], now);
+    installations(w, &doc["installations"], &doc["resources"], now);
     integrations(w, &doc["installations"]);
     resources(w, &doc["resources"], now);
 
@@ -280,50 +280,85 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
 /// Connected installations (D11, enrollment C1): connection, data age, history warmup and export gaps are separate
 /// states; a revoked installation keeps its history and is not an active failure. Absent until enrollment is set up.
-fn installations(w: &mut String, inst: &Value, now: u64) {
-    if inst.is_null() {
-        return;
-    }
-    let _ = writeln!(w, "<section id=\"installations\">\n<h2>Installations</h2>\n{}", unknown_line(&inst["source"]));
+fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
+    if inst.is_null() { return; }
+    let _ = writeln!(w, "<section id=\"installations\" class=\"connections\"><div class=\"connect-title\"><h2>Connections</h2><a id=\"add-service\" href=\"/connect\">＋ Add service</a></div>{}", unknown_line(&inst["source"]));
     let rows = inst["rows"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
-        let _ = writeln!(w, "<p class=\"note\">No installation connected yet. Run the product's enroll command on its host.</p>\n</section>");
+        let _ = writeln!(w, "<p class=\"detail\">{}</p></section>", if inst["source"]["state"] == "ok" { "No installation connected yet." } else { "Installation list unavailable." });
         return;
     }
-    let _ = writeln!(w, "<table>\n<tr><th>Installation</th><th>Connection</th><th>Data</th><th>History</th><th>Export</th><th>Evidence</th><th></th></tr>");
-    for r in rows {
+    let _ = writeln!(w, "<div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
+    let mut panels = String::new();
+    for (index, r) in rows.iter().enumerate() {
         let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
         let id = crate::enroll::anchor(inst_id, ws);
         let revoked = r["connection"] == "revoked";
-        let connection = match r["connection"].as_str() {
-            Some("active") => badge("ok", "active"),
-            Some("pending") => format!("{} <span class=\"detail\">approved, waiting for the host</span>", badge("unknown", "pending")),
-            _ => format!("{} <span class=\"detail\">history kept</span>", badge("unknown", "revoked")),
+        let verified = r["projected"] == true;
+        let recent = r["received_at"].as_u64().is_some_and(|t| t <= now && now - t <= crate::enroll::STALE_SECS);
+        let (class, connection) = match r["connection"].as_str() {
+            Some("revoked") => ("detail", "Revoked · history kept"),
+            Some("pending") => ("detail", "Pending · credential activation"),
+            Some("active") if !verified => ("detail", "Pending · first snapshot readback"),
+            Some("active") if recent => ("connect-good", "✓ Connected"),
+            Some("active") if r["received_at"].as_u64().is_some_and(|t| t <= now) => ("connect-ask", "No recent receipt"),
+            _ => ("detail", "Connection unknown"),
         };
         let o = &r["observation"];
-        let data = match (o["state"].as_str(), o["age_s"].as_u64()) {
-            (Some(st), Some(age)) if !revoked => format!("{}{}", badge(st, &format!("{} old", dur(age))), o["reason"].as_str().filter(|x| !x.is_empty()).map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default()),
-            // a revoked installation's last data is history, not a stale failure
-            (_, Some(_)) => format!("<span class=\"detail\">last {}</span>", at(&o["at"], now)),
-            _ => badge("unknown", o["reason"].as_str().unwrap_or("unknown")),
+        let data = match o["age_s"].as_u64() {
+            Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, dur(age), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
+            None => format!("Unknown · {}", o["reason"].as_str().map(esc).unwrap_or_else(|| "no observation".into())),
         };
-        let h = &r["history"];
-        // a revoked installation sends no more samples: no warmup cue
-        let history = if h["state"] == "warmup" && !revoked { badge("unknown", h["reason"].as_str().unwrap_or("")) } else { format!("{} sample{}", text(&h["samples"]), if h["samples"] == 1 { "" } else { "s" }) };
+        let selected = index == 0;
+        let product = match r["product"].as_str() { Some("agentq") => "AgentQ", Some("serverq") => "ServerQ", Some("taskq") => "TaskQ", _ => "Unknown product" };
+        let duplicate = rows.iter().filter(|other| other["host_label"] == r["host_label"] && other["runtime"] == r["runtime"] && other["product"] == r["product"]).count() > 1;
+        let identity = if duplicate { format!("<small>{}</small>", esc(inst_id)) } else { String::new() };
+        let _ = writeln!(w, "<button type=\"button\" class=\"connect-select\" id=\"select-{id}\" aria-controls=\"{id}\" aria-expanded=\"{selected}\" aria-pressed=\"{selected}\"><span><strong>{product}</strong><small>{} · {}</small>{identity}</span><span class=\"{class}\">{connection}</span><span class=\"connect-data\">{data}</span></button>", text(&r["host_label"]), text(&r["runtime"]));
+        let w = &mut panels;
+        let _ = writeln!(w, "<div class=\"connect-body\" id=\"{id}\" {}><strong>{product} · {} ({})</strong>", if selected { "" } else { "hidden" }, text(&r["host_label"]), text(&r["runtime"]));
+        let received = if r["received_at"].as_u64().is_some_and(|t| t > now) { "Unknown · server clock uncertain".into() } else if r["received_at"].is_null() { "Unknown · no durable receipt yet".into() } else { at(&r["received_at"], now) };
+        let _ = writeln!(w, "<p class=\"detail\">Host activity unknown. Last durable receipt: {}. {}</p>", received, if revoked { "Local work continues independently." } else { "The host retries with its existing grant; silence does not prove it stopped or disconnected locally." });
+        if let Some(reason) = o["reason"].as_str() {
+            let _ = writeln!(w, "<p class=\"detail\">Producer: {}</p>", esc(reason));
+        }
+        let resource = resources["rows"].as_array().and_then(|rows| rows.iter().find(|v| v["installation"] == inst_id && v["workspace"] == ws));
+        if r["product"] == "agentq" && !revoked {
+            if let Some(res) = resource.filter(|r| r["source"]["state"] != "unknown") {
+                let h = &res["history"];
+                let n = num(&h["samples"], &res["source"]);
+                let _ = writeln!(w, "<p>Resource history: {} · {n} real samples in this window</p>", if h["state"] == "warmup" { "collecting · trends need 3 samples" } else { "available" });
+                if res["current"]["cpu"]["percent"].is_null() {
+                    let _ = writeln!(w, "<p class=\"detail\">CPU unknown · {}</p>", res["current"]["cpu"]["reason"].as_str().map(esc).unwrap_or_else(|| "no sample".into()));
+                }
+            } else {
+                let _ = writeln!(w, "<p class=\"detail\">Resource history unavailable · trends need 3 real samples. CPU unknown until a real baseline arrives.</p>");
+            }
+        }
         let x = &r["export"];
-        let export = if x["state"] == "gap" { badge("warn", &format!("gap · {}", x["reason"].as_str().unwrap_or(""))) } else { "<span class=\"detail\">no gap recorded</span>".into() };
-        let evidence = match r["snapshot"]["event_id"].as_str() {
-            Some(ev) => format!("<code>{}</code><br><span class=\"detail\">{}</span>", esc(ev), text(&r["snapshot"]["schema"])),
-            None => "—".into(),
+        let export = match x["state"].as_str() {
+            Some("gap") => format!("gap · {}", text(&x["reason"])),
+            Some("not_applicable") => "Not applicable · no Langfuse export required".into(),
+            Some("unknown") => format!("Unknown · {}", text(&x["reason"])),
+            _ => "Unknown · no qualified export evidence".into(),
         };
-        let action = if revoked { String::new() } else { format!("<a id=\"revoke-{id}\" href=\"/connect?revoke={}&amp;workspace={}\">Revoke…</a>", enc(inst_id), enc(ws)) };
-        let _ = writeln!(
-            w,
-            "<tr id=\"{id}\"><td><b>{} ({})</b> · {}<br><span class=\"detail\">{} · workspace {} · generation {}</span></td><td>{connection}</td><td>{data}</td><td>{history}</td><td>{export}</td><td>{evidence}</td><td>{action}</td></tr>",
-            text(&r["host_label"]), text(&r["runtime"]), text(&r["product"]), esc(inst_id), esc(ws), text(&r["generation"])
-        );
+        let _ = writeln!(w, "<p class=\"detail\">Export: {export}</p><details id=\"identity-{id}\"><summary id=\"scope-{id}\">Identity &amp; scope</summary><dl><dt>Installation</dt><dd><code>{}</code></dd><dt>Workspace</dt><dd>{}</dd><dt>Generation</dt><dd>{}</dd><dt>Version</dt><dd>{}</dd><dt>Authorized data</dt><dd>{}</dd><dt>Observation authority</dt><dd>Observation only · no task actions or host commands</dd>", esc(inst_id), esc(ws), text(&r["generation"]), r["snapshot"]["payload"]["version"].as_str().or_else(|| r["snapshot"]["payload"]["agentq.version"].as_str()).map(esc).unwrap_or_else(|| "Unknown · not reported".into()), r["scopes"].as_array().map(|v| v.iter().map(text).collect::<Vec<_>>().join(", ")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Unknown · not reported".into()));
+        if let Some(caps) = r["capabilities"].as_array().filter(|c| !c.is_empty()) {
+            let _ = writeln!(w, "<dt>Separately approved operations</dt><dd>{}</dd>", caps.iter().map(text).collect::<Vec<_>>().join(", "));
+        }
+        if !r["scope"].is_null() { let _ = writeln!(w, "<dt>Board scope</dt><dd>{}: {}</dd>", text(&r["scope"]["name"]), text(&r["scope"]["value"])); }
+        let evidence = r["snapshot"]["event_id"].as_str().map(|s| format!("<code>{}</code> · {}", esc(s), text(&r["snapshot"]["schema"]))).unwrap_or_else(|| "No snapshot yet".into());
+        let _ = writeln!(w, "<dt>Evidence</dt><dd>{evidence}</dd><dt>Snapshot history</dt><dd>{} retained snapshots; resource trends use their own samples</dd></dl></details>", num(&r["history"]["samples"], &json!({"reason": "history unavailable"})));
+        if revoked {
+            let _ = writeln!(w, "<p>New browser approval is required. Keep the existing identity to preserve history; a lost identity stays separate.</p><a id=\"reconnect-{id}\" href=\"/connect\">Reconnect…</a>");
+        } else {
+            if !verified {
+                let _ = writeln!(w, "<p><a id=\"readback-{id}\" href=\"/connect?wait={}&amp;workspace={}&amp;generation={}&amp;since={now}\">Check pending readback</a></p>", enc(inst_id), enc(ws), text(&r["generation"]));
+            }
+            let _ = writeln!(w, "<p><a id=\"revoke-{id}\" href=\"/connect?revoke={}&amp;workspace={}\">Revoke…</a></p>", enc(inst_id), enc(ws));
+        }
+        let _ = writeln!(w, "</div>");
     }
-    let _ = writeln!(w, "</table>\n</section>");
+    let _ = writeln!(w, "</div>{panels}</section>");
 }
 
 /// One projected value as glyph and word: configured/registered, partial, missing, bypassed, disabled, unknown and
