@@ -20,7 +20,7 @@ use coreq::Tool;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -388,6 +388,13 @@ fn serve(t: &Tool, service: bool) -> ! {
                 let _ = std::fs::write(&healthy, "");
             }
         });
+        // only the launcher-run release updates itself; a service run from elsewhere just serves
+        let exe = |p: PathBuf| std::fs::canonicalize(p).ok();
+        if std::env::current_exe().ok().and_then(exe).is_some_and(|e| Some(e) == exe(t.release_exe(t.version))) {
+            std::thread::spawn(|| auto_update(tool()));
+        } else {
+            eprintln!("update: not an installed release; no automatic update");
+        }
     }
     let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
     profile::open(&dir);
@@ -525,6 +532,59 @@ fn selftest(t: &Tool) -> Result<(), String> {
     Ok(())
 }
 
+/// The release the coreq launcher rolled back: newer than `running`, never healthy, three starts of `project` (D2).
+fn rolled_back(install: &Path, running: &str, project: &str) -> Option<String> {
+    let found = std::fs::read_dir(install.join("releases")).ok()?.flatten().filter_map(|e| {
+        let (v, d) = (e.file_name().to_string_lossy().into_owned(), e.path());
+        let starts: u32 = std::fs::read_to_string(d.join("starts").join(project)).ok()?.trim().parse().ok()?;
+        (starts >= 3 && !d.join("healthy").exists() && coreq::update::newer(&v, running)).then_some(v)
+    });
+    found.reduce(|a, b| if coreq::update::newer(&b, &a) { b } else { a })
+}
+
+/// The version an automatic check applies: a newer release, unless it is the one rolled back after failed starts.
+fn applies<'a>(check: &'a Result<Option<String>, String>, skip: Option<&str>) -> Option<&'a str> {
+    check.as_ref().ok()?.as_deref().filter(|v| Some(*v) != skip)
+}
+
+/// Automatic update (D2): an installed `service run` checks after at most 900 s, then every `DASHQ_UPDATE_EVERY` s
+/// (default 3600), and applies a newer release by exiting 75 so the unit or launcher starts the new `current`.
+fn auto_update(t: Tool) {
+    let every = Duration::from_secs(std::env::var("DASHQ_UPDATE_EVERY").ok().and_then(|v| v.parse().ok()).filter(|n| *n > 0).unwrap_or(3600));
+    let project = std::env::current_dir().ok().and_then(|d| Some(d.file_name()?.to_string_lossy().into_owned())).unwrap_or_else(|| "_".into());
+    let skip_file = t.install.join("rolled-back");
+    std::thread::sleep(every.min(Duration::from_secs(900)));
+    loop {
+        if let Some(v) = rolled_back(&t.install, t.version, &project) {
+            let _ = std::fs::write(&skip_file, &v);
+        }
+        let skip = std::fs::read_to_string(&skip_file).ok().map(|s| s.trim().to_string());
+        let t0 = std::time::Instant::now();
+        let check = coreq::update::update(&t, true);
+        profile::record("update.check", t0, check.as_ref().err().map(|_| "failed"));
+        match (&check, applies(&check, skip.as_deref())) {
+            (Err(e), _) => eprintln!("update check: failed: {e}"),
+            (Ok(None), _) => eprintln!("update check: up to date ({})", t.version),
+            (Ok(Some(v)), None) => eprintln!("update check: {v} available; skipped: rolled back after failed starts"),
+            (Ok(Some(_)), Some(v)) => {
+                eprintln!("update check: {v} available; applying");
+                let t0 = std::time::Instant::now();
+                let r = coreq::update::update(&t, false);
+                profile::record("update", t0, r.as_ref().err().map(|_| "failed"));
+                match r {
+                    Ok(Some(v)) => {
+                        eprintln!("update: {v} applied; restarting");
+                        std::process::exit(75);
+                    }
+                    Ok(None) => eprintln!("update: up to date ({})", t.version),
+                    Err(e) => eprintln!("update: failed: {e}; staying on {}", t.version),
+                }
+            }
+        }
+        std::thread::sleep(every);
+    }
+}
+
 /// Only a release that became current restarts an installed service; check, unchanged and failed updates leave it running.
 fn restarts(r: &Result<Option<String>, String>, check: bool, installed: bool) -> bool {
     !check && installed && matches!(r, Ok(Some(_)))
@@ -648,6 +708,38 @@ mod tests {
         assert!(!restarts(&new, false, false), "no service unit");
         assert!(!restarts(&Ok(None), false, true), "unchanged");
         assert!(!restarts(&Err("selftest failed".into()), false, true), "failed");
+    }
+
+    // chain: the installed service applies a newer release on its own, never the one rolled back after failed starts (#130)
+    #[test]
+    fn auto_update_applies_new_releases_but_not_a_rolled_back_one() {
+        let new = Ok(Some("0.9.3".to_string()));
+        assert_eq!(applies(&new, None), Some("0.9.3"));
+        assert_eq!(applies(&new, Some("0.9.3")), None, "rolled back");
+        assert_eq!(applies(&new, Some("0.9.2")), Some("0.9.3"), "a newer release than the rolled-back one");
+        assert_eq!(applies(&Ok(None), None), None, "up to date");
+        assert_eq!(applies(&Err("timeout".into()), None), None, "failed check");
+
+        let d = std::env::temp_dir().join(format!("dashq-rollback-{}", std::process::id()));
+        let release = |v: &str, starts: &str, healthy: bool| {
+            let r = d.join("releases").join(v);
+            std::fs::create_dir_all(r.join("starts")).unwrap();
+            std::fs::write(r.join("starts").join("dashq"), starts).unwrap();
+            if healthy {
+                std::fs::write(r.join("healthy"), "").unwrap();
+            }
+        };
+        release("0.9.2", "1", true);
+        release("0.9.1", "3", false);
+        assert_eq!(rolled_back(&d, "0.9.2", "dashq"), None, "older releases are not candidates");
+        release("0.9.3", "2", false);
+        assert_eq!(rolled_back(&d, "0.9.2", "dashq"), None, "still starting");
+        release("0.9.3", "3", false);
+        assert_eq!(rolled_back(&d, "0.9.2", "dashq"), Some("0.9.3".into()));
+        assert_eq!(rolled_back(&d, "0.9.2", "other"), None, "starts count per project");
+        release("0.9.3", "3", true);
+        assert_eq!(rolled_back(&d, "0.9.2", "dashq"), None, "healthy");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     // Chain D13: pinned shared card fixtures -> duplicate/stale/receipt behavior and unmodified assets.
