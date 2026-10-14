@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS answerers(workspace TEXT NOT NULL, subject TEXT NOT N
 CREATE TABLE IF NOT EXISTS answers(op_id TEXT PRIMARY KEY, subject TEXT NOT NULL, workspace TEXT NOT NULL, board TEXT NOT NULL, task INTEGER NOT NULL, revision INTEGER NOT NULL, payload BLOB NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'stale', 'unknown')), receipt TEXT, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resource_grants(grant_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, subject TEXT NOT NULL, workspace TEXT NOT NULL, installation TEXT NOT NULL, generation INTEGER NOT NULL, projects TEXT NOT NULL, runtimes TEXT NOT NULL, host_policy INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resource_ops(op_id TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, actor_id TEXT NOT NULL, grant_id TEXT NOT NULL, submit TEXT NOT NULL, expires_at INTEGER NOT NULL, delivered INTEGER NOT NULL, cancel INTEGER NOT NULL, state TEXT NOT NULL, receipt TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS operations(operation TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, capability TEXT NOT NULL, workspace TEXT NOT NULL, actor TEXT NOT NULL, apply INTEGER NOT NULL, digest TEXT NOT NULL, expires_at INTEGER NOT NULL, op TEXT NOT NULL, queued INTEGER NOT NULL, delivered INTEGER NOT NULL, result TEXT, result_at INTEGER);
+CREATE INDEX IF NOT EXISTS operations_by_installation ON operations(installation, generation);
 ";
 
 /// C5 bounds; tests shrink them.
@@ -233,6 +235,31 @@ pub struct AnswerOp {
     pub state: String,
     pub receipt: Option<String>,
 }
+
+/// `queue` outcome: stored, the identical operation already stored, or refused with a safe code.
+#[derive(Debug, PartialEq)]
+pub enum Queued {
+    Queued,
+    Same,
+    Refused(&'static str),
+}
+
+/// One queued operation (D16) as stored: the immutable wire object `op` plus delivery and result state.
+#[derive(Debug, PartialEq)]
+pub struct OpRecord {
+    pub op: serde_json::Value,
+    pub workspace: String,
+    pub actor: String,
+    pub delivered: bool,
+    pub revoked: bool,
+    pub result: Option<serde_json::Value>,
+}
+
+/// D16 operation lifetime: AgentQ refuses a window over 300 s.
+pub const OPERATION_SECS: i64 = 300;
+/// Unresolved operations per installation, and resolved ones kept per installation after prune.
+const MAX_UNRESOLVED: i64 = 64;
+const KEEP_RESOLVED: i64 = 64;
 
 /// Failed approvals per code before it is invalidated (C3).
 const MAX_FAILURES: i64 = 5;
@@ -492,6 +519,163 @@ impl Store {
     /// Stores the outcome and sanitized receipt of an operation.
     pub fn finish_answer(&self, op_id: &str, state: &str, receipt: &str, now: i64) -> Result<(), Error> {
         self.write(|tx| Ok(tx.execute("UPDATE answers SET state = ?2, receipt = ?3, at = ?4 WHERE op_id = ?1", params![op_id, state, receipt, now]).map(|_| ())?))
+    }
+
+    /// Queues one operation (D16, coreq `/operations`) for its installation and generation under the server's own
+    /// authority: `subject` is the verified account, `op.authority.actor` must be its actor ID, `op.authority.workspace`
+    /// the live grant's, and the subject that workspace's administrator or the grant's approving member. The payload
+    /// is never read for authority. One unresolved apply per installation; full storage refuses.
+    pub fn queue(&self, subject: &str, op: &serde_json::Value, now: i64) -> Result<Queued, Error> {
+        use coreq::enroll::{MAX_OPERATIONS, MAX_PAYLOAD, digest};
+        let l = self.limits;
+        let (a, s) = (&op["authority"], |k: &str| op[k].as_str().unwrap_or_default().to_string());
+        let (id, inst, cap, dig) = (s("operation"), s("installation"), s("capability"), s("digest"));
+        let (Some(generation), Some(expires)) = (op["generation"].as_i64(), op["expires_at"].as_i64()) else { return Ok(Queued::Refused("invalid")) };
+        if id.len() != 32 || !id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) || !op["payload"].is_object() || !a.is_object() {
+            return Ok(Queued::Refused("invalid"));
+        }
+        if op["payload"].to_string().len() > MAX_PAYLOAD {
+            return Ok(Queued::Refused("payload_too_large"));
+        }
+        if dig != digest(&op["payload"]) {
+            return Ok(Queued::Refused("digest_mismatch"));
+        }
+        let profiles = a["profiles"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let pid = |p: &serde_json::Value| p.as_str().is_some_and(|p| (1..=64).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._:-".contains(&b)));
+        if a["actor"] != crate::enroll::actor_id(subject).as_str() || !(1..=64).contains(&profiles.len()) || !profiles.iter().all(pid) || profiles.iter().enumerate().any(|(i, p)| profiles[..i].contains(p)) {
+            return Ok(Queued::Refused("authority"));
+        }
+        if expires <= now || expires - now > OPERATION_SECS {
+            return Ok(Queued::Refused("invalid_expiry"));
+        }
+        let text = op.to_string();
+        let apply = op["payload"]["kind"] == "apply";
+        self.write(|tx| {
+            if let Some(stored) = tx.query_row("SELECT op FROM operations WHERE operation = ?1", [&id], |r| r.get::<_, String>(0)).optional()? {
+                return Ok(if stored == text { Queued::Same } else { Queued::Refused("replay_mismatch") });
+            }
+            let live: Option<(String, String, Option<String>)> = tx
+                .query_row(
+                    "SELECT workspace, account, capabilities FROM grants g WHERE installation = ?1 AND generation = ?2
+                       AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)
+                       AND EXISTS (SELECT 1 FROM activations x WHERE x.installation = g.installation AND x.generation = g.generation)",
+                    params![inst, generation],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((workspace, account, caps)) = live else { return Ok(Queued::Refused("no_grant")) };
+            if !serde_json::from_str::<Vec<String>>(caps.as_deref().unwrap_or("[]")).unwrap_or_default().contains(&cap) {
+                return Ok(Queued::Refused("scope"));
+            }
+            let role: Option<String> = tx.query_row("SELECT role FROM members WHERE workspace = ?1 AND subject = ?2", [&workspace, subject], |r| r.get(0)).optional()?;
+            if a["workspace"] != workspace.as_str() || !(role.as_deref() == Some("admin") || (role.is_some() && account == subject)) {
+                return Ok(Queued::Refused("authority"));
+            }
+            // unresolved: no result yet, and either pulled (the host may be running it) or still deliverable
+            let (pending, unresolved, applying): (i64, i64, i64) = tx.query_row(
+                "SELECT COALESCE(SUM(generation = ?2 AND expires_at > ?3), 0), COUNT(*), COALESCE(SUM(generation = ?2 AND apply = 1), 0)
+                 FROM operations WHERE installation = ?1 AND result IS NULL AND (delivered = 1 OR expires_at > ?3)",
+                params![inst, generation, now],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            if pending >= MAX_OPERATIONS as i64 || unresolved >= MAX_UNRESOLVED || (apply && applying > 0) {
+                return Ok(Queued::Refused("busy"));
+            }
+            if used(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes {
+                return Ok(Queued::Refused("store_full"));
+            }
+            tx.execute(
+                "INSERT INTO operations (operation, installation, generation, capability, workspace, actor, apply, digest, expires_at, op, queued, delivered) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
+                params![id, inst, generation, cap, workspace, a["actor"].as_str(), apply, dig, expires, text, now],
+            )?;
+            Ok(Queued::Queued)
+        })
+    }
+
+    /// The live, acknowledged grant of `installation` and the current snapshot payload of its workspace.
+    pub fn live(&self, installation: &str) -> Result<Option<(Grant, Option<String>)>, Error> {
+        Ok(self
+            .lock()?
+            .query_row(
+                "SELECT g.generation, g.workspace, g.account, g.scopes, g.board, g.capabilities, s.payload FROM grants g
+                 LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
+                 WHERE g.installation = ?1 AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)
+                   AND EXISTS (SELECT 1 FROM activations x WHERE x.installation = g.installation AND x.generation = g.generation)
+                 ORDER BY g.generation DESC LIMIT 1",
+                [installation],
+                |r| {
+                    let g = Grant { installation: installation.into(), generation: r.get(0)?, workspace: r.get(1)?, account: r.get(2)?, scopes: r.get(3)?, board: r.get(4)?, capabilities: r.get(5)? };
+                    Ok((g, r.get(6)?))
+                },
+            )
+            .optional()?)
+    }
+
+    /// `/operations`: pending operations of `capability` for the credential's own installation and generation (no
+    /// result, not expired), at most 16, marked delivered in the same commit. `None`: capability outside the grant.
+    pub fn pull(&self, verifier: &[u8], capability: &str, now: i64) -> Result<Option<Vec<serde_json::Value>>, Error> {
+        self.write(|tx| {
+            let g = authorize(tx, verifier)?.ok_or(Error::Denied)?;
+            if !serde_json::from_str::<Vec<String>>(g.capabilities.as_deref().unwrap_or("[]")).unwrap_or_default().iter().any(|c| c == capability) {
+                return Ok(None);
+            }
+            let mut q = tx.prepare(
+                "SELECT operation, op FROM operations WHERE installation = ?1 AND generation = ?2 AND capability = ?3 AND result IS NULL AND expires_at > ?4
+                 ORDER BY queued, operation LIMIT ?5",
+            )?;
+            let rows: Vec<(String, String)> = q.query_map(params![g.installation, g.generation, capability, now, coreq::enroll::MAX_OPERATIONS as i64], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+            drop(q);
+            for (id, _) in &rows {
+                tx.execute("UPDATE operations SET delivered = 1 WHERE operation = ?1", [id])?;
+            }
+            Ok(Some(rows.into_iter().map(|(_, op)| serde_json::from_str(&op).unwrap_or_default()).collect()))
+        })
+    }
+
+    /// `/operations/result`: stores the first result of the credential's own operation and binds its digest. `None`
+    /// is `accepted` (committed before the reply; the same result again repeats it), else the rejection reason. A
+    /// result uses the control reserve, so a full store still resolves operations.
+    pub fn post_result(&self, verifier: &[u8], operation: &str, digest: &str, result: &str, now: i64) -> Result<Option<&'static str>, Error> {
+        self.write(|tx| {
+            let g = authorize(tx, verifier)?.ok_or(Error::Denied)?;
+            let row: Option<(String, Option<String>)> = tx
+                .query_row("SELECT digest, result FROM operations WHERE operation = ?1 AND installation = ?2 AND generation = ?3", params![operation, g.installation, g.generation], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?;
+            Ok(match row {
+                None => Some("unknown_operation"),
+                Some((d, _)) if d != digest => Some("digest_mismatch"),
+                Some((_, Some(r))) => (r != result).then_some("replay_mismatch"),
+                Some((_, None)) => {
+                    tx.execute("UPDATE operations SET result = ?2, result_at = ?3 WHERE operation = ?1", params![operation, result, now])?;
+                    None
+                }
+            })
+        })
+    }
+
+    /// One stored operation with its delivery, grant and result state.
+    pub fn operation(&self, id: &str) -> Result<Option<OpRecord>, Error> {
+        Ok(self
+            .lock()?
+            .query_row(
+                "SELECT op, workspace, actor, delivered, EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation), result
+                 FROM operations o WHERE operation = ?1",
+                [id],
+                |r| {
+                    let (op, result): (String, Option<String>) = (r.get(0)?, r.get(5)?);
+                    Ok(OpRecord {
+                        op: serde_json::from_str(&op).unwrap_or_default(),
+                        workspace: r.get(1)?,
+                        actor: r.get(2)?,
+                        delivered: r.get(3)?,
+                        revoked: r.get(4)?,
+                        result: result.and_then(|x| serde_json::from_str(&x).ok()),
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// Workspaces where `subject` is a member, with its role.
@@ -833,6 +1017,13 @@ impl Store {
             tx.execute("DELETE FROM outbox WHERE queued < ?1", [cut])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
+            // resolved operations (a result, or expired never delivered) keep the newest per installation; unresolved stay
+            tx.execute(
+                "DELETE FROM operations WHERE (result IS NOT NULL OR (delivered = 0 AND expires_at <= ?1)) AND operation NOT IN
+                   (SELECT k.operation FROM operations k WHERE k.installation = operations.installation
+                      AND (k.result IS NOT NULL OR (k.delivered = 0 AND k.expires_at <= ?1)) ORDER BY k.queued DESC, k.operation DESC LIMIT ?2)",
+                params![now, KEEP_RESOLVED],
+            )?;
             Ok(())
         })?;
         self.lock()?.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
@@ -1045,5 +1236,54 @@ mod tests {
         assert!(r.authorize(b"v1").unwrap().is_some());
         assert_eq!(r.authorize(b"v2").unwrap(), None);
         assert_eq!(r.receipt(b"v1", "e1").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
+    }
+
+    // chain: D16 A2/A3 bounds, a full store refuses new operations but still commits results and keeps unresolved
+    // ones across restart; prune keeps every unresolved operation and the newest resolved ones per installation
+    #[test]
+    fn operations_survive_full_storage_restart_and_prune() {
+        let op = |n: u32, kind: &str, now: i64| {
+            let payload = serde_json::json!({"schema": 1, "kind": kind, "n": n});
+            serde_json::json!({"operation": format!("{n:032x}"), "capability": "agentq.configure", "installation": "inst-1", "generation": 1, "expires_at": now + OPERATION_SECS,
+                "digest": coreq::enroll::digest(&payload), "payload": payload, "authority": {"actor": "a", "workspace": "w", "profiles": ["p1"]}})
+        };
+        let open = |name: &str, l: Limits| {
+            let s = Store::open(&dir(name).join("dashq.db"), l).unwrap();
+            s.write(|tx| grant(tx, &AGENT, "w", "a", SCOPES, None, Some(r#"["agentq.configure"]"#), b"v1", NOW)).unwrap();
+            s.ack(b"v1", NOW).unwrap();
+            s.add_member("w", "a", "admin").unwrap();
+            s
+        };
+        let l = Limits { store_bytes: 2 << 20, reserve_bytes: 1 << 20, ..LIMITS };
+        let s = open("ops-full", l);
+        // the queuing subject must be the authority's actor
+        assert_eq!(s.queue("b", &op(1, "apply", NOW), NOW).unwrap(), Queued::Refused("authority"));
+        assert_eq!((s.queue("a", &op(1, "apply", NOW), NOW).unwrap(), s.queue("a", &op(2, "plan", NOW), NOW).unwrap()), (Queued::Queued, Queued::Queued));
+        assert_eq!(s.pull(b"v1", "agentq.configure", NOW).unwrap().unwrap().len(), 2);
+        let big = "x".repeat(32 << 10);
+        for i in 0..200 {
+            if s.accept(b"v1", &[snap(&format!("e{i}"), NOW, &big)], NOW).unwrap()[0] == Outcome::Rejected("store_full") {
+                break;
+            }
+        }
+        assert_eq!(s.queue("a", &op(3, "plan", NOW), NOW).unwrap(), Queued::Refused("store_full"));
+        assert_eq!(s.post_result(b"v1", &format!("{:032x}", 1), op(1, "apply", NOW)["digest"].as_str().unwrap(), "{\"outcome\":\"applied\"}", NOW).unwrap(), None);
+        let path = Store::path(&s.lock().unwrap());
+        drop(s);
+        let s = Store::open(&path, l).unwrap();
+        let (a, b) = (s.operation(&format!("{:032x}", 1)).unwrap().unwrap(), s.operation(&format!("{:032x}", 2)).unwrap().unwrap());
+        assert!(a.result.is_some() && b.delivered && b.result.is_none());
+        // 70 plans expire undelivered one after another; prune keeps 64 of them and the unresolved delivered plan
+        let s = open("ops-prune", LIMITS);
+        assert_eq!(s.queue("a", &op(1000, "plan", NOW), NOW).unwrap(), Queued::Queued);
+        s.pull(b"v1", "agentq.configure", NOW).unwrap();
+        for n in 0..70 {
+            let now = NOW + n as i64 * (OPERATION_SECS + 1);
+            assert_eq!(s.queue("a", &op(n, "plan", now), now).unwrap(), Queued::Queued, "{n}");
+        }
+        s.prune(NOW + 70 * (OPERATION_SECS + 1)).unwrap();
+        let left: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, 65);
+        assert!(s.operation(&format!("{:032x}", 1000)).unwrap().is_some() && s.operation(&format!("{:032x}", 0)).unwrap().is_none());
     }
 }
