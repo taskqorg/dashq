@@ -421,6 +421,11 @@ fn selftest(t: &Tool) -> Result<(), String> {
     Ok(())
 }
 
+/// Only a release that became current restarts an installed service; check, unchanged and failed updates leave it running.
+fn restarts(r: &Result<Option<String>, String>, check: bool, installed: bool) -> bool {
+    !check && installed && matches!(r, Ok(Some(_)))
+}
+
 fn main() {
     let t = tool();
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -453,11 +458,22 @@ fn main() {
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
         ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
-        ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => match coreq::update::update(&t, !rest.is_empty()) {
-            Ok(Some(v)) => println!("update: {v}"),
-            Ok(None) => println!("update: up to date"),
-            Err(e) => t.die(&e),
-        },
+        ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => {
+            let check = !rest.is_empty();
+            let r = coreq::update::update(&t, check);
+            let u = coreq::service::unit(&t, std::path::Path::new("."), "dashq");
+            let restart = restarts(&r, check, u.path.exists());
+            match r {
+                Ok(Some(v)) => println!("update: {v}"),
+                Ok(None) => println!("update: up to date"),
+                Err(e) => t.die(&e),
+            }
+            // the running service keeps the old release until its unit is reloaded (#83)
+            if restart {
+                coreq::service::run_all(&u.unload, true).and_then(|_| coreq::service::run_all(&u.load, false)).unwrap_or_else(|e| t.die(&format!("restart: {e}")));
+                println!("service restart: ok ({})", u.path.display());
+            }
+        }
         ["service", op @ ("install" | "uninstall")] => {
             let root = std::env::current_dir().unwrap_or_else(|e| t.die(&e.to_string()));
             let u = coreq::service::unit(&t, &root, "dashq");
@@ -477,6 +493,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // chain: `dashq update` switches the running service to the new release (#83)
+    #[test]
+    fn update_restarts_only_onto_a_new_release() {
+        let new = Ok(Some("0.7.0".to_string()));
+        assert!(restarts(&new, false, true));
+        assert!(!restarts(&new, true, true), "--check installs nothing");
+        assert!(!restarts(&new, false, false), "no service unit");
+        assert!(!restarts(&Ok(None), false, true), "unchanged");
+        assert!(!restarts(&Err("selftest failed".into()), false, true), "failed");
+    }
 
     #[test]
     fn fixture_rendering_is_pinned() {
