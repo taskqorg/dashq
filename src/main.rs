@@ -151,10 +151,14 @@ impl App {
     fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
         let c = &self.cfg;
         let now = source::now();
+        let span = profile::current();
         let (lf, boards, releases, taskq) = std::thread::scope(|sc| {
-            let lf = sc.spawn(|| match &c.langfuse {
-                Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
-                None => Value::Null,
+            let lf = sc.spawn(|| {
+                profile::enter(span);
+                match &c.langfuse {
+                    Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
+                    None => Value::Null,
+                }
             });
             let gh: Vec<_> = c
                 .projects
@@ -162,7 +166,8 @@ impl App {
                 .filter_map(|r| Some((r, c.github_token.as_deref()?)))
                 .map(|(r, token)| {
                     sc.spawn(move || {
-                        let b = self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
+                        profile::enter(span);
+                        let b =self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
                         let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, token));
                         // one single flight per board: callers inside 60 s share one `taskq status --json` run
                         let t = c.taskq_bin.as_ref().map(|bin| self.cache.get(&format!("taskq:{r}"), 60, || source::taskq_status(bin, r, token)));
@@ -185,14 +190,18 @@ impl App {
         let t0 = std::time::Instant::now();
         let serverq = source::serverq(&c.serverq_report);
         profile::record("read.serverq", t0, serverq["error"].as_str());
+        let t0 = std::time::Instant::now();
         let host = filters["host"].as_str().map(String::from);
         // committed snapshots never wait for or depend on the optional sources above (D11)
         let projection = enroll::projection(&self.enroll, scope, host.as_deref(), now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
+        profile::step("enrollment", t0);
+        let t0 = std::time::Instant::now();
         let mut doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
         }));
+        profile::step("build", t0);
         if let Some(p) = projection {
             doc["sources"]["enrollment"] = p["source"].clone();
             doc["installations"] = p;
@@ -259,7 +268,7 @@ fn handle(app: &App, mut s: TcpStream) {
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
     let c = &app.cfg;
     let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
-    let t0 = std::time::Instant::now();
+    let t0 = profile::begin();
     let (op, status) = if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.answer", x.status)

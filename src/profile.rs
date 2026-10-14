@@ -2,9 +2,11 @@
 //! ranks operations worst first. Records hold operation names, numbers, outcomes and error classes only.
 
 use serde_json::{Value, json};
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -26,9 +28,51 @@ pub const OPS: [(&str, u64, f64); 12] = [
 /// Store bound: past `MAX` bytes the file is cut to its newest half.
 const MAX: u64 = 4 << 20;
 const FILE: &str = "profile.jsonl";
+/// First line after a prune: records before the oldest kept one are gone.
+const PRUNED: &str = "{\"pruned\":true}\n";
 
 static STORE: OnceLock<PathBuf> = OnceLock::new();
 static LOCK: Mutex<()> = Mutex::new(());
+static NEXT: AtomicU64 = AtomicU64::new(1);
+
+/// A traced call: its id and start. Records on the same thread while it is open trace as its steps.
+pub type Span = Option<(u64, Instant)>;
+thread_local! {
+    static SPAN: Cell<Span> = const { Cell::new(None) };
+}
+
+/// Starts a measured call; with tracing on, it opens a span whose inner records print as steps.
+pub fn begin() -> Instant {
+    let t = Instant::now();
+    SPAN.set(trace().then(|| (NEXT.fetch_add(1, Ordering::Relaxed), t)));
+    t
+}
+
+/// The open span, to carry into worker threads with `enter`.
+pub fn current() -> Span {
+    SPAN.get()
+}
+
+pub fn enter(s: Span) {
+    SPAN.set(s);
+}
+
+/// A trace-only step of the open span, for work that is not a measured operation itself.
+pub fn step(name: &str, t0: Instant) {
+    if let Some(s) = SPAN.get() {
+        eprintln!("{}", line(Some(s), name, t0, None));
+    }
+}
+
+/// One trace line: `trace OP MS ms OUTCOME`, inside a span `trace #ID step OP MS ms at +OFFSET ms OUTCOME`.
+fn line(span: Span, op: &str, t0: Instant, error: Option<&str>) -> String {
+    let (ms, out) = (t0.elapsed().as_millis(), error.unwrap_or("ok"));
+    match span {
+        Some((id, s)) if s == t0 => format!("trace #{id} {op} {ms} ms {out}"),
+        Some((id, s)) => format!("trace #{id} step {op} {ms} ms at +{} ms {out}", t0.saturating_duration_since(s).as_millis()),
+        None => format!("trace {op} {ms} ms {out}"),
+    }
+}
 
 pub fn trace() -> bool {
     std::env::var_os("DASHQ_TRACE").is_some_and(|v| v == "1")
@@ -56,7 +100,12 @@ pub fn record(op: &str, start: Instant, error: Option<&str>) {
     let ms = start.elapsed().as_millis() as u64;
     let error = error.map(class);
     if trace() {
-        eprintln!("trace {op} {ms} ms {}", error.as_deref().unwrap_or("ok"));
+        let span = SPAN.get();
+        eprintln!("{}", line(span, op, start, error.as_deref()));
+        // the span's own record closes it
+        if span.is_some_and(|s| s.1 == start) {
+            SPAN.set(None);
+        }
     }
     let Some(p) = STORE.get() else { return };
     let line = json!({"at": crate::source::now(), "op": op, "ms": ms, "outcome": if error.is_some() { "failed" } else { "ok" }, "error": error}).to_string() + "\n";
@@ -64,13 +113,17 @@ pub fn record(op: &str, start: Instant, error: Option<&str>) {
     let _ = append(p, &line, MAX);
 }
 
-// ponytail: the lock covers this process only; a concurrent `dashq update` prune may drop a line of the service
-fn append(p: &Path, line: &str, max: u64) -> std::io::Result<()> {
+fn create(p: &Path, append: bool) -> std::io::Result<std::fs::File> {
     let mut o = std::fs::OpenOptions::new();
-    o.create(true).append(true);
+    o.create(true).write(true).append(append).truncate(!append);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
-    let mut f = o.open(p)?;
+    o.open(p)
+}
+
+// ponytail: the lock covers this process only; a concurrent `dashq update` prune may drop a line of the service
+fn append(p: &Path, line: &str, max: u64) -> std::io::Result<()> {
+    let mut f = create(p, true)?;
     f.write_all(line.as_bytes())?;
     if f.metadata()?.len() <= max {
         return Ok(());
@@ -79,7 +132,10 @@ fn append(p: &Path, line: &str, max: u64) -> std::io::Result<()> {
     let cut = s.len().saturating_sub(max as usize / 2);
     let start = s[cut..].iter().position(|b| *b == b'\n').map_or(s.len(), |i| cut + i + 1);
     let tmp = p.with_extension("tmp");
-    std::fs::write(&tmp, &s[start..])?;
+    let _ = std::fs::remove_file(&tmp);
+    let mut t = create(&tmp, false)?;
+    t.write_all(PRUNED.as_bytes())?;
+    t.write_all(&s[start..])?;
     std::fs::rename(tmp, p)
 }
 
@@ -90,9 +146,13 @@ fn pct(sorted: &[u64], p: usize) -> u64 {
 /// The profile report of the window ending at `now`; `text` is the store, `None` when it is missing.
 pub fn report(text: Option<&str>, now: u64, window: u64) -> Value {
     let from = now.saturating_sub(window);
-    let (mut by, mut corrupt) = (BTreeMap::<String, Vec<(u64, String, Option<String>)>>::new(), 0);
+    let (mut by, mut corrupt, mut pruned, mut oldest) = (BTreeMap::<String, Vec<(u64, String, Option<String>)>>::new(), 0, false, u64::MAX);
     for line in text.unwrap_or("").lines().filter(|l| !l.trim().is_empty()) {
         let r: Value = serde_json::from_str(line).unwrap_or_default();
+        if r["pruned"] == true {
+            pruned = true;
+            continue;
+        }
         let (Some(at), Some(op), Some(ms), Some(out)) = (r["at"].as_u64(), r["op"].as_str(), r["ms"].as_u64(), r["outcome"].as_str()) else {
             corrupt += 1;
             continue;
@@ -101,14 +161,17 @@ pub fn report(text: Option<&str>, now: u64, window: u64) -> Value {
             corrupt += 1;
             continue;
         }
+        oldest = oldest.min(at);
         if at >= from && at <= now {
             by.entry(op.into()).or_default().push((ms, out.into(), r["error"].as_str().map(String::from)));
         }
     }
+    // a prune that dropped records inside the window leaves its start unmeasured
+    let cut = (pruned && oldest > from).then(|| format!("store pruned: window covered from {}", oldest.min(now)));
     let unknown: Vec<Value> = OPS
         .iter()
         .filter(|(op, ..)| !by.contains_key(*op))
-        .map(|(op, ..)| json!({"op": op, "reason": if text.is_none() { "no profile store" } else { "no samples in window" }}))
+        .map(|(op, ..)| json!({"op": op, "reason": if text.is_none() { "no profile store" } else if cut.is_some() { "store pruned" } else { "no samples in window" }}))
         .collect();
     let mut rows: Vec<(f64, f64, Value)> = by
         .iter()
@@ -140,10 +203,11 @@ pub fn report(text: Option<&str>, now: u64, window: u64) -> Value {
     // worst first: slowness against budget or failure rate against the error budget, then instability
     rows.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.total_cmp(&a.1)));
     let samples: usize = by.values().map(Vec::len).sum();
-    let store = match (text, corrupt) {
-        (None, _) => json!({"state": "unknown", "reason": "no profile store", "corrupt": 0}),
-        (_, 0) => json!({"state": "ok", "reason": null, "corrupt": 0}),
-        (_, n) => json!({"state": "incomplete", "reason": format!("{n} corrupt records skipped"), "corrupt": n}),
+    let store = match (text, cut, corrupt) {
+        (None, ..) => json!({"state": "unknown", "reason": "no profile store", "corrupt": 0}),
+        (_, Some(c), n) => json!({"state": "unknown", "reason": c, "corrupt": n}),
+        (_, None, 0) => json!({"state": "ok", "reason": null, "corrupt": 0}),
+        (_, None, n) => json!({"state": "incomplete", "reason": format!("{n} corrupt records skipped"), "corrupt": n}),
     };
     json!({
         "schema": 1, "generated_at": now, "window_s": window, "from": from, "to": now, "trace": if trace() { "on" } else { "off" },
@@ -189,18 +253,38 @@ mod tests {
         assert!(!r["unknown"].as_array().unwrap().iter().any(|u| u["op"] == "http.page"));
     }
 
-    // chain: the store stays bounded and keeps whole newest records; no content, only classes
+    // chain: the store stays bounded, private across prunes and keeps whole newest records; a pruned window reads
+    // unknown, never ok; no content, only classes
     #[test]
     fn store_is_bounded() {
         let p = std::env::temp_dir().join(format!("dashq-profile-{}.jsonl", std::process::id()));
         let _ = std::fs::remove_file(&p);
+        let rec = |i: u64| json!({"at": i, "op": "http.page", "ms": 5, "outcome": "ok", "error": null}).to_string() + "\n";
         for i in 0..200 {
-            append(&p, &format!("{{\"at\":{i}}}\n"), 1000).unwrap();
+            append(&p, &rec(i), 1000).unwrap();
         }
         let s = std::fs::read_to_string(&p).unwrap();
-        assert!(s.len() <= 1000 && s.starts_with("{\"at\":") && s.ends_with("{\"at\":199}\n"));
+        assert!(s.len() <= 1000 + PRUNED.len() && s.starts_with(PRUNED) && s.ends_with(&rec(199)), "{s}");
+        #[cfg(unix)]
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&p).unwrap().permissions()) & 0o777, 0o600);
         let _ = std::fs::remove_file(&p);
+        let oldest: u64 = s.lines().nth(1).and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|r| r["at"].as_u64()).unwrap();
+        let r = report(Some(&s), 199, 199);
+        assert_eq!((r["store"]["state"].as_str(), r["store"]["reason"].clone()), (Some("unknown"), json!(format!("store pruned: window covered from {oldest}"))));
+        assert_eq!(r["unknown"][0]["reason"], "store pruned");
+        assert_eq!(report(Some(&s), 199, 199 - oldest)["store"]["state"], "ok", "a window inside the kept records is whole");
         assert_eq!(class("taskq incomplete: HTTP 401 /home/x"), "taskq incomplete");
         assert_eq!(class("HTTP 500"), "HTTP 500");
+    }
+
+    // chain: a traced call prints its steps with their offsets under one id, then its own total
+    #[test]
+    fn trace_spans_steps() {
+        let t = Instant::now() - std::time::Duration::from_millis(30);
+        let step = t + std::time::Duration::from_millis(10);
+        assert!(line(Some((7, t)), "read.board", step, Some("timeout")).starts_with("trace #7 step read.board "));
+        assert!(line(Some((7, t)), "read.board", step, None).contains(" ms at +10 ms ok"));
+        assert!(line(Some((7, t)), "http.data", t, None).starts_with("trace #7 http.data "));
+        assert!(line(None, "update", t, Some("failed")).starts_with("trace update ") && line(None, "update", t, Some("failed")).ends_with(" ms failed"));
     }
 }
