@@ -130,6 +130,16 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.goto(url);
     const q = '[id="board-taskqorg%2Ftaskq-q-12"]';
     await page.waitForSelector(q + ' button[data-choice="1"]:not([disabled])');
+    // D6/D13: route access must not enable a retained or incomplete board observation after refresh.
+    for (const source of [{state: 'stale', incomplete: false}, {state: 'ok', incomplete: true}]) {
+      snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, source: {...b.source, ...source}});
+      await page.evaluate(() => refresh());
+      assert(await page.locator(q + ' button[data-choice="1"]').isDisabled(), 'incomplete observation stays read-only');
+      assert.equal(answers.posts.length, 0);
+    }
+    snapshot = boards => boards;
+    await page.evaluate(() => refresh());
+    await page.waitForSelector(q + ' button[data-choice="1"]:not([disabled])');
     await page.locator(q + ' button[data-choice="1"]').click();
     await page.waitForFunction(q => document.querySelector(q).innerText.includes('Answer accepted on the board'), q);
     const [first] = answers.posts;
