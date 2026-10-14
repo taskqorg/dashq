@@ -806,7 +806,7 @@ pub fn build(inp: &Value) -> Value {
         Some("ok" | "incomplete") => None,
         _ => Some(lf_src["reason"].as_str().unwrap_or("read not confirmed").to_string()),
     };
-    let clients = crate::clients::build(
+    let mut clients = crate::clients::build(
         &crate::clients::Ctx {
             now, heartbeats: rows("agentq.installation"), compress: rows("agentq.compress.24h"), retrieval: rows("agentq.retrieval.24h"),
             compress_gap: use_gap("agentq.compress.24h"), retrieval_gap: use_gap("agentq.retrieval.24h"),
@@ -816,6 +816,12 @@ pub fn build(inp: &Value) -> Value {
         },
         &fleet, &activity, &inp["installations"], &mut current, &mut gaps,
     );
+    if lf_src["state"] == "unconfirmed" {
+        // a failed read shows the cached heartbeat as last known, never as current (D6)
+        for r in clients["rows"].as_array_mut().into_iter().flatten() {
+            r["heartbeat"]["state"] = json!("unconfirmed");
+        }
+    }
     let taskq_src = (!taskq_states.is_empty()).then(|| worst(taskq_states.iter().map(|(n, s)| (n.clone(), s)), now));
     let gh_src = if gh_states.is_empty() { source(&Value::Null, now, GITHUB_LIMIT, None) } else { worst(gh_states.iter().map(|(n, s)| (n.clone(), s)), now) };
 

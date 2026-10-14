@@ -27,13 +27,20 @@ fn unix(v: &Value) -> Value {
     v.as_u64().map_or(Value::Null, |t| json!(t))
 }
 
-/// A heartbeat JSON-string field: the parsed value, or the reason it reads unknown.
+/// A heartbeat JSON-string field of the expected shape: the parsed value, or the reason it reads unknown (D6).
+/// `agentq.routing` is an object of per-client objects; `agentq.hooks` is a list of objects that name their agent.
 fn field(row: &Value, key: &str) -> Result<Value, String> {
-    match aq(row, key) {
-        Value::Null => Err(format!("heartbeat has no {key} (agentq#134)")),
-        Value::String(s) => serde_json::from_str(s).map_err(|_| format!("{key} unreadable (cut or invalid)")),
-        _ => Err(format!("{key} unreadable (not a JSON string)")),
-    }
+    let v: Value = match aq(row, key) {
+        Value::Null => return Err(format!("heartbeat has no {key} (agentq#134)")),
+        Value::String(s) => serde_json::from_str(s).map_err(|_| format!("{key} unreadable (cut or invalid)"))?,
+        _ => return Err(format!("{key} unreadable (not a JSON string)")),
+    };
+    let ok = if key == "agentq.routing" {
+        v.as_object().is_some_and(|m| m.values().all(Value::is_object))
+    } else {
+        v.as_array().is_some_and(|l| l.iter().all(|h| h["agent"].is_string()))
+    };
+    if ok { Ok(v) } else { Err(format!("{key} unreadable (unexpected shape)")) }
 }
 
 pub struct Ctx<'a> {
@@ -275,7 +282,24 @@ mod tests {
         // a stale heartbeat keeps its rows as last known but asserts nothing
         let mut stale = inp.clone();
         stale["now"] = json!(now + 8000);
-        assert!(crate::data::build(&stale)["attention"]["current"].as_array().unwrap().iter().all(|i| !i["what"].as_str().unwrap().ends_with(" 24 h")));
+        let stale_doc = crate::data::build(&stale);
+        assert!(stale_doc["attention"]["current"].as_array().unwrap().iter().all(|i| !i["what"].as_str().unwrap().ends_with(" 24 h")));
+        // ... and renders its routing and hook badges as last known, never as current ok
+        let html = crate::page::render(&stale_doc, &json!({}));
+        let table = &html[html.find("<h3>agentq clients").unwrap()..];
+        let table = &table[..table.find("</table>").unwrap()];
+        assert!(table.contains("Last known routed") && table.contains("Last known ok") && !table.contains("s ok\""), "{table}");
+        // D6: a heartbeat field of the wrong JSON shape reads unknown with its reason, never as no hook runs or no routing
+        let mut odd = inp.clone();
+        let m = &mut odd["langfuse"]["value"]["agentq.installation"][0]["metadata"];
+        m["attributes.agentq.routing"] = json!("[]");
+        m["attributes.agentq.hooks"] = json!("{}");
+        let odd_doc = crate::data::build(&odd);
+        let odd_codex = odd_doc["agents"]["clients"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "inst-mac" && r["client"] == "codex").unwrap().clone();
+        assert_eq!((odd_codex["routing_reason"].as_str(), odd_codex["hooks"].is_null(), odd_codex["hooks_reason"].as_str()),
+            (Some("agentq.routing unreadable (unexpected shape)"), true, Some("agentq.hooks unreadable (unexpected shape)")));
+        let html = crate::page::render(&odd_doc, &json!({}));
+        assert!(!html.contains("no hook runs") && html.contains("agentq.hooks unreadable (unexpected shape)"));
         // agent or session filters keep the rows but not the unfiltered 24 h use
         let mut filtered = inp.clone();
         filtered["filters"] = json!({"session": "s1"});

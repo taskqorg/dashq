@@ -320,14 +320,17 @@ fn clients(w: &mut String, c: &Value, cc: &Value, cr: &Value, now: u64) {
     let _ = writeln!(w, "<h3>agentq clients (use over 24 h)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Client</th><th>Routing</th><th>Hooks (last failure)</th><th>MCP</th><th>Hook compress (compressed · bytes saved)</th><th>Compress records</th><th>Retrievals (installation)</th></tr>");
     for r in c["rows"].as_array().into_iter().flatten() {
         let client = AGENTS.iter().find(|(k, _)| r["client"] == *k).map_or_else(|| none(&r["use_reason"]), |(_, n)| n.to_string());
-        let stale = if r["heartbeat"]["state"] == "ok" { String::new() } else { " <span class=\"detail\">last known</span>".into() };
+        let fresh = r["heartbeat"]["state"] == "ok";
+        let stale = if fresh { String::new() } else { " <span class=\"detail\">last known</span>".into() };
+        // a stale or unconfirmed heartbeat never shows a current badge (D6)
+        let last = |s: &str| if fresh { s.to_string() } else { format!("Last known {s}") };
         let rt = &r["routing"];
         let routing = if rt.is_null() {
             none(&r["routing_reason"])
         } else {
             let s = rt["state"].as_str().unwrap_or("unknown");
-            let class = match s { "routed" => "ok", "direct" | "bypassed" => "warn", _ => "unknown" };
-            format!("{}{}", badge(class, s), rt["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default())
+            let class = match s { _ if !fresh => "unconfirmed", "routed" => "ok", "direct" | "bypassed" => "warn", _ => "unknown" };
+            format!("{}{}", badge(class, &last(s)), rt["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default())
         };
         let hooks = match r["hooks"].as_array() {
             None => none(&r["hooks_reason"]),
@@ -336,7 +339,7 @@ fn clients(w: &mut String, c: &Value, cc: &Value, cr: &Value, now: u64) {
                 let s = h["state"].as_str().unwrap_or("unknown");
                 let f = &h["last_failure"];
                 let fail = if f.is_null() { String::new() } else { format!(" <span class=\"detail\">failed {}: {}</span>", at(&f["at"], now), f["error"].as_str().map_or("reason withheld".into(), esc)) };
-                format!("{} {}{fail}", text(&h["event"]), badge(if s == "failed" { "error" } else { s }, s))
+                format!("{} {}{fail}", text(&h["event"]), badge(if !fresh { "unconfirmed" } else if s == "failed" { "error" } else { s }, &last(s)))
             }).collect::<Vec<_>>().join("<br>"),
         };
         let mcp = if r["mcp"].is_null() { none(&r["mcp_reason"]) } else { text(&r["mcp"]) };
