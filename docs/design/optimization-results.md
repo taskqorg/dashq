@@ -18,6 +18,6 @@ The accepted [reference](optimization-results-reference.html), [preview](optimiz
 
 Use AgentQ conformance fixtures for outcome/reason totals, source boundaries, deduplication, byte sums and coverage. Match the reference at 1024px/16px light and 360px/20px dark; cover period/client selection, reason disclosure, incomplete/missing/empty sources and separate experiment detail. Real samples determine each bucket; do not interpolate missing events.
 
-For #67, the owner accepted fixture and browser proof; live qualification below is deferred to a separate authorized task.
+For #67, the owner accepted fixture and browser proof. #68 recorded [live evidence](evidence/optimization-results-live.md) for the macOS run adapter and its remaining gaps.
 
 Live qualification compares local AgentQ stats, exported events and the guarded dashboard for the same scope/window and exact versions, including late delivery, duplicate events and unavailable sources. Verify read-only authorization and absence of raw content. Actual task effects stay unknown until a qualifying experiment exists. Do not enable or change agent settings to populate the view.
