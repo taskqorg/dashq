@@ -14,11 +14,13 @@ async function refresh() {
     const main = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById('main');
     if (!main) throw new Error('invalid page');
     // D10: new values keep open disclosures, focus and reading position
-    const open = [...document.querySelectorAll('main details')].map(d => d.open);
+    // a disclosure is keyed by its id, else its nearest id and summary, so added rows do not shift the others
+    const key = d => d.id || (d.parentElement.closest('[id]')?.id + ':' + d.querySelector('summary')?.textContent);
+    const open = new Map([...document.querySelectorAll('main details')].map(d => [key(d), d.open]));
     const focus = document.activeElement?.id;
     const y = window.scrollY;
     document.getElementById('main').replaceWith(main);
-    main.querySelectorAll('details').forEach((d, i) => { if (i < open.length) d.open = open[i]; });
+    main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (focus) document.getElementById(focus)?.focus({ preventScroll: true });
     window.scrollTo(0, y);
     bind();

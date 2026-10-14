@@ -181,6 +181,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = writeln!(w, "</section>");
 
     installations(w, &doc["installations"], now);
+    integrations(w, &doc["installations"]);
     resources(w, &doc["resources"], now);
 
     // 2. Hosts
@@ -381,6 +382,190 @@ fn installations(w: &mut String, inst: &Value, now: u64) {
     let _ = writeln!(w, "</table>\n</section>");
 }
 
+/// One projected value as glyph and word: configured/registered, partial, missing, bypassed, disabled, unknown and
+/// unsupported stay distinct (agentq-settings.md G1).
+fn aq_state(v: &Value) -> (&'static str, &'static str, &'static str) {
+    match v.as_str() {
+        Some("registered") => ("good", "✓", "registered"),
+        Some("enabled") => ("good", "✓", "enabled"),
+        Some("configured") => ("good", "✓", "configured"),
+        Some("routed") => ("good", "✓", "AgentQ"),
+        Some("direct") => ("muted", "→", "Direct"),
+        Some("partial") => ("ask", "◐", "partial"),
+        Some("absent") => ("ask", "✕", "missing"),
+        Some("missing") => ("ask", "✕", "missing"),
+        Some("bypassed") => ("ask", "↷", "bypassed"),
+        Some("disabled") => ("muted", "○", "off"),
+        Some("unsupported") => ("muted", "—", "not supported"),
+        _ => ("ask", "?", "unknown"),
+    }
+}
+
+fn aq_word(v: &Value) -> String {
+    let (class, glyph, word) = aq_state(v);
+    format!("<span class=\"aq-{class}\">{glyph} {word}</span>")
+}
+
+fn aq_glyph(name: &str, v: &Value) -> String {
+    let (class, glyph, word) = aq_state(v);
+    format!("<span class=\"aq-{class}\" title=\"{name} {word}\" role=\"img\" aria-label=\"{name} {word}\">{glyph}</span>")
+}
+
+/// AgentQ's fixed codes in words; an unlisted code is shown as sent (it is a short identifier).
+fn aq_code(c: &Value) -> String {
+    match c.as_str().unwrap_or("other") {
+        "foreign_provider" => "another provider owns the routing".into(),
+        "unparseable_config" => "client config cannot be parsed".into(),
+        "unreadable_config" => "client config cannot be read".into(),
+        "not_released" => "configuration adapter not released".into(),
+        "stale" => "stale snapshot".into(),
+        "truncated" => "profile list truncated".into(),
+        "incomplete" => "incomplete readback".into(),
+        "conflict" => "conflicting config".into(),
+        "project_override" => "project overrides present".into(),
+        "other" => "unlisted problem".into(),
+        other => esc(other),
+    }
+}
+
+fn aq_codes(v: &Value) -> Vec<String> {
+    v.as_array().into_iter().flatten().map(aq_code).collect()
+}
+
+/// AgentQ client integrations (agentq-settings.md G1, G4): read-only profiles from each connected AgentQ snapshot's
+/// `configuration` projection. Configured is never verified; nothing here is a TaskQ task or a saving.
+// ponytail: read-only view; review/apply (G1 editor, G2 results, G3 adapter) waits for AgentQ A3 apply and its own task
+fn integrations(w: &mut String, inst: &Value) {
+    let rows: Vec<&Value> = inst["rows"].as_array().into_iter().flatten().filter(|r| r["product"] == "agentq" && r["connection"] != "revoked").collect();
+    if rows.is_empty() {
+        return;
+    }
+    let count: usize = rows.iter().filter_map(|r| r["snapshot"]["payload"]["configuration"]["profiles"].as_array()).map(Vec::len).sum();
+    let _ = writeln!(
+        w,
+        "<section id=\"integrations\" class=\"aq\">\n<h2>Agent integrations</h2>\n<p class=\"note\">{count} profile{} · read-only. ✓ configured · ◐ partial · ✕ missing · ↷ bypassed · ○ off · ? unknown · — not supported. Client activity is verified separately.</p>\n<div class=\"aq-head\" aria-hidden=\"true\"><span>Client / profile</span><span>Routing</span><span>MCP / hooks</span><span>Optimization</span></div>",
+        if count == 1 { "" } else { "s" }
+    );
+    for r in rows {
+        let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
+        let host = format!("{} · {}", text(&r["host_label"]), text(&r["runtime"]));
+        let payload = &r["snapshot"]["payload"];
+        let c = &payload["configuration"];
+        let o = &r["observation"];
+        let age = o["age_s"].as_u64().map_or_else(|| esc(o["reason"].as_str().unwrap_or("age unknown")), |a| format!("observed {} ago", dur(a)));
+        if !matches!(c["state"].as_str(), Some("fresh" | "stale")) {
+            let why = match (r["snapshot"].is_null(), c["reason"].as_str()) {
+                (true, _) => "no snapshot yet".into(),
+                (_, Some(why)) => esc(why),
+                _ => "not reported by this AgentQ version".into(),
+            };
+            let _ = writeln!(w, "<p class=\"aq-gap\"><b>{host}</b> · {} <span class=\"detail\">{why}</span></p>", aq_word(&Value::Null));
+            continue;
+        }
+        let mut notes = vec![];
+        // D6: a stale profile is never green
+        let stale = c["state"] == "stale" || o["state"] != "ok";
+        if stale {
+            notes.push(format!("{} snapshot · {age}", badge("stale", "stale")));
+        }
+        if c["truncated"] == true {
+            notes.push("Only the first 16 profiles arrived.".into());
+        }
+        if c["incomplete"] == true {
+            notes.push("Some profiles failed validation and are not shown.".into());
+        }
+        if !notes.is_empty() {
+            let _ = writeln!(w, "<p class=\"aq-gap\"><b>{host}</b> · {}</p>", notes.join(" "));
+        }
+        for p in c["profiles"].as_array().into_iter().flatten() {
+            let id = format!("aq-{}-{}", crate::enroll::anchor(inst_id, ws), esc(p["id"].as_str().unwrap_or("")));
+            let ops: Vec<&str> = p["operations"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            let plugin = ops.contains(&"plugin");
+            let second = if plugin { aq_glyph("plugin", &p["plugin"]) } else { aq_glyph("hooks", &p["hooks"]) };
+            let eff = &p["effective"];
+            let _ = writeln!(
+                w,
+                "<details id=\"{id}\" class=\"aq-row{}\"><summary><span class=\"aq-client\"><b>{}</b><small>{host} · {}</small></span><span><i class=\"aq-label\">Routing</i>{}</span><span><i class=\"aq-label\">MCP / {}</i>{} / {second}</span><span><i class=\"aq-label\">Optimization</i>{}</span></summary>",
+                if stale { " aq-stale" } else { "" },
+                text(&p["label"]),
+                text(&p["id"]),
+                aq_word(&p["routing"]),
+                if plugin { "plugin" } else { "hooks" },
+                aq_glyph("MCP", &p["mcp"]),
+                aq_word(&eff["state"])
+            );
+            let routing_note = match (p["kind"].as_str(), p["routing"].as_str()) {
+                (_, Some("unsupported")) => "This client has no provider route.",
+                (Some("codex"), Some("direct")) => "Direct keeps MCP and telemetry; it bypasses the provider optimization.",
+                (Some("claude-code"), Some("direct")) => "Direct removes the AgentQ route; the command hook can still use RTK.",
+                (_, Some("routed")) => "The client's provider runs through the local AgentQ proxy.",
+                (_, Some("bypassed")) => "Another provider owns the route; AgentQ does not overwrite it.",
+                _ => "Routing could not be read.",
+            };
+            let adapter = match eff["adapter"].as_str() {
+                Some("provider") => "provider proxy",
+                Some("hook") => "tool hook",
+                Some("plugin") => "tool-result plugin",
+                _ => "no adapter",
+            };
+            let pref = if p["optimization"] == "unsupported" { aq_word(&p["optimization"]) } else { format!("preference {} · {adapter}", aq_word(&p["optimization"])) };
+            let mut chips = vec![format!("<span class=\"aq-chip\">agent_context {}</span>", aq_word(&p["mcp"]))];
+            if plugin {
+                chips.push(format!("<span class=\"aq-chip\">plugin {}</span>", aq_word(&p["plugin"])));
+            } else if p["hooks"] != "unsupported" {
+                chips.push(format!("<span class=\"aq-chip\">hooks {}</span>", aq_word(&p["hooks"])));
+            }
+            let aliases: Vec<String> = p["aliases"].as_array().into_iter().flatten().map(|a| format!("<span class=\"aq-chip\">{}</span>", text(a))).collect();
+            let overrides = match p["overrides"].as_u64() {
+                Some(0) => "none".into(),
+                Some(n) => format!("<span class=\"aq-ask\">{n}</span>"),
+                None => "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".into(),
+            };
+            let owned = match p["owned"].as_bool() {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "unknown",
+            };
+            let problems = [aq_codes(&p["conflicts"]), aq_codes(&p["incomplete"])].concat();
+            let problems = if problems.is_empty() { String::new() } else { format!("<p class=\"aq-ask\">{}</p>", problems.join(" · ")) };
+            let verification = if p["verification"]["state"] == "verified" {
+                "<p class=\"aq-good\">✓ Verified client activity</p>".to_string()
+            } else {
+                format!(
+                    "<p class=\"aq-ask\">Client activity unverified</p><small>{}A written config or healthy service does not verify the client path.</small>",
+                    if p["verification"]["reason"] == "no_evidence" { "No client observation for this profile yet. " } else { "" }
+                )
+            };
+            let engines: Vec<String> = payload["engines"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(e, v)| format!("<div class=\"aq-fact\"><span>{}</span><span>{}</span></div>", esc(e), if v["version"].is_null() { "unknown".into() } else { format!("{} · {}", text(&v["version"]), text(&v["state"])) }))
+                .collect();
+            let d = &c["defaults"];
+            let _ = writeln!(
+                w,
+                "<div class=\"aq-body\"><div><div class=\"aq-fact\"><span>Routing</span><span>{}</span></div><small>{routing_note}</small>\n<div class=\"aq-fact\"><span>Context optimization</span><span>{}</span></div><small>{pref}</small>\n<div class=\"aq-fact\"><span>MCP &amp; {}</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Shared config</span><span class=\"aq-chips\">{}</span></div>\n<div class=\"aq-fact\"><span>Project overrides</span><span>{overrides}</span></div>\n<div class=\"aq-fact\"><span>AgentQ-owned entries</span><span>{owned}</span></div>{problems}\n<p class=\"detail\">Read-only: {}.</p></div>\n<div><b>Verification</b>{verification}\n<div class=\"aq-fact\"><span>Revision</span><span><code>{}</code></span></div>\n<details><summary>Managed engines</summary>{}<small>Managed by the AgentQ release, not per client. Host minimum {} bytes; host optimization {}.</small></details>\n<details><summary>Activity</summary><small>Active task and progress are not supplied by this AgentQ projection.</small></details></div></div></details>",
+                aq_word(&p["routing"]),
+                aq_word(&eff["state"]),
+                if plugin { "plugin" } else { "hooks" },
+                chips.join(""),
+                aliases.join(""),
+                aq_codes(&p["writes"]["reasons"]).join(", "),
+                text(&p["revision"]),
+                engines.join(""),
+                if d["min_bytes"].is_null() { "unknown".into() } else { text(&d["min_bytes"]) },
+                match d["enabled"].as_bool() {
+                    Some(true) => "on",
+                    Some(false) => "off",
+                    None => "unknown",
+                }
+            );
+        }
+    }
+    let _ = writeln!(w, "<p class=\"detail\">AgentQ owns integrations. Client login, model and approval policy stay with the client.</p>\n</section>");
+}
+
 /// Bytes in GB with one decimal (10^9, the producers' own figures).
 fn gb(v: &Value) -> String {
     v.as_u64().map_or("—".into(), |b| format!("{:.1}", b as f64 / 1e9))
@@ -433,4 +618,72 @@ fn resources(w: &mut String, res: &Value, now: u64) {
         );
     }
     let _ = writeln!(w, "</table>\n</section>");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One connected AgentQ installation per fixture case (fixture/agentq/configuration.json).
+    pub fn agentq_doc() -> Value {
+        let cases: Value = serde_json::from_str(include_str!("../fixture/agentq/configuration.json")).unwrap();
+        let rows: Vec<Value> = ["profile_state_and_revision", "profile_projection", "profile_projection_overrides", "profile_projection_stale", "old_producer_configuration_unknown", "unsupported_schema", "no_status"]
+            .iter()
+            .map(|k| {
+                let stale = *k == "profile_projection_stale";
+                json!({"installation": format!("inst-{}", k.len()), "product": "agentq", "runtime": "native", "host_label": k.replace('_', "-"), "workspace": "ws-1", "generation": 1, "connection": "active",
+                    "observation": {"state": if stale { "stale" } else { "ok" }, "at": 1000, "age_s": if stale { 1000 } else { 30 }, "reason": if stale { json!("older than 180 s") } else { Value::Null }},
+                    "history": {"samples": 3, "state": "ok"}, "export": {"state": "ok"}, "snapshot": {"event_id": k, "schema": "agentq-snapshot/1", "payload": cases["cases"][k]}})
+            })
+            .chain([json!({"installation": "inst-new", "product": "agentq", "runtime": "wsl", "host_label": "pc", "workspace": "ws-1", "connection": "active", "observation": {"state": "unknown", "reason": "no snapshot yet"}, "snapshot": null})])
+            .collect();
+        json!({"generated_at": 1030, "installations": {"source": {"state": "ok"}, "rows": rows}})
+    }
+
+    /// agentq-settings.md G1/G4, #62 A3–A5: actual capabilities, aliases, routing, MCP/hooks/plugin, preference and
+    /// effective state from AgentQ's own projection; missing, unsupported, stale, bypassed, configured and unverified
+    /// stay distinct; no write control, task or saving appears.
+    #[test]
+    fn agentq_profiles_render_read_only_from_snapshots() {
+        let mut w = String::new();
+        integrations(&mut w, &agentq_doc()["installations"]);
+        if let Some(out) = std::env::var_os("DASHQ_EVIDENCE") {
+            let css = include_str!("../assets/style.css");
+            std::fs::write(out, format!("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>{css}</style></head><body><main id=\"main\">{w}</main></body></html>")).unwrap();
+        }
+        let section = |host: &str| w.split("<b>").find(|s| s.contains(host)).unwrap_or_else(|| panic!("{host} in {w}")).to_string();
+        // the onboarded Codex profile: Direct bypasses provider optimization, MCP and hooks registered, shared aliases
+        let codex = w.split("<details id=").find(|s| s.contains("<b>Codex</b><small>profile-state-and-revision")).unwrap();
+        assert!(codex.contains("→ Direct") && codex.contains("↷ bypassed") && codex.contains("aria-label=\"MCP registered\"") && codex.contains("aria-label=\"hooks registered\""), "{codex}");
+        assert!(codex.contains(">codex-cli<") && codex.contains(">codex-desktop<") && codex.contains("preference <span class=\"aq-good\">✓ enabled</span> · provider proxy"), "{codex}");
+        let claude = w.split("<details id=").find(|s| s.contains("<b>Claude Code</b><small>profile-state-and-revision")).unwrap();
+        assert!(claude.contains("aria-label=\"MCP unknown\"") && claude.contains("client config cannot be parsed · client config cannot be read") && claude.contains("Read-only: configuration adapter not released, incomplete readback, conflicting config."), "{claude}");
+        let hermes = w.split("<details id=").find(|s| s.contains("<b>Hermes</b>")).unwrap();
+        assert!(hermes.contains("MCP / plugin") && hermes.contains("aria-label=\"plugin enabled\"") && hermes.contains("✓ configured") && hermes.contains("— not supported"), "{hermes}");
+        let chat = w.split("<details id=").find(|s| s.contains("<b>Claude Desktop Chat</b><small>profile-state-and-revision")).unwrap();
+        assert!(chat.contains("aria-label=\"MCP missing\"") && chat.contains("This client has no provider route.") && !chat.contains("preference"), "{chat}");
+        // configured is never verified
+        assert!(hermes.contains("Client activity unverified") && !w.contains("Verified client activity"));
+        // the projection's own drops and states
+        assert!(section("profile-projection").contains("Some profiles failed validation"));
+        assert!(w.contains("project overrides present") && w.contains("<span class=\"aq-ask\">3</span>"));
+        assert!(section("profile-projection-stale").contains("stale</span> snapshot · observed 16m ago"), "{w}");
+        assert!(w.contains("class=\"aq-row aq-stale\"><summary><span class=\"aq-client\"><b>Codex</b><small>profile-projection-stale"));
+        assert!(section("old-producer").contains("older producer") && section("unsupported-schema").contains("unsupported schema") && section("no-status").contains("no status"));
+        assert!(section("pc").contains("no snapshot yet"));
+        // read-only: no form control, no task or saving claim
+        for absent in ["<button", "<input", "<select", "<form", "saving", "saved"] {
+            assert!(!w.contains(absent), "{absent}");
+        }
+        assert!(w.contains("Active task and progress are not supplied by this AgentQ projection."));
+        assert!(w.contains("0.51.0 · ready") && w.contains("Host minimum 2048 bytes"));
+    }
+
+    #[test]
+    fn integrations_absent_without_agentq_rows() {
+        let mut w = String::new();
+        integrations(&mut w, &Value::Null);
+        integrations(&mut w, &json!({"rows": [{"product": "serverq"}, {"product": "agentq", "connection": "revoked"}]}));
+        assert!(w.is_empty());
+    }
 }
