@@ -8,10 +8,15 @@ const read = f => fs.readFileSync(f, 'utf8');
 // Same concatenation as src/main.rs app_js()/style_css().
 const js = ['assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(read).join('\n');
 const css = ['assets/style.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(read).join('\n');
+// `snapshot` rewrites the served board rows, so a refresh can add or remove tasks.
+let snapshot = boards => boards;
+const unescape = s => s.replace(/&(quot|#39|lt|gt|amp);/g, (_, e) => ({quot: '"', '#39': "'", lt: '<', gt: '>', amp: '&'}[e]));
+const escape = s => s.replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const page = () => read('fixture/page.html').replace(/data-boards="([^"]*)"/, (_, b) => 'data-boards="' + escape(JSON.stringify(snapshot(JSON.parse(unescape(b))))) + '"');
 const server = http.createServer((req, res) => {
   const p = new URL(req.url, 'http://x').pathname;
   const [type, body] = p === '/app.js' ? ['text/javascript', js] : p === '/style.css' ? ['text/css', css]
-    : p === '/data' ? ['application/json', read('fixture/data.json')] : ['text/html', read('fixture/page.html')];
+    : p === '/data' ? ['application/json', read('fixture/data.json')] : ['text/html', page()];
   res.setHeader('Content-Type', type + '; charset=utf-8'); res.end(body);
 });
 const long = 'taskqorg/' + 'a-very-long-project-name-'.repeat(4);
@@ -60,6 +65,23 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     assert.deepEqual(errors, [], at);
     await page.close();
   }
+  // changing snapshot: a refresh that removes Doing keeps focus on the same Ask counter and card control, not a shifted one
+  {
+    const page = await browser.newPage({viewport: {width: 1024, height: 900}});
+    await page.goto(url); await page.waitForSelector('#boards .tqp-counts');
+    const ask = '[id="board-taskqorg%2Ftaskq"] [data-state=ask]';
+    await page.locator(ask).focus();
+    snapshot = boards => boards.map(b => ({...b, tasks: b.tasks && b.tasks.filter(t => !(b.project === 'taskqorg/taskq' && t.state === 'doing'))}));
+    await page.evaluate(() => refresh());
+    assert.equal(await page.$$eval('[id="board-taskqorg%2Ftaskq"] [data-state=doing]', bs => bs.length), 0, 'Doing removed');
+    assert(await page.$eval(ask, b => b === document.activeElement), 'focus after Doing removed: ' + await page.evaluate(() => document.activeElement.id));
+    await page.locator('[id="board-taskqorg%2Ftaskq-q-12"] a').first().focus();
+    const link = await page.evaluate(() => document.activeElement.getAttribute('href'));
+    snapshot = boards => boards;
+    await page.evaluate(() => refresh());
+    assert.equal(await page.evaluate(() => document.activeElement.closest('[id$="-q-12"]') && document.activeElement.getAttribute('href')), link, 'card focus after Doing restored');
+    await page.close();
+  }
   // narrow long-text fixture: long project, title and question wrap inside the column
   const page = await browser.newPage({viewport: {width: 360, height: 900}, colorScheme: 'dark'});
   await page.goto(url); await page.addStyleTag({content: 'html{font-size:20px}'});
@@ -71,5 +93,5 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'long text overflow');
   await page.locator('#boards').screenshot({path: `${out}/360-20-dark-long.png`});
   await browser.close(); server.close();
-  console.log('PASS boards browser (' + browser.version() + '): 4 size/theme layouts, long text, counters, icon contrast, Attention, 3 refreshes');
+  console.log('PASS boards browser (' + browser.version() + '): 4 size/theme layouts, long text, counters, icon contrast, Attention, 3 refreshes, changing-snapshot focus');
 })().catch(e => { console.error(e); server.close(); process.exit(1); });

@@ -6,6 +6,14 @@ const questionId = (name, n) => boardId(name) + '-q-' + n;
 // DashQ board rows -> TaskQ project model; a failed or incomplete read is partial, so counters read `?`.
 const boardProjects = boards => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
   complete: b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: b.counts.closed, tasks: b.tasks || []}));
+function controlKey(e) {
+  const d = e.dataset;
+  if (d.tqp) return d.tqp + (d.state ? '-' + d.state : '');
+  if (d.qac) return d.qac + (d.choice ? '-' + d.choice : '');
+  if (e.tagName === 'SUMMARY') return 'summary' + (e.parentElement.className ? '-' + e.parentElement.className : '');
+  if (e.tagName === 'A') return 'link-' + encodeURIComponent(e.getAttribute('href') || '');
+  return e.tagName.toLowerCase();
+}
 function renderBoards() {
   const root = document.getElementById('boards');
   if (!root) return;
@@ -16,6 +24,7 @@ function renderBoards() {
   const aggregate = document.createElement('div');
   aggregate.innerHTML = TaskqProjectBlocks.aggregate(projects);
   fragments.append(aggregate);
+  aggregate.id = 'boards-all';
   for (const [index, p] of projects.entries()) {
     const b = boards[index], wrap = document.createElement('div');
     wrap.id = boardId(p.id);
@@ -51,6 +60,7 @@ function renderBoards() {
       }
       if (boardFilter && (!boardFilter.project || boardFilter.project === p.id) && row.state !== boardFilter.state) continue;
       const el = document.createElement('div');
+      el.id = wrap.id + '-task-' + row.n;
       el.innerHTML = TaskqProjectBlocks.task(p, row);
       const failed = b.failed?.find(f => f.number === row.n);
       if (failed) {
@@ -76,10 +86,17 @@ function renderBoards() {
   }
   for (const id of boardCards.keys()) if (!kept.has(id)) boardCards.delete(id);
   blocks.replaceChildren(fragments);
-  // Stable IDs let the page refresh restore keyboard focus after moving the retained container.
-  for (const group of blocks.children) {
-    group.querySelectorAll('button,a,summary,textarea').forEach((e, i) => { if (!e.id) e.id = (group.id || 'boards-all') + '-control-' + i; });
-  }
+  // The page refresh restores focus and drafts by ID. A control ID names its board/task/card and its action/state,
+  // never its DOM position, so rows added or removed by a refresh cannot move focus to another control.
+  const used = new Set();
+  blocks.querySelectorAll('button,a,summary,textarea').forEach(e => {
+    if (e.id) return;
+    const base = e.parentElement.closest('[id]').id + '-' + controlKey(e);
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = base + '-' + n;
+    used.add(id);
+    e.id = id;
+  });
   root.querySelector('.board-fallback').hidden = true;
 }
 if (typeof module === 'object') module.exports = {boardProjects};
