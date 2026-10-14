@@ -6,8 +6,8 @@ const fs = require('fs'), http = require('http'), assert = require('assert');
 const out = process.env.DASHQ_BOARDS_EVIDENCE || 'docs/design/evidence/boards';
 const read = f => fs.readFileSync(f, 'utf8');
 // Same concatenation as src/main.rs app_js()/style_css().
-const js = ['assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(read).join('\n');
-const css = ['assets/style.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(read).join('\n');
+const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(read).join('\n');
+const css = ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(read).join('\n');
 // `snapshot` rewrites the served board rows, so a refresh can add or remove tasks.
 let snapshot = boards => boards;
 const unescape = s => s.replace(/&(quot|#39|lt|gt|amp);/g, (_, e) => ({quot: '"', '#39': "'", lt: '<', gt: '>', amp: '&'}[e]));
