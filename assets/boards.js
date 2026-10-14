@@ -28,6 +28,10 @@ function renderBoards() {
   aggregate.innerHTML = TaskqProjectBlocks.aggregate(projects);
   fragments.append(aggregate);
   aggregate.id = 'boards-all';
+  const coverage = document.createElement('p');
+  coverage.className = 'detail';
+  coverage.textContent = 'Current coverage: ' + projects.filter(p => p.complete).length + ' of ' + projects.length + ' boards fresh and complete. Unavailable boards are excluded from current totals.';
+  aggregate.append(coverage);
   for (const [index, p] of projects.entries()) {
     const b = boards[index], wrap = document.createElement('div');
     wrap.id = boardId(p.id);
@@ -36,6 +40,13 @@ function renderBoards() {
     freshness.className = 'detail';
     freshness.textContent = b.source.state + ' · ' + (b.source.age_s == null ? 'age unknown' : b.source.age_s + ' s old') + (b.source.reason ? ' · ' + b.source.reason : '');
     wrap.append(freshness);
+    if (!p.complete && b.source.at != null) {
+      const last = document.createElement('details');
+      last.id = wrap.id + '-last-known';
+      last.open = open.get(last.id) || false;
+      last.innerHTML = '<summary>Last-known counts · not current</summary>' + TaskqProjectBlocks.counters(b.counts, p.id, p.name + ' last known');
+      wrap.append(last);
+    }
     const tasks = document.createElement('details');
     tasks.id = wrap.id + '-tasks';
     tasks.open = open.get(tasks.id) || (boardFilter && (!boardFilter.project || boardFilter.project === p.id));
@@ -53,11 +64,14 @@ function renderBoards() {
           const el = document.createElement('div');
           el.id = id;
           card = {el, widget: TaskqAnswerCard.mount(el, {
-            capability: () => ({answer: false, reason: 'Answer adapter has not been qualified; answer on the board.'}),
+            capability: () => ({answer: false, reason: card.source.state === 'ok'
+              ? 'Answer adapter has not been qualified; answer on the board.'
+              : 'Board observation ' + card.source.state + ': ' + (card.source.reason || 'current revision unavailable') + '; answer on the board.'}),
             send: () => Promise.reject(new Error('Answering is disabled'))
           })};
           boardCards.set(id, card);
         }
+        card.source = b.source;
         wrap.append(card.el);
         card.widget.update([{board: p.id, row}]);
       }
@@ -76,7 +90,7 @@ function renderBoards() {
     }
     if (!shown) {
       const empty = document.createElement('p');
-      empty.textContent = boardFilter?.state === 'closed' ? 'Closed total is unknown; open the board.' : 'No matching tasks observed.';
+      empty.textContent = boardFilter?.state === 'closed' ? 'Closed total is unknown; open the board.' : p.complete ? 'No matching tasks observed.' : b.source.at == null ? 'No board observation received yet.' : 'No matching tasks in the retained observation; current state unknown.';
       tasks.append(empty);
     }
     wrap.append(tasks);

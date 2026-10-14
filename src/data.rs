@@ -805,7 +805,7 @@ pub fn build(inp: &Value) -> Value {
 
     // serverq (D4.3)
     let sq = &inp["serverq"];
-    let sq_src = source(sq, now, SERVERQ_LIMIT, None);
+    let sq_src = source(sq, now, SERVERQ_LIMIT, sq["value"]["at"].as_u64());
     let sq_host = inp["serverq_host"].as_str().unwrap_or("");
     let report = &sq["value"];
     let mut results = Vec::new();
@@ -852,7 +852,13 @@ pub fn build(inp: &Value) -> Value {
     }
 
     // Resources (D4.4): enrolled history first, Langfuse samples otherwise; a stale or missing sample is a gap.
-    let resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, fhost);
+    let mut resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, fhost);
+    if lf_src["state"] == "unconfirmed" {
+        for r in resources["rows"].as_array_mut().into_iter().flatten().filter(|r| r["provenance"] == "langfuse") {
+            r["source"]["state"] = json!("unconfirmed");
+            r["source"]["reason"] = lf_src["reason"].clone();
+        }
+    }
     for r in resources["rows"].as_array().into_iter().flatten().filter(|r| r["source"]["state"] != "ok") {
         gaps.push(json!({"source": r["provenance"], "host": r["host"], "what": format!("resources of {}: {}", r["installation"].as_str().unwrap_or(""), r["source"]["state"].as_str().unwrap_or("")),
             "since": r["source"]["at"], "detail": r["source"]["reason"], "trace_id": null}));
@@ -909,12 +915,30 @@ fn question(t: &Value) -> Value {
 
 /// 503 when every source failed with no value to show (D7).
 pub fn all_failed(doc: &Value) -> bool {
-    doc["sources"].as_object().is_some_and(|s| s.values().all(|x| x["state"] == "unknown" && x["reason"].as_str().is_some_and(|r| r.contains("read failed"))))
+    let sources: Vec<&Value> = doc["sources"].as_object().into_iter().flatten()
+        .filter(|(name, x)| name.as_str() != "export" && x["reason"] != "not configured").map(|(_, x)| x).collect();
+    !sources.is_empty() && sources.iter().all(|x| x["state"] == "unknown" && x["reason"].as_str().is_some_and(|r| r.contains("read failed")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D19 U2: cached resource collection failure is unconfirmed, with producer ages and other boards retained.
+    #[test]
+    fn startup_partial_collection_failure() {
+        let mut input: Value = serde_json::from_str(crate::FIXTURE).unwrap();
+        let good = build(&input);
+        input["langfuse"]["error"] = json!("timeout");
+        let failed = build(&input);
+        assert_eq!(failed["boards"][0], good["boards"][0], "independently fresh board is unaffected");
+        for (last, current) in good["resources"]["rows"].as_array().unwrap().iter().zip(failed["resources"]["rows"].as_array().unwrap()) {
+            assert_eq!(current["current"], last["current"]);
+            assert_eq!(current["source"]["at"], last["source"]["at"]);
+            assert_eq!(current["source"]["age_s"], last["source"]["age_s"]);
+            assert_eq!(current["source"]["state"], "unconfirmed");
+        }
+    }
 
     #[test]
     fn query_validates_every_parameter() {
