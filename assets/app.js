@@ -19,6 +19,7 @@ async function refresh() {
     const key = d => d.id || (d.parentElement.closest('[id]')?.id + ':' + d.querySelector('summary')?.textContent);
     const open = new Map([...document.querySelectorAll('main details')].map(d => [key(d), d.open]));
     const selected = document.querySelector('.connect-select[aria-pressed="true"]')?.getAttribute('aria-controls');
+    const version = document.querySelector('.version-select[aria-pressed="true"]')?.getAttribute('aria-controls');
     const active = document.activeElement;
     const focus = active?.id;
     const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
@@ -35,6 +36,7 @@ async function refresh() {
     document.getElementById('main').replaceWith(main);
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
+    if (version) selectVersion(version);
     drafts.forEach((draft, id) => {
       const e = document.getElementById(id);
       if (e) { e.value = draft.value; if ('checked' in e) e.checked = draft.checked; }
@@ -202,12 +204,24 @@ function selectConnection(id) {
     e.setAttribute('aria-expanded', selected);
   });
 }
+function selectVersion(id) {
+  const panel = document.getElementById(id);
+  if (!panel?.matches('.version-body')) return;
+  document.querySelectorAll('.version-body').forEach(e => { e.hidden = e !== panel; });
+  document.querySelectorAll('.version-select').forEach(e => {
+    const selected = e.getAttribute('aria-controls') === id;
+    e.setAttribute('aria-pressed', selected);
+    e.setAttribute('aria-expanded', selected);
+  });
+}
 function revealConnection() {
   const id = location.hash.slice(1);
   selectConnection(id);
   document.getElementById('select-' + id)?.scrollIntoView();
 }
 document.addEventListener('click', e => {
+  const version = e.target.closest('.version-select');
+  if (version) selectVersion(version.getAttribute('aria-controls'));
   const row = e.target.closest('.connect-select');
   if (row) selectConnection(row.getAttribute('aria-controls'));
 });

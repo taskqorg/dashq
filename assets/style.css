@@ -147,3 +147,52 @@ tr:target td { background: #eef4ff; }
 .connections .connect-select { background: transparent; color: inherit; border: 0; border-bottom: 1px solid var(--cn-line); border-radius: 0; width: 100%; text-align: left; font: inherit; padding: 8px 4px; }
 .connections .connect-select:hover, .connections .connect-select[aria-pressed=true] { background: var(--cn-hover); }
 .connections [hidden] { display: none !important; }
+
+/* D18 V4: pinned service-versions-reference.html layout; production has no demo controls. */
+
+#qversions{--paper:light-dark(#fafbfc,#252b32);--ink:light-dark(#243039,#eef2f5);--secondary:light-dark(#59636e,#b9c3cd);--line:light-dark(#dce0e5,#46505b);--hover:light-dark(#e9edf1,#37424c);--good:light-dark(#246f59,#8dd2b8);--ask:light-dark(#955525,#edbc96);--bad:light-dark(#a6324b,#ee96a5);font:1rem/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--ink)}
+#qversions *{box-sizing:border-box}
+#qversions .app{background:var(--paper);padding:12px;border-radius:8px}
+#qversions button,#qversions select{font:inherit;color:inherit;min-height:32px;padding:4px 6px;border:0;border-radius:5px;background:transparent}
+#qversions select{border:1px solid var(--line);background:var(--paper);max-width:100%}
+#qversions button:hover,#qversions button[aria-pressed=true]{background:var(--hover)}
+#qversions :focus-visible{outline:2px solid var(--good);outline-offset:2px}
+#qversions strong,#qversions h3{font-weight:500}
+#qversions h3{font-size:1em;margin:0 0 7px}
+#qversions p{margin:6px 0}
+#qversions small{font-size:.85em;color:var(--secondary)}
+#qversions svg{width:16px;height:16px;vertical-align:-3px;flex-shrink:0}
+#qversions .line{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#qversions .spread{justify-content:space-between}
+#qversions .ask{color:var(--ask)}
+#qversions .good{color:var(--good)}
+#qversions .bad{color:var(--bad)}
+#qversions .muted{color:var(--secondary)}
+#qversions .inventory{margin:8px 0}
+#qversions .row{display:grid;grid-template-columns:minmax(140px,1.5fr) repeat(3,minmax(85px,.8fr)) minmax(140px,1.5fr);gap:8px;align-items:center;width:100%;text-align:left;border-bottom:1px solid var(--line);padding:8px 6px;font-variant-numeric:tabular-nums}
+#qversions .row small{display:block}
+#qversions .row span{min-width:0;overflow-wrap:anywhere}
+#qversions .rowhead{color:var(--secondary);font-size:.85em}
+#qversions .label{display:none}
+#qversions .detail{border-top:1px solid var(--line);padding-top:12px;margin-top:6px}
+#qversions .columns{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:12px}
+#qversions .steps{list-style:none;padding:0;margin:0}
+#qversions .steps li{display:grid;grid-template-columns:18px 1fr;gap:6px;padding:4px 0}
+#qversions .fact{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;border-bottom:1px solid var(--line);padding:5px 0}
+#qversions .fact span:last-child{text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+#qversions .notice{margin:8px 0;background:var(--hover);padding:7px 9px;border-radius:5px}
+#qversions .timeline{display:grid;grid-template-columns:4em minmax(0,1fr);gap:7px 10px;padding:8px 0;font-variant-numeric:tabular-nums}
+#qversions details{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
+#qversions summary{min-height:32px}
+#qversions code{font:inherit;background:var(--hover);padding:1px 4px;overflow-wrap:anywhere}
+#qversions [hidden]{display:none!important}@media(max-width:670px){#qversions .rowhead{display:none}
+#qversions .row{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+#qversions .row .identity{grid-column:1/-1}
+#qversions .row .health{grid-column:1/-1}
+#qversions .label{display:block!important;color:var(--secondary);font-size:.85em}
+#qversions .columns{grid-template-columns:1fr;gap:16px}}@media(pointer:coarse){#qversions button,#qversions select,#qversions summary{min-height:44px}}
+
+#qversions { color-scheme: light dark; margin-top: 24px; }
+#qversions h2 { font-size: 1em; font-weight: 500; margin: 0; }
+#qversions .detail { color: var(--ink); overflow-wrap: anywhere; }
+#qversions button.row { border-bottom: 1px solid var(--line); padding: 8px 6px; cursor: pointer; }
