@@ -196,3 +196,29 @@ tr:target td { background: #eef4ff; }
 #qversions h2 { font-size: 1em; font-weight: 500; margin: 0; }
 #qversions .detail { color: var(--ink); overflow-wrap: anywhere; }
 #qversions button.row { border-bottom: 1px solid var(--line); padding: 8px 6px; cursor: pointer; }
+
+/* D17 Results: pinned AgentQ reference, inherited theme and type size. */
+#aqresults{--paper:light-dark(#fafbfc,#252b32);--ink:light-dark(#243039,#eef2f5);--secondary:light-dark(#59636e,#b9c3cd);--line:light-dark(#dce0e5,#46505b);--hover:light-dark(#e9edf1,#37424c);--good:light-dark(#246f59,#8dd2b8);--bad:light-dark(#a6324b,#ee96a5);color-scheme:light dark;font:1rem/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--ink)}
+#aqresults .app{background:var(--paper);padding:12px;border-radius:8px}
+#aqresults h2,#aqresults h3{margin:0;font-size:1em}#aqresults p{margin:5px 0}
+#aqresults small{display:block;font-size:.85em;color:var(--secondary);overflow-wrap:anywhere}
+#aqresults .line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}#aqresults .spread{justify-content:space-between}
+#aqresults .section{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+#aqresults .stats{display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;margin:8px 0}
+#aqresults button[aria-expanded=true]{background:var(--hover)}
+#aqresults .composition{width:100%;height:7px;display:block;margin:6px 0}
+#aqresults .compressed{fill:var(--good,#26835b)}#aqresults .passed{fill:var(--secondary,#7e838c);opacity:.55}#aqresults .failed{fill:var(--bad,#ce5266)}
+#aqresults .columns{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}#aqresults .columns>section{min-width:0;margin:0}
+#aqresults .history{display:flex;gap:6px;align-items:end;height:100px;margin-top:8px;border-bottom:1px solid var(--line)}#aqresults .history svg{flex:1;min-width:0;height:100%}
+#aqresults .volume{display:grid;grid-template-columns:4em minmax(0,1fr) 5em;gap:6px;align-items:center;margin:7px 0}#aqresults .volume svg{width:100%;height:12px}#aqresults .volume strong{text-align:right}
+#aqresults .profile{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,3em);gap:5px;align-items:center;padding:4px 0;overflow-wrap:anywhere}#aqresults .profile>span:not(:first-child){text-align:right}
+#aqresults .rowhead{color:var(--secondary)}#aqresults .detail{padding:8px;background:var(--hover);border-radius:6px;margin-top:8px}
+#aqresults .reason{display:grid;grid-template-columns:minmax(0,1fr) 3em;gap:10px}#aqresults .reason strong{text-align:right}
+#aqresults summary{min-height:32px}#aqresults [hidden]{display:none!important}
+@media(max-width:640px){#aqresults .columns{grid-template-columns:1fr}#aqresults .app{padding:9px}#aqresults .profile{grid-template-columns:minmax(0,1fr) repeat(3,2.4em)}}
+#aqresults button,#aqresults select{font:inherit;color:inherit;background:transparent;border:1px solid var(--line);border-radius:5px;padding:4px 6px}
+#aqresults .bucket.unknown{background:repeating-linear-gradient(135deg,transparent,transparent 6px,var(--hover) 6px,var(--hover) 8px)}
+#aqresults:not([data-observation=ok]) .compressed{fill:var(--secondary)}
+#aqresults *{box-sizing:border-box}#aqresults strong,#aqresults h2,#aqresults h3{font-weight:500}
+#aqresults button{border:0;min-height:32px}#aqresults select{background:var(--paper);max-width:100%}#aqresults :focus-visible{outline:2px solid var(--good);outline-offset:2px}
+@media(pointer:coarse){#aqresults button,#aqresults select,#aqresults summary{min-height:44px}}

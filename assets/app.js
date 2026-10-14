@@ -20,6 +20,7 @@ async function refresh() {
     const open = new Map([...document.querySelectorAll('main details')].map(d => [key(d), d.open]));
     const selected = document.querySelector('.connect-select[aria-pressed="true"]')?.getAttribute('aria-controls');
     const version = document.querySelector('.version-select[aria-pressed="true"]')?.getAttribute('aria-controls');
+    const outcome = document.querySelector('[data-result-outcome][aria-expanded="true"]')?.dataset.resultOutcome;
     const active = document.activeElement;
     const focus = active?.id;
     const selection = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
@@ -37,6 +38,7 @@ async function refresh() {
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
     if (version) selectVersion(version);
+    if (outcome) selectOutcome(outcome);
     drafts.forEach((draft, id) => {
       const e = document.getElementById(id);
       if (e) { e.value = draft.value; if ('checked' in e) e.checked = draft.checked; }
@@ -230,3 +232,24 @@ revealConnection();
 addEventListener('hashchange', revealConnection);
 refresh();
 setInterval(refresh, 60000);
+
+function selectOutcome(outcome) {
+  document.querySelectorAll('[data-result-outcome]').forEach(b => {
+    const selected = b.dataset.resultOutcome === outcome;
+    b.setAttribute('aria-expanded', String(selected));
+    const panel = document.getElementById(b.getAttribute('aria-controls'));
+    if (panel) panel.hidden = !selected;
+  });
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-result-outcome]');
+  if (b) selectOutcome(b.getAttribute('aria-expanded') === 'true' ? null : b.dataset.resultOutcome);
+});
+document.addEventListener('change', e => {
+  const key = e.target.dataset.resultsFilter;
+  if (!key) return;
+  const url = new URL(location.href);
+  if (e.target.value) url.searchParams.set(key, e.target.value); else url.searchParams.delete(key);
+  url.hash = 'aqresults';
+  location.assign(url);
+});

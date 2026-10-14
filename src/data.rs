@@ -789,6 +789,7 @@ pub fn build(inp: &Value) -> Value {
                    "fleet": fleet, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual},
         "versions": versions,
+        "optimization": crate::optimization::build(inp),
     });
     if inp["installations"].is_object() {
         doc["installations"] = inp["installations"].clone();

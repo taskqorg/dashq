@@ -36,7 +36,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 
 ### D4.1 Langfuse API
 - Public API with the project keys, server side only. Reads the same event names as ServiceQ: monitor snapshots, activity and compression traces, `agent-context.native-tool` observations.
-- Agents sources: the agentq observations (agentq.md § 6), one span per event, span name = event name: `agentq.run` (RTK runs), `agentq.retrieval` (MCP tool calls), `agentq.installation` (hourly heartbeat) and `agentq.incident`. Each carries `agentq.installation` (fleet key: one installation, one row), `agentq.version`, `agentq.runtime`, `host.name` and `agentq.stage`; the Agents view takes fleet, versions, last seen and health from them, usage from `agentq.run`/`agentq.retrieval`, incidents from `agentq.incident`. Last seen is the newest event time per installation; an installation without an `agentq.installation` heartbeat in 7200 s is stale (D6). The legacy Node names above stay until the last Node host is gone (agentq#50).
+- Agents sources: the agentq observations (agentq.md § 6), one span per event, span name = event name: `agentq.compress` (core optimization accounting, D17), `agentq.run` (RTK runs), `agentq.retrieval` (MCP tool calls), `agentq.installation` (hourly heartbeat) and `agentq.incident`. Each carries `agentq.installation` (fleet key: one installation, one row), `agentq.version`, `agentq.runtime`, `host.name` and `agentq.stage`; the Agents view takes fleet, versions, last seen and health from them, usage from `agentq.run`/`agentq.retrieval`, incidents from `agentq.incident`. Last seen is the newest event time per installation; an installation without an `agentq.installation` heartbeat in 7200 s is stale (D6). The legacy Node names above stay until the last Node host is gone (agentq#50).
 - Periods: 30 min, 2 h, 24 h (1800, 7200, 86400 s; default 1800). Health and incident history always read 24 h.
 - Cursor pagination, at most 10,000 rows per event name and period. Hitting the cap marks that source `incomplete` (D6).
 - Cache 30 s per period: page loads inside 30 s share one read.
@@ -79,7 +79,7 @@ Every value carries the state of its source. The page never turns missing data i
 
 ## D7. /data JSON
 - `GET /data?period=1800|7200|86400&host=H&agent=A&session=ID` returns the document the page renders; filters are optional. Invalid parameters: 400. All sources failed: 503 with `{"error"}`; partial failure is 200 with source states.
-- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`, `versions` (D18).
+- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness).
 - Session filters apply to activity and compression only; host health and resources keep host scope.
 - It holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
 - Schema changes are additive within `schema` 1; a breaking change raises it.
@@ -180,7 +180,7 @@ Accepted target: [client integration G1–G4](docs/design/agentq-settings.md) ad
 
 ## D17. AgentQ optimization results
 
-Accepted target: [optimization results P1–P3](docs/design/optimization-results.md) refines D8.4 with AgentQ-owned accounting definitions, honest coverage and a separate paired-experiment view. Read-only; it adds no configuration authority, optimizer or experiment runner. Existing metadata/privacy and source-failure rules remain.
+Implemented: [optimization results P1–P3](docs/design/optimization-results.md) refines D8.4 with AgentQ-owned accounting definitions, honest coverage and a separate paired-experiment view. Read-only; it adds no configuration authority, optimizer or experiment runner. Existing metadata/privacy and source-failure rules remain. `/data.optimization` consumes `agentq.compress` and identity-matched legacy run observations through `agentq.accounting/1`, pinned with its 29 conformance cases. Exported events carry no interval coverage: empty reads are unknown, observed counts are partial, and event-time buckets never invent missing samples. Whole-task effect is unknown without a separate qualified experiment source. Results inherits period/agent/host/session filters; disclosures, focus and selection survive refresh. Fixture/browser qualification covers #67; by owner answer, P3 live local-stats/export/guarded-dashboard comparison is deferred to a separate authorized task.
 
 ## D18. Service versions and diagnostics
 

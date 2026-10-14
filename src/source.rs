@@ -185,7 +185,7 @@ pub fn clock(t: u64, now: u64) -> String {
 /// The agentq events key by their span name; the legacy Node names stay until agentq#50.
 pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value, bool), Fail> {
     let filter = r#"[{"type":"string","column":"name","operator":"starts with","value":"service.health."}]"#;
-    let queries: [(&str, (&str, &str), u64); 10] = [
+    let queries: [(&str, (&str, &str), u64); 11] = [
         ("health", ("filter", filter), 86400),
         ("compression", ("name", "agent-context.compression"), period),
         ("native_tools", ("name", "agent-context.native-tool"), period),
@@ -194,6 +194,7 @@ pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value,
         // fleet, versions, last seen and health: the hourly heartbeat, health window
         ("agentq.installation", ("name", "agentq.installation"), 86400),
         ("agentq.run", ("name", "agentq.run"), period),
+        ("agentq.compress", ("name", "agentq.compress"), period),
         ("agentq.retrieval", ("name", "agentq.retrieval"), period),
         ("agentq.incident", ("name", "agentq.incident"), 86400),
         // resource samples (D4.4): the window is the period

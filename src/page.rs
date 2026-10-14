@@ -149,6 +149,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     installations(w, &doc["installations"], &doc["resources"], now);
     integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
     resources(w, &doc["resources"], now);
+    crate::optimization::render(w, doc);
 
     // 2. Hosts
     let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");

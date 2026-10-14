@@ -1376,5 +1376,159 @@
         ]
       }
     ]
+  },
+  "optimization": {
+    "schema": "agentq.accounting/1",
+    "window": {
+      "start": 1791873339,
+      "end": 1791875139
+    },
+    "now": 1791875139,
+    "state": "unknown",
+    "lower_bound": false,
+    "calls": null,
+    "outcomes": null,
+    "reasons": null,
+    "volume": [],
+    "cohorts": [],
+    "coverage": {
+      "sources": [
+        {
+          "installation": "inst-fra",
+          "runtime": "linux",
+          "state": "unknown",
+          "observed": [],
+          "gaps": [
+            [
+              1791873339,
+              1791875139
+            ]
+          ],
+          "dropped": 0,
+          "resets": 0,
+          "records": 0,
+          "reasons": [
+            {
+              "reason": "no_observation",
+              "detail": "exported events carry no coverage"
+            },
+            {
+              "reason": "capped"
+            }
+          ]
+        }
+      ],
+      "read": 2,
+      "counted": 0,
+      "duplicates": 0,
+      "out_of_window": 0,
+      "excluded": {
+        "malformed": 2
+      },
+      "legacy_run": 0,
+      "capped": false,
+      "profile_unknown": 0
+    },
+    "observed_tokens": {
+      "state": "unknown",
+      "reason": "core records carry no observed model usage"
+    },
+    "task_effect": {
+      "state": "unknown",
+      "reason": "no paired experiment cohort"
+    },
+    "buckets": [
+      {
+        "start": 1791873339,
+        "end": 1791873489,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791873489,
+        "end": 1791873639,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791873639,
+        "end": 1791873789,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791873789,
+        "end": 1791873939,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791873939,
+        "end": 1791874089,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874089,
+        "end": 1791874239,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874239,
+        "end": 1791874389,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874389,
+        "end": 1791874539,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874539,
+        "end": 1791874689,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874689,
+        "end": 1791874839,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874839,
+        "end": 1791874989,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      },
+      {
+        "start": 1791874989,
+        "end": 1791875139,
+        "state": "unknown",
+        "calls": null,
+        "outcomes": null
+      }
+    ],
+    "source": {
+      "state": "stale",
+      "at": 1791874500,
+      "age_s": 639,
+      "reason": "data is 10m old (limit 10m)",
+      "incomplete": true
+    }
   }
 }

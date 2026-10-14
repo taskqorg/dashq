@@ -1,9 +1,11 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
+mod accounting;
 mod answer;
 mod configure;
 mod data;
 mod enroll;
+mod optimization;
 mod page;
 mod policy;
 mod profile;
