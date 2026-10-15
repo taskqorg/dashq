@@ -50,13 +50,6 @@
         "age_s": 2139,
         "reason": "Langfuse: capped query"
       },
-      "snapshot": {
-        "state": "ok",
-        "at": 1791874860,
-        "age_s": 279,
-        "reason": null,
-        "incomplete": false
-      },
       "taskq": {
         "version": "4.2.0",
         "latest": "4.2.0",
@@ -68,13 +61,7 @@
       "agentq": {
         "installation": "inst-fra",
         "running": "0.5.0",
-        "monitor": "0.4.16",
-        "proxy": "0.4.15",
-        "selected": "0.4.16",
-        "available": "0.4.17",
         "latest": "0.4.17",
-        "updater": "current",
-        "subscription": "connected",
         "behind": false
       },
       "serverq": {
@@ -84,86 +71,7 @@
         "age_s": 3600,
         "reason": null,
         "installation": null
-      },
-      "services": [
-        {
-          "service": "contextq",
-          "agent": "codex",
-          "at": 1791874860,
-          "trace_id": "tr-fra-1",
-          "state": "ok",
-          "reason": "Proxy reachable; agent activity is shown apart."
-        },
-        {
-          "service": "gateway",
-          "agent": null,
-          "at": 1791874860,
-          "trace_id": "tr-fra-2",
-          "state": "warning",
-          "reason": "Telemetry send failed; data stays queued."
-        },
-        {
-          "service": "updater",
-          "agent": null,
-          "at": 1791874860,
-          "trace_id": "tr-fra-3",
-          "state": "ok",
-          "reason": "Release subscription works; hourly fallback check."
-        }
-      ]
-    },
-    {
-      "id": "mac/native",
-      "reason": null,
-      "freshness": {
-        "state": "unknown",
-        "at": null,
-        "age_s": null,
-        "reason": "no agentq heartbeat"
-      },
-      "snapshot": {
-        "state": "stale",
-        "at": 1791867600,
-        "age_s": 7539,
-        "reason": "data is 2h old (limit 10m)",
-        "incomplete": false
-      },
-      "taskq": {
-        "version": null,
-        "latest": "4.2.0",
-        "behind": null,
-        "state": "unknown",
-        "age_s": null,
-        "reason": "no heartbeat"
-      },
-      "agentq": {
-        "installation": null,
-        "running": null,
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
-        "latest": "0.4.17",
-        "updater": null,
-        "subscription": null,
-        "behind": null
-      },
-      "serverq": {
-        "status": null,
-        "state": "unknown",
-        "age_s": null,
-        "reason": "no serverq report for this host"
-      },
-      "services": [
-        {
-          "service": "langfuse",
-          "agent": null,
-          "at": 1791867600,
-          "trace_id": "tr-mac-1",
-          "state": "unknown",
-          "reason": "no check in 10 min"
-        }
-      ]
+      }
     },
     {
       "id": "macbook-m2.local",
@@ -174,7 +82,6 @@
         "age_s": null,
         "reason": "no agentq heartbeat"
       },
-      "snapshot": null,
       "taskq": {
         "version": "4.1.2",
         "latest": "4.2.0",
@@ -186,13 +93,7 @@
       "agentq": {
         "installation": null,
         "running": null,
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.4.17",
-        "updater": null,
-        "subscription": null,
         "behind": null
       },
       "serverq": {
@@ -200,8 +101,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     },
     {
       "id": "win-1/native",
@@ -212,7 +112,6 @@
         "age_s": null,
         "reason": "no heartbeat in 24 h"
       },
-      "snapshot": null,
       "taskq": {
         "version": null,
         "latest": "4.2.0",
@@ -224,13 +123,7 @@
       "agentq": {
         "installation": "inst-win",
         "running": "0.4.0",
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.4.17",
-        "updater": null,
-        "subscription": null,
         "behind": true
       },
       "serverq": {
@@ -238,8 +131,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     }
   ],
   "attention": {
@@ -254,55 +146,10 @@
       {
         "source": "Langfuse",
         "host": "fra/native",
-        "what": "gateway: warning",
-        "since": 1791874860,
-        "detail": "Telemetry send failed; data stays queued.",
-        "trace_id": "tr-fra-2",
-        "native_failure": {
-          "schema": 1,
-          "at": null,
-          "jobId": null,
-          "version": null,
-          "stage": "process",
-          "nodeCode": null,
-          "exitCode": 1,
-          "signal": null,
-          "killed": null,
-          "stdoutCapturedBytes": null,
-          "stderrCapturedBytes": null,
-          "outputCapped": null,
-          "elapsedMs": null,
-          "sdkPhase": null,
-          "httpStatus": null,
-          "sdkErrorType": null,
-          "sdkFailure": null,
-          "sdkRequests": null,
-          "sdkMaxBodyBytes": null,
-          "sdkMaxSpanBytes": null,
-          "sdkMaxSpans": null,
-          "sdkRequestFinishMs": null,
-          "sdkResponseMs": null,
-          "sdkResponseStatus": null,
-          "sdkRequestMs": null,
-          "sdkTimedOut": null,
-          "sdkSocketWrittenBytes": null
-        }
-      },
-      {
-        "source": "Langfuse",
-        "host": "fra/native",
         "what": "Codex: model call errors",
         "since": null,
         "detail": "1 ERROR calls in the period.",
         "trace_id": "tr-a2"
-      },
-      {
-        "source": "Langfuse",
-        "host": "fra/native",
-        "what": "Codex: compression failures",
-        "since": null,
-        "detail": "1 measured calls failed in the period.",
-        "trace_id": "tr-c3"
       },
       {
         "source": "taskq",
@@ -312,6 +159,15 @@
         "detail": "Reason: CI <red> on every runner",
         "trace_id": null,
         "url": "https://github.com/taskqorg/taskq/issues/14"
+      },
+      {
+        "source": "agentq",
+        "host": "fra/native",
+        "client": "Codex",
+        "what": "Codex: hooks configured, no compress records in 24 h",
+        "since": null,
+        "detail": "2 model calls in the period, but installation inst-fra sent no agentq.compress record for this client in 24h.",
+        "trace_id": null
       },
       {
         "source": "serverq",
@@ -325,53 +181,11 @@
     "gaps": [
       {
         "source": "Langfuse",
-        "host": "mac/native",
-        "what": "langfuse: unknown",
-        "since": 1791867600,
-        "detail": "no check in 10 min",
-        "trace_id": "tr-mac-1",
-        "native_failure": null
-      },
-      {
-        "source": "Langfuse",
-        "host": "mac/native",
-        "what": "no fresh host snapshot",
-        "since": 1791867600,
-        "detail": "Last snapshot older than 10 min: check the monitor and its delivery.",
-        "trace_id": null
-      },
-      {
-        "source": "Langfuse",
-        "host": "fra/native",
-        "what": "Codex: unknown compression outcome",
-        "since": null,
-        "detail": "1 records with a missing or unknown outcome; counted as neither success nor failure.",
-        "trace_id": "tr-c4"
-      },
-      {
-        "source": "Langfuse",
-        "host": "fra/native",
-        "what": "Codex: incomplete RTK accounting",
-        "since": null,
-        "detail": "Events 2; with session id 1; with tool-call id 1; without estimate 1; unknown origin 1.",
-        "trace_id": "tr-n1"
-      },
-      {
-        "source": "Langfuse",
         "host": "win-1/native",
         "what": "agentq installation inst-win: stale",
         "since": null,
         "detail": "no heartbeat in 24 h",
         "trace_id": "tr-q5"
-      },
-      {
-        "source": "agentq",
-        "host": "fra/native",
-        "client": null,
-        "what": "AgentQ coverage unknown",
-        "since": null,
-        "detail": "Langfuse capped query (native_tools): missing compression or activity records of installation inst-fra are not confirmed.",
-        "trace_id": null
       },
       {
         "source": "serverq",
@@ -398,14 +212,6 @@
         "since": 1791867600,
         "occurrences": null,
         "trace_id": "tr-q6"
-      },
-      {
-        "source": "Langfuse",
-        "host": "fra/native",
-        "what": "Codex: Service timeout",
-        "since": 1791864000,
-        "occurrences": 3.0,
-        "trace_id": "tr-i2"
       },
       {
         "source": "serverq",
@@ -911,11 +717,9 @@
     },
     "incomplete": {
       "activity": false,
-      "compression": false,
-      "native_tools": true,
       "agentq.installation": false,
       "agentq.run": false,
-      "agentq.retrieval": false
+      "agentq.retrieval": true
     },
     "fleet": [
       {
@@ -1133,80 +937,6 @@
         ]
       }
     ],
-    "compression": [
-      {
-        "host": "fra/native",
-        "agent": "codex",
-        "compressed": 1,
-        "normal_skips": 1,
-        "failed": 1,
-        "unknown": 1,
-        "outcomes": {
-          "compressed": 1,
-          "no_gain": 1,
-          "compression timeout": 1
-        },
-        "chars_before": null,
-        "chars_after": null,
-        "size_samples": 2,
-        "trace_id": "tr-c1",
-        "error_trace_id": "tr-c3",
-        "unknown_trace_id": "tr-c4"
-      },
-      {
-        "host": "mac/native",
-        "agent": "claude-code",
-        "compressed": 1,
-        "normal_skips": 0,
-        "failed": 0,
-        "unknown": 0,
-        "outcomes": {
-          "compressed": 1
-        },
-        "chars_before": 200,
-        "chars_after": 50,
-        "size_samples": 1,
-        "trace_id": "tr-c5",
-        "error_trace_id": null,
-        "unknown_trace_id": null
-      }
-    ],
-    "native_rtk": [
-      {
-        "host": "fra/native",
-        "agent": "codex",
-        "calls": 2,
-        "samples": 1,
-        "input_estimate": 400,
-        "output_estimate": 100,
-        "reduced": 1,
-        "unchanged": 0,
-        "expanded": 0,
-        "unknown": 1,
-        "origins": {
-          "production": 1,
-          "qualification": 0,
-          "unknown": 1
-        },
-        "session_links": 1,
-        "call_links": 1,
-        "exit_samples": 2,
-        "nonzero_exits": 1,
-        "trace_id": "tr-n1"
-      }
-    ],
-    "counters": [
-      {
-        "host": "fra/native",
-        "service": "contextq",
-        "agent": "codex",
-        "at": 1791874860,
-        "metrics": {
-          "codex_ws_frames_attempted": 120.0,
-          "queue_batches": 0.0
-        }
-      }
-    ],
     "unattributed": 1
   },
   "checks": {
@@ -1371,68 +1101,6 @@
         ],
         "gaps": [
           "selected",
-          "health",
-          "lifecycle",
-          "coreq",
-          "engines",
-          "queue"
-        ]
-      },
-      {
-        "product": "agentq",
-        "provenance": "langfuse-legacy",
-        "installation": "device:dev-fra",
-        "workspace": null,
-        "host": "fra/native",
-        "observation": {
-          "state": "incomplete",
-          "at": 1791874860,
-          "age_s": 279,
-          "reason": "capped query",
-          "incomplete": false
-        },
-        "running": {
-          "version": null,
-          "source": null,
-          "reason": "not reported",
-          "last_known": false
-        },
-        "selected": {
-          "version": "0.4.16",
-          "source": "langfuse-legacy",
-          "reason": null,
-          "last_known": true
-        },
-        "release": {
-          "version": "0.4.17",
-          "at": 1791875000,
-          "state": "ok",
-          "reason": null
-        },
-        "reported_available": "0.4.17",
-        "update": {
-          "state": "unknown",
-          "reason": "no verified version comparison"
-        },
-        "health": {
-          "state": "unknown",
-          "reason": "observation incomplete: capped query"
-        },
-        "lifecycle": {
-          "state": "unknown",
-          "reason": "lifecycle stage not reported by langfuse-legacy"
-        },
-        "libraries": {
-          "coreq": null,
-          "engines": null
-        },
-        "queue_age_s": null,
-        "connection": null,
-        "coverage": [
-          "running",
-          "selected"
-        ],
-        "gaps": [
           "health",
           "lifecycle",
           "coreq",
