@@ -41,7 +41,7 @@ Before enabling production writes, qualify an authorized test task on the real b
 
 ## Embedded consumer (#43)
 
-The browser loads the unchanged answer-card and project-blocks assets from the same-origin app/style responses. `assets/taskq/provenance.json` records the owner-approved source commit and SHA-256 per file, not a published release. `boards.tasks` preserves canonical row/question identity, choices, evidence and limits. Label-only rows have no parsed question and no answer capability. Source freshness remains beside each block. Navigation counters filter observed rows; Closed remains unknown.
+The browser loads the unchanged answer-card and project-blocks assets from the same-origin app/style responses. `assets/taskq/provenance.json` records the pinned published TaskQ v4.4.0 release, source commit, release asset names and SHA-256 per file. `boards.tasks` preserves canonical row/question identity, choices, evidence and limits. Label-only rows have no parsed question and no answer capability. Source freshness remains beside each block. Navigation counters filter observed rows; Closed remains unknown.
 
 Attention opens the single Boards card. The board container and component instances survive page refresh; the canonical component owns revision-bound drafts. No tray management capability is added. Static `--snapshot` remains script-free with source and issue links; browser evidence is required for the shared UI.
 
