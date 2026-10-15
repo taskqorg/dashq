@@ -176,5 +176,38 @@
       },
       "manual_rules": ["backups-restore-drill"]
     }
+  },
+  "agent_work": {
+    "macbook-m2": {"at": 1791875119, "error": null, "incomplete": false, "value": {"corrupt": 0, "records": [
+      {"stage": "claim", "task": 131, "attempt": 6181339000, "rt": "claude", "us": 1840000, "outcome": "ok", "error": "none", "at_ms": 1791873439000, "unknown": "no-model"},
+      {"stage": "start", "task": 131, "attempt": 6181339000, "rt": "claude", "us": 1010000, "outcome": "ok", "error": "none", "at_ms": 1791873441000, "unknown": "no-model"},
+      {"stage": "build", "task": 131, "attempt": 6181339000, "rt": "claude", "us": 840000000, "outcome": "ok", "error": "none", "at_ms": 1791873499000, "calls": 62, "tokens": 4180000},
+      {"stage": "claim", "task": 136, "attempt": 6181339001, "rt": "claude", "us": 1930000, "outcome": "ok", "error": "none", "at_ms": 1791873739000, "unknown": "no-model"},
+      {"stage": "start", "task": 136, "attempt": 6181339001, "rt": "claude", "us": 1050000, "outcome": "ok", "error": "none", "at_ms": 1791873741000, "unknown": "no-model"},
+      {"stage": "build", "task": 136, "attempt": 6181339001, "rt": "claude", "us": 1860000000, "outcome": "ok", "error": "none", "at_ms": 1791873799000, "calls": 118, "tokens": 9020000},
+      {"stage": "claim", "task": 139, "attempt": 6181339002, "rt": "claude", "us": 2020000, "outcome": "ok", "error": "none", "at_ms": 1791874039000, "unknown": "no-model"},
+      {"stage": "start", "task": 139, "attempt": 6181339002, "rt": "claude", "us": 1090000, "outcome": "ok", "error": "none", "at_ms": 1791874041000, "unknown": "no-model"},
+      {"stage": "build", "task": 139, "attempt": 6181339002, "rt": "claude", "us": 540000000, "outcome": "ask", "error": "none", "at_ms": 1791874099000, "calls": 35, "tokens": 2010000},
+      {"stage": "claim", "task": 140, "attempt": 6181339003, "rt": "claude", "us": 2110000, "outcome": "ok", "error": "none", "at_ms": 1791874339000, "unknown": "no-model"},
+      {"stage": "start", "task": 140, "attempt": 6181339003, "rt": "claude", "us": 1130000, "outcome": "ok", "error": "none", "at_ms": 1791874341000, "unknown": "no-model"},
+      {"stage": "build", "task": 140, "attempt": 6181339003, "rt": "claude", "us": 1320000000, "outcome": "failed", "error": "exit", "at_ms": 1791874399000, "calls": 80, "unknown": "no-usage"},
+      {"stage": "claim", "task": 131, "attempt": 6181339010, "rt": "codex", "us": 2100000, "outcome": "ok", "error": "none", "at_ms": 1791873639000, "unknown": "no-model"},
+      {"stage": "start", "task": 131, "attempt": 6181339010, "rt": "codex", "us": 2400000, "outcome": "ok", "error": "none", "at_ms": 1791873642000, "unknown": "no-model"},
+      {"stage": "review", "task": 131, "attempt": 6181339010, "rt": "codex", "us": 360000000, "outcome": "ok", "error": "none", "at_ms": 1791873679000, "tokens": 1250000},
+      {"stage": "checks", "task": 131, "attempt": 6181339010, "rt": "codex", "us": 180000000, "outcome": "ok", "error": "none", "at_ms": 1791873689000, "unknown": "no-model"},
+      {"stage": "close", "task": 131, "attempt": 6181339010, "rt": "codex", "us": 240000000, "outcome": "ok", "error": "none", "at_ms": 1791873694000, "unknown": "no-model"},
+      {"stage": "claim", "task": 137, "attempt": 6181339011, "rt": "codex", "us": 2100000, "outcome": "ok", "error": "none", "at_ms": 1791873939000, "unknown": "no-model"},
+      {"stage": "start", "task": 137, "attempt": 6181339011, "rt": "codex", "us": 2500000, "outcome": "ok", "error": "none", "at_ms": 1791873942000, "unknown": "no-model"},
+      {"stage": "review", "task": 137, "attempt": 6181339011, "rt": "codex", "us": 240000000, "outcome": "ok", "error": "none", "at_ms": 1791873979000, "tokens": 890000},
+      {"stage": "checks", "task": 137, "attempt": 6181339011, "rt": "codex", "us": 240000000, "outcome": "ok", "error": "none", "at_ms": 1791873989000, "unknown": "no-model"},
+      {"stage": "close", "task": 137, "attempt": 6181339011, "rt": "codex", "us": 300000000, "outcome": "ok", "error": "none", "at_ms": 1791873994000, "unknown": "no-model"},
+      {"stage": "claim", "task": 138, "attempt": 6181339012, "rt": "codex", "us": 2100000, "outcome": "ok", "error": "none", "at_ms": 1791874239000, "unknown": "no-model"},
+      {"stage": "start", "task": 138, "attempt": 6181339012, "rt": "codex", "us": 2600000, "outcome": "ok", "error": "none", "at_ms": 1791874242000, "unknown": "no-model"},
+      {"stage": "review", "task": 138, "attempt": 6181339012, "rt": "codex", "us": null, "outcome": "ok", "error": "none", "at_ms": 1791874279000, "unknown": "adopted"},
+      {"stage": "checks", "task": 138, "attempt": 6181339012, "rt": "codex", "us": 300000000, "outcome": "ok", "error": "none", "at_ms": 1791874289000, "unknown": "no-model"},
+      {"stage": "close", "task": 138, "attempt": 6181339012, "rt": "codex", "us": 360000000, "outcome": "ok", "error": "none", "at_ms": 1791874294000, "unknown": "no-model"},
+      {"stage": "review", "task": 139, "attempt": 6181339020, "rt": "codex-app", "us": 660000000, "outcome": "ok", "error": "none", "at_ms": 1791874239000, "unknown": "app-turn"}
+    ]}},
+    "fra": {"value": null, "at": null, "error": "log missing", "incomplete": false}
   }
 }

@@ -30,7 +30,7 @@ fn num(v: &Value, src: &Value) -> String {
     if src["incomplete"] == true { format!("≥{} (capped)", text(v)) } else { text(v) }
 }
 
-fn badge(state: &str, label: &str) -> String {
+pub(crate) fn badge(state: &str, label: &str) -> String {
     let class = match state {
         "ok" => "ok",
         "warn" | "warning" | "stale" | "unconfirmed" | "incomplete" => "warn",
@@ -102,6 +102,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 "enrollment" => "Connections",
                 "taskq" => "taskq",
                 "export" => "Export",
+                "agent_work" => "Agent work",
                 _ => "serverq",
             };
             format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", dur(a))))
@@ -296,6 +297,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     // 5. Server checks
     }
+    crate::agent_work::render(w, doc);
     if configured("serverq") || enrolled_checks {
         let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>");
         if configured("serverq") {

@@ -15,7 +15,7 @@
 <main id="main">
 <p class="bar">Updated <time data-at="1791875139">07:05 UTC</time> · Period <strong>30 min</strong> · <a href="/?period=7200">2 h</a> · <a href="/?period=86400">24 h</a> <button id="refresh" type="button">Refresh</button></p>
 <p id="banner" class="banner" role="alert" hidden></p>
-<ul class="summary"><li><span class="s warn">incomplete</span> Langfuse: capped query · <span data-age-s="9">9s old</span></li><li><span class="s unknown">unknown</span> GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC · <span data-age-s="339">5m old</span></li><li><span class="s unknown">unknown</span> taskq: taskqorg/dashq: read failed (taskq timeout) · <span data-age-s="39">39s old</span></li></ul>
+<ul class="summary"><li><span class="s warn">incomplete</span> Langfuse: capped query · <span data-age-s="9">9s old</span></li><li><span class="s unknown">unknown</span> GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC · <span data-age-s="339">5m old</span></li><li><span class="s unknown">unknown</span> taskq: taskqorg/dashq: read failed (taskq timeout) · <span data-age-s="39">39s old</span></li><li><span class="s unknown">unknown</span> Agent work: fra: read failed (log missing) · age unknown</li></ul>
 <section id="attention">
 <h2>Attention</h2>
 <h3>Current problems (5)</h3>
@@ -247,6 +247,36 @@
 <tr><td>fra/native</td><td>contextq · codex</td><td>07:01 UTC (4m ago)</td><td>codex_ws_frames_attempted 120 · queue_batches 0</td></tr>
 </table>
 </details>
+</section>
+<section id="agentwork">
+<h2>Agent work</h2>
+<p class="note">taskq attempt stages ended in the period, per host and runtime; slowest stage (p95) first. Budgets unknown. Model use counts build and review only.</p>
+<p class="note">macbook-m2 <span class="s ok">ok</span> · 28 stage records · read 07:05 UTC · log retains stages from 06:37 UTC; earlier unknown</p>
+<p class="note">fra <span class="s unknown">unknown</span> · — stage records · read failed (log missing)</p>
+<h3>macbook-m2 · claude</h3>
+<p>4 attempts · 4 tasks · outcomes ask 1 · failed 1 · ok 2 · time 76.2 min · context tokens 15 210 000 <small>(3 of 4 known; no-usage)</small> · model calls 295</p>
+<table>
+<tr><th>Stage</th><th>Count</th><th>p50 · p95 · max</th><th>Total time</th><th>Outcomes</th><th>Errors</th><th>Model calls</th><th>Context tokens</th></tr>
+<tr><td>build</td><td>4</td><td>14.0 min · 31.0 min · 31.0 min</td><td>76.0 min</td><td>ask 1 · failed 1 · ok 2</td><td>exit 1</td><td>295</td><td>15 210 000 <small>(3 of 4 known; no-usage)</small></td></tr>
+<tr><td>claim</td><td>4</td><td>1.9 s · 2.1 s · 2.1 s</td><td>7.9 s</td><td>ok 4</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+<tr><td>start</td><td>4</td><td>1.1 s · 1.1 s · 1.1 s</td><td>4.3 s</td><td>ok 4</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+</table>
+<h3>macbook-m2 · codex-app</h3>
+<p>1 attempt · 1 task · outcomes ok 1 · time 11.0 min · context tokens <span class="unknown" title="unknown: app-turn">—</span> <small>unknown: app-turn</small> · model calls <span class="unknown" title="unknown: app-turn">—</span> <small>unknown: app-turn</small></p>
+<table>
+<tr><th>Stage</th><th>Count</th><th>p50 · p95 · max</th><th>Total time</th><th>Outcomes</th><th>Errors</th><th>Model calls</th><th>Context tokens</th></tr>
+<tr><td>review</td><td>1</td><td>11.0 min · 11.0 min · 11.0 min</td><td>11.0 min</td><td>ok 1</td><td>—</td><td><span class="unknown" title="unknown: app-turn">—</span> <small>unknown: app-turn</small></td><td><span class="unknown" title="unknown: app-turn">—</span> <small>unknown: app-turn</small></td></tr>
+</table>
+<h3>macbook-m2 · codex</h3>
+<p>3 attempts · 3 tasks · outcomes ok 3 · time 37.2 min (1 untimed) · context tokens 2 140 000 <small>(2 of 3 known; adopted)</small> · model calls <span class="unknown" title="unknown: adopted, not-reported">—</span> <small>unknown: adopted, not-reported</small></p>
+<table>
+<tr><th>Stage</th><th>Count</th><th>p50 · p95 · max</th><th>Total time</th><th>Outcomes</th><th>Errors</th><th>Model calls</th><th>Context tokens</th></tr>
+<tr><td>review</td><td>3</td><td>4.0 min · 6.0 min · 6.0 min <small>(2 of 3 timed)</small></td><td>10.0 min</td><td>ok 3</td><td>—</td><td><span class="unknown" title="unknown: adopted, not-reported">—</span> <small>unknown: adopted, not-reported</small></td><td>2 140 000 <small>(2 of 3 known; adopted)</small></td></tr>
+<tr><td>close</td><td>3</td><td>5.0 min · 6.0 min · 6.0 min</td><td>15.0 min</td><td>ok 3</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+<tr><td>checks</td><td>3</td><td>4.0 min · 5.0 min · 5.0 min</td><td>12.0 min</td><td>ok 3</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+<tr><td>start</td><td>3</td><td>2.5 s · 2.6 s · 2.6 s</td><td>7.5 s</td><td>ok 3</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+<tr><td>claim</td><td>3</td><td>2.1 s · 2.1 s · 2.1 s</td><td>6.3 s</td><td>ok 3</td><td>—</td><td>none (no model)</td><td>none (no model)</td></tr>
+</table>
 </section>
 <section id="checks">
 <h2>Server checks</h2>

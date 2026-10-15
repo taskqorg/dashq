@@ -210,3 +210,4 @@ tr:target td { background: #eef4ff; }
 /* Shared blocks inherit sizing and placement; TaskQ owns their internal styles. */
 #boards { color-scheme: light dark; }
 .board-blocks > div { margin-block: 8px; }
+#agentwork td{white-space:nowrap}

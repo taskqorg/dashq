@@ -1,6 +1,7 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
 mod accounting;
+mod agent_work;
 mod answer;
 mod clients;
 mod configure;
@@ -54,6 +55,8 @@ struct Config {
     resources: bool,
     /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
     agentq_configure: bool,
+    /// `taskq_logs` `{host: absolute taskq.log path}`: attempt stage records for Agent work (D21); empty: not configured.
+    taskq_logs: Vec<(String, String)>,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -136,6 +139,14 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         (s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?,
          s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?)
     } else { (String::new(), String::new()) };
+    let taskq_logs = match v.get("taskq_logs") {
+        None => vec![],
+        Some(x) => x
+            .as_object()
+            .filter(|o| !o.is_empty())
+            .and_then(|o| o.iter().map(|(h, p)| p.as_str().filter(|p| data::safe_id(h) && std::path::Path::new(p).is_absolute()).map(|p| (h.clone(), p.to_string()))).collect())
+            .ok_or("config: bad key taskq_logs")?,
+    };
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     Ok(Config {
         links,
@@ -150,6 +161,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         answer,
         resources,
         agentq_configure,
+        taskq_logs,
     })
 }
 
@@ -229,6 +241,10 @@ impl App {
                 }
             })
         };
+        // `read.tasklog` (D20): local files, reread every 60 s, last value kept on failure
+        let agent_work = if c.taskq_logs.is_empty() { Value::Null } else {
+            c.taskq_logs.iter().map(|(h, p)| (h.clone(), self.cache.get(&format!("tasklog:{h}"), 60, || agent_work::read(p)))).collect::<serde_json::Map<_, _>>().into()
+        };
         let t0 = std::time::Instant::now();
         let host = filters["host"].as_str().map(String::from);
         // committed snapshots never wait for or depend on the optional sources above (D11)
@@ -239,7 +255,7 @@ impl App {
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "installations": projection,
+            "installations": projection, "agent_work": agent_work,
         }));
         profile::step("build", t0);
         let mut doc = doc;
@@ -796,7 +812,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false }
+        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![] }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -883,6 +899,14 @@ mod tests {
         t.as_object_mut().unwrap().remove("taskq");
         write(&t);
         assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq.binary");
+        // Agent work logs (D21): host ids and absolute paths only
+        let mut l = good.clone();
+        l["taskq_logs"] = json!({"mac": report_path});
+        write(&l);
+        assert_eq!(load_config(&p).unwrap().taskq_logs, [("mac".to_string(), report_path.to_string_lossy().into_owned())]);
+        l["taskq_logs"] = json!({"mac": "taskq.log"});
+        write(&l);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key taskq_logs");
         write(&json!({"public_host": "dash.example.com"}));
         let first = load_config(&p).unwrap();
         assert!(first.langfuse.is_none() && first.github_token.is_none() && first.serverq_report.is_empty());
