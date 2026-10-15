@@ -583,12 +583,12 @@ impl Store {
             if a["workspace"] != workspace.as_str() || !(role.as_deref() == Some("admin") || (role.is_some() && account == subject)) {
                 return Ok(Queued::Refused("authority"));
             }
-            // unresolved, in any generation: no result yet, and either pulled (the host may be running it, also after a
-            // revoke and reconnect) or still deliverable (unexpired, generation not revoked)
+            // unresolved, in any generation: no result yet, generation not revoked, and either pulled or still
+            // deliverable; a revoke resolves a delivered operation as rejected (#147): no result can arrive after it
             let (pending, unresolved, applying): (i64, i64, i64) = tx.query_row(
                 "SELECT COALESCE(SUM(generation = ?2 AND expires_at > ?3), 0), COUNT(*), COALESCE(SUM(apply = 1), 0)
-                 FROM operations o WHERE installation = ?1 AND result IS NULL AND (delivered = 1 OR (expires_at > ?3
-                   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation)))",
+                 FROM operations o WHERE installation = ?1 AND result IS NULL AND (delivered = 1 OR expires_at > ?3)
+                   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = o.installation AND r.generation = o.generation)",
                 params![inst, generation, now],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )?;
@@ -1096,11 +1096,13 @@ impl Store {
             tx.execute("DELETE FROM export_gaps WHERE at < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
-            // resolved operations (a result, or expired never delivered) keep the newest per installation; unresolved stay
+            // resolved operations (a result, revoked generation, or expired never delivered) keep the newest per installation; unresolved stay
             tx.execute(
-                "DELETE FROM operations WHERE (result IS NOT NULL OR (delivered = 0 AND expires_at <= ?1)) AND operation NOT IN
+                "DELETE FROM operations WHERE (result IS NOT NULL OR (delivered = 0 AND expires_at <= ?1) OR EXISTS
+                   (SELECT 1 FROM revocations r WHERE r.installation = operations.installation AND r.generation = operations.generation)) AND operation NOT IN
                    (SELECT k.operation FROM operations k WHERE k.installation = operations.installation
-                      AND (k.result IS NOT NULL OR (k.delivered = 0 AND k.expires_at <= ?1)) ORDER BY k.queued DESC, k.operation DESC LIMIT ?2)",
+                      AND (k.result IS NOT NULL OR (k.delivered = 0 AND k.expires_at <= ?1) OR EXISTS
+                        (SELECT 1 FROM revocations r WHERE r.installation = k.installation AND r.generation = k.generation)) ORDER BY k.queued DESC, k.operation DESC LIMIT ?2)",
                 params![now, KEEP_RESOLVED],
             )?;
             Ok(())
@@ -1385,5 +1387,11 @@ mod tests {
         let left: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 65);
         assert!(s.operation(&format!("{:032x}", 1000)).unwrap().is_some() && s.operation(&format!("{:032x}", 0)).unwrap().is_none());
+        // Revoke resolves the delivered plan too; it now shares the 64-row resolved bound.
+        s.revoke_credential(b"v1", NOW + 70 * (OPERATION_SECS + 1)).unwrap();
+        s.prune(NOW + 70 * (OPERATION_SECS + 1)).unwrap();
+        let left: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, KEEP_RESOLVED);
+        assert!(s.operation(&format!("{:032x}", 1000)).unwrap().is_none());
     }
 }
