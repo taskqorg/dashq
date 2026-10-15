@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "dashq"
-version = "0.9.6"
+version = "0.9.7"
 dependencies = [
  "coreq",
  "ring",
