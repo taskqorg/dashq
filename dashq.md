@@ -79,10 +79,10 @@ Every value carries the state of its source. The page never turns missing data i
 
 ## D7. /data JSON
 - `GET /data?period=1800|7200|86400&host=H&agent=A&session=ID` returns the document the page renders; filters are optional. Invalid parameters: 400. All sources failed: 503 with `{"error"}`; partial failure is 200 with source states.
-- Top level: `schema` (1), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21).
+- Top level: `schema` (2; D4.1 removal of the legacy Node fields raised it), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources` (D4.4: `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`), `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21).
 - Session filters apply to model activity only; host health and resources keep host scope.
 - It holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
-- Schema changes are additive within `schema` 1; a breaking change raises it.
+- Schema changes are additive within `schema` 2; a breaking change raises it.
 - Agents read it with `dashq report` on the host, or through the guard with the owner's session.
 
 ## D8. Page

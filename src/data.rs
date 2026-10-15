@@ -734,7 +734,7 @@ pub fn build(inp: &Value) -> Value {
         sources["enrollment"] = inp["installations"]["source"].clone();
     }
     let mut doc = json!({
-        "schema": 1,
+        "schema": 2,
         "generated_at": now,
         "period": period,
         "filters": f,
