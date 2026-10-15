@@ -72,10 +72,6 @@ pub fn build(inp: &Value) -> Value {
         let mut src = crate::data::source(snap, now, LIMIT, None);
         let all: Vec<&Value> = snap["value"]["records"].as_array().into_iter().flatten().collect();
         let corrupt = snap["value"]["corrupt"].as_u64().unwrap_or(0);
-        if corrupt > 0 && src["state"] == "ok" {
-            src["state"] = json!("incomplete");
-            src["reason"] = json!(format!("{corrupt} unreadable stage records skipped"));
-        }
         let retained = all.iter().filter_map(|r| r["at_ms"].as_u64()).min().map(|m| m / 1000);
         let win: Vec<&Value> = all.iter().copied().filter(|r| r["at_ms"].as_u64().is_some_and(|m| (from..=now).contains(&(m / 1000)))).collect();
         // the log is bounded (taskq.md § 4 Data): records before its oldest kept one are unknown, never absent
@@ -85,7 +81,18 @@ pub fn build(inp: &Value) -> Value {
             Some(r) if r > from => json!(format!("log retains stages from {}; earlier unknown", clock(r, now))),
             Some(_) => Value::Null,
         };
-        hosts.push(json!({"host": host, "source": src, "records": (!snap["value"].is_null()).then_some(win.len()), "retained_from": retained, "coverage": coverage}));
+        // a log without stage records observed nothing (no profiling taskq, or no attempt yet): unknown, never 0;
+        // skipped records or a partly covered window make the counts a lower bound: incomplete
+        let gaps: Vec<String> = (corrupt > 0).then(|| format!("{corrupt} unreadable stage records skipped")).into_iter().chain(coverage.as_str().map(String::from)).collect();
+        let observed = !snap["value"].is_null() && retained.is_some();
+        if !snap["value"].is_null() && !gaps.is_empty() {
+            src["incomplete"] = json!(corrupt > 0 || observed);
+            if src["state"] == "ok" {
+                src["state"] = json!(if observed { "incomplete" } else { "unknown" });
+                src["reason"] = json!(gaps.join("; "));
+            }
+        }
+        hosts.push(json!({"host": host, "source": src, "records": observed.then_some(win.len()), "retained_from": retained, "coverage": coverage}));
         for rt in RUNTIMES {
             let mine: Vec<&Value> = win.iter().copied().filter(|r| r["rt"] == rt).collect();
             if !mine.is_empty() {
@@ -98,7 +105,7 @@ pub fn build(inp: &Value) -> Value {
     rows.sort_by(|a, b| worst(b).total_cmp(&worst(a)));
     // the worst host names the block's state; one missing log never reads ok
     let bad = ["unknown", "unconfirmed", "stale", "incomplete"].iter().find_map(|st| hosts.iter().find(|h| h["source"]["state"] == *st));
-    let src = match (hosts.first(), bad) {
+    let mut src = match (hosts.first(), bad) {
         (None, _) => json!({"state": "unknown", "at": null, "age_s": null, "reason": "no log for this host filter", "incomplete": false}),
         (_, Some(h)) => {
             let mut s = h["source"].clone();
@@ -107,6 +114,8 @@ pub fn build(inp: &Value) -> Value {
         }
         (Some(h), None) => h["source"].clone(),
     };
+    // one host with skipped or uncovered records makes the block's counts a lower bound too
+    src["incomplete"] = json!(hosts.iter().any(|h| h["source"]["incomplete"] == true));
     json!({"source": src, "window_s": period, "from": from, "to": now, "hosts": hosts, "rows": rows})
 }
 
@@ -200,7 +209,7 @@ pub fn render(w: &mut String, doc: &Value) {
         let s = &h["source"];
         let state = s["state"].as_str().unwrap_or("unknown");
         let mut notes: Vec<String> = s["reason"].as_str().map(esc).into_iter().collect();
-        notes.extend(h["coverage"].as_str().map(esc));
+        notes.extend(h["coverage"].as_str().filter(|c| !s["reason"].as_str().is_some_and(|r| r.contains(c))).map(esc));
         let _ = writeln!(w, "<p class=\"note\">{} {} · {} stage records{}{}</p>", esc(h["host"].as_str().unwrap_or("")), crate::page::badge(state, state), h["records"].as_u64().map_or("—".into(), |r| r.to_string()),
             s["at"].as_u64().map(|t| format!(" · read {}", clock(t, now))).unwrap_or_default(), if notes.is_empty() { String::new() } else { format!(" · {}", notes.join(" · ")) });
     }
@@ -217,7 +226,12 @@ pub fn render(w: &mut String, doc: &Value) {
         let _ = writeln!(w, "</table>");
     }
     if a["rows"].as_array().is_none_or(|r| r.is_empty()) {
-        let _ = writeln!(w, "<p class=\"note\">No attempt stages in this period.</p>");
+        // a zero is shown only when every log covers the period; else what is missing reads unknown
+        let line = match (a["source"]["state"].as_str(), a["source"]["reason"].as_str()) {
+            (Some("ok"), _) => "No attempt stages in this period.".to_string(),
+            (_, why) => format!("Attempt stages in this period unknown: {}.", esc(why.unwrap_or("no reason"))),
+        };
+        let _ = writeln!(w, "<p class=\"note\">{line}</p>");
     }
     let _ = writeln!(w, "</section>");
 }
@@ -255,12 +269,17 @@ mod tests {
         let (value, _) = read(log.to_str().unwrap()).unwrap();
         assert_eq!((value["records"].as_array().unwrap().len(), value["corrupt"].as_u64()), (5, Some(1)), "only stage lines leave the log");
         let snap = json!({"value": value, "at": 2990, "error": null, "incomplete": false});
-        let doc = build(&json!({"now": 3000, "period": 1800, "filters": {}, "agent_work": {"mac": snap, "fra": {"value": null, "at": null, "error": "log missing", "incomplete": false}}}));
+        let empty = json!({"value": {"records": [], "corrupt": 0}, "at": 2990, "error": null, "incomplete": false});
+        let doc = build(&json!({"now": 3000, "period": 1800, "filters": {}, "agent_work": {"mac": snap, "fra": {"value": null, "at": null, "error": "log missing", "incomplete": false}, "win": empty}}));
         let _ = std::fs::remove_dir_all(&dir);
         let hosts = doc["hosts"].as_array().unwrap();
         assert_eq!((hosts[1]["host"].as_str(), hosts[1]["source"]["state"].as_str(), hosts[1]["records"].clone()), (Some("fra"), Some("unknown"), Value::Null));
-        assert_eq!(hosts[0]["source"]["reason"], "1 unreadable stage records skipped");
-        assert_eq!(doc["source"]["state"], "unknown", "a missing log is not ok");
+        assert_eq!((hosts[0]["source"]["state"].as_str(), hosts[0]["source"]["reason"].as_str(), hosts[0]["source"]["incomplete"].as_bool()), (Some("incomplete"), Some("1 unreadable stage records skipped"), Some(true)));
+        let w = &hosts[2]["source"];
+        assert_eq!((w["state"].as_str(), w["reason"].as_str(), hosts[2]["records"].clone()), (Some("unknown"), Some("no stage records in log"), Value::Null), "an empty log observed nothing: unknown, never ok/0");
+        assert_eq!((doc["source"]["state"].as_str(), doc["source"]["incomplete"].as_bool()), (Some("unknown"), Some(true)), "a missing log is not ok; skipped records leave the block incomplete");
+        let day = build(&json!({"now": 3000, "period": 86400, "filters": {"host": "mac"}, "agent_work": {"mac": snap}}));
+        assert_eq!((day["source"]["state"].as_str(), day["source"]["incomplete"].as_bool()), (Some("incomplete"), Some(true)), "a window the log covers only in part is a lower bound");
         let rows = doc["rows"].as_array().unwrap();
         assert_eq!(rows.iter().map(|r| r["runtime"].as_str().unwrap()).collect::<Vec<_>>(), ["claude", "codex"], "slowest first");
         let c = &rows[0];
@@ -275,6 +294,9 @@ mod tests {
         render(&mut html, &json!({"agent_work": doc, "generated_at": 3000}));
         assert!(html.contains("unknown: no-usage") && html.contains("none (no model)") && html.contains("1.0 min") && html.contains("log missing"), "{html}");
         assert!(!html.contains(">0<"), "{html}");
+        let mut nothing = String::new();
+        render(&mut nothing, &json!({"agent_work": build(&json!({"now": 3000, "period": 1800, "filters": {}, "agent_work": {"win": empty}}))}));
+        assert!(nothing.contains("Attempt stages in this period unknown: win: no stage records in log.") && !nothing.contains("No attempt stages"), "{nothing}");
         let mut none = String::new();
         render(&mut none, &json!({"agent_work": build(&json!({"now": 1, "period": 1800}))}));
         assert!(none.is_empty(), "unconfigured: no empty panel (D19)");

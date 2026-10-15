@@ -37,7 +37,7 @@
       "at": null,
       "age_s": null,
       "reason": "fra: read failed (log missing)",
-      "incomplete": false
+      "incomplete": true
     }
   },
   "hosts": [
@@ -1746,7 +1746,7 @@
       "at": null,
       "age_s": null,
       "reason": "fra: read failed (log missing)",
-      "incomplete": false
+      "incomplete": true
     },
     "window_s": 1800,
     "from": 1791873339,
@@ -1755,11 +1755,11 @@
       {
         "host": "macbook-m2",
         "source": {
-          "state": "ok",
+          "state": "incomplete",
           "at": 1791875119,
           "age_s": 20,
-          "reason": null,
-          "incomplete": false
+          "reason": "log retains stages from 06:37 UTC; earlier unknown",
+          "incomplete": true
         },
         "records": 28,
         "retained_from": 1791873439,
