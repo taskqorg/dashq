@@ -27,8 +27,6 @@ fn gaps(product: &str, provenance: &str) -> &'static [&'static str] {
             "engines",
             "queue",
         ],
-        // legacy Node updater snapshot: installed, available, status (free text), subscription
-        "langfuse-legacy" => &["health", "lifecycle", "coreq", "engines", "queue"],
         // taskq.md § 4 heartbeat: version, service id, attempts
         "taskq-heartbeat" => &[
             "selected",
@@ -142,9 +140,9 @@ fn row(
     })
 }
 
-/// Rows from enrolled snapshots, then Langfuse installations not enrolled, legacy updaters and taskq heartbeats.
-/// `legacy`: `{device, host, at, monitor, installed, available}`; `heartbeats`: `{service, workspace, host, at, age_s, ttl, version, source}`.
-pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value]) -> Value {
+/// Rows from enrolled snapshots, then Langfuse installations not enrolled and taskq heartbeats.
+/// `heartbeats`: `{service, workspace, host, at, age_s, ttl, version, source}`.
+pub fn build(inp: &Value, fleet: &[Value], heartbeats: &[Value]) -> Value {
     let now = inp["now"].as_u64().unwrap_or(0);
     let lf = source(&inp["langfuse"], now, 600, None);
     let mut rows = Vec::new();
@@ -264,22 +262,6 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             x["reason"] = json!(s);
         }
         rows.push(x);
-    }
-    for l in legacy {
-        let obs = source(&json!({"value": true, "at": l["at"]}), now, 600, None);
-        let extra = json!({"reported_available": l["available"]});
-        rows.push(row(
-            "agentq",
-            "langfuse-legacy",
-            json!(format!("device:{}", l["device"].as_str().unwrap_or(""))),
-            Value::Null,
-            l["host"].clone(),
-            observed(obs, &lf),
-            l["monitor"].clone(),
-            l["installed"].clone(),
-            extra,
-            inp,
-        ));
     }
     for h in heartbeats {
         let (age, ttl) = (h["age_s"].as_u64(), h["ttl"].as_u64().unwrap_or(300));
@@ -480,17 +462,6 @@ mod tests {
         assert!(rows.iter().all(|r| r["product"] != "coreq"
             && r["health"]["state"] == "unknown"
             && r["gaps"].as_array().is_some_and(|g| !g.is_empty())));
-        let legacy = rows
-            .iter()
-            .find(|r| r["provenance"] == "langfuse-legacy")
-            .unwrap();
-        assert_eq!(
-            (
-                legacy["installation"].as_str(),
-                legacy["selected"]["version"].as_str()
-            ),
-            (Some("device:dev-fra"), Some("0.4.16"))
-        );
         assert!(rows.iter().any(|r| r["provenance"] == "taskq-heartbeat"
             && r["reason"] == "older heartbeat: no service id"));
         let text = out.to_string();

@@ -190,12 +190,9 @@ pub fn render(doc: &Value, links: &Value) -> String {
         if hosts.is_empty() {
             let _ = writeln!(w, "<p class=\"note\">No host seen in any source.</p>");
         } else {
-            // hosts.md H5: legacy monitor columns only while a legacy health row exists
-            let legacy = hosts.iter().any(|x| !x["snapshot"].is_null());
-            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Freshness</th><th>taskq</th><th>agentq</th><th>agentq latest</th>{}<th>serverq</th></tr>",
-                if legacy { "<th>Snapshot</th><th>Monitor</th><th>Proxy</th><th>Selected</th><th>Updater</th><th>Services</th>" } else { "" });
+            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Freshness</th><th>taskq</th><th>agentq</th><th>agentq latest</th><th>serverq</th></tr>");
             for x in hosts {
-                let (s, t, a, q) = (&x["snapshot"], &x["taskq"], &x["agentq"], &x["serverq"]);
+                let (t, a, q) = (&x["taskq"], &x["agentq"], &x["serverq"]);
                 let state = |o: &Value, label: String| -> String {
                     let st = o["state"].as_str().unwrap_or("unknown");
                     let mut out = badge(st, &label);
@@ -208,35 +205,13 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 let ver = |v: &Value, behind: &Value| format!("{}{}", unk(v), if behind == true { " <span class=\"s warn\">behind</span>" } else { "" });
                 let age = |o: &Value, none: &str| o["age_s"].as_u64().map_or(none.into(), |a| format!("{} old", dur(a)));
                 let fresh = state(&x["freshness"], age(&x["freshness"], "unknown"));
-                let snap = if s.is_null() { "<span class=\"unknown\" title=\"no legacy monitor on this host\">—</span>".into() } else { state(s, age(s, "no snapshot")) };
                 let host = format!("{}{}", text(&x["id"]), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
                 let agentq = format!("{}{}", ver(&a["running"], &a["behind"]), a["installation"].as_str().map(|i| format!(" <span class=\"detail\">{}</span>", esc(i))).unwrap_or_default());
                 let taskq = format!("{} {}", ver(&t["version"], &t["behind"]), state(t, t["age_s"].as_u64().map_or("unknown".into(), |a| format!("{} old", dur(a)))));
                 // green only for a fresh report whose checks are all ok
                 let q_state = if q["state"] == "ok" { json!({"state": match q["status"].as_str() { Some("ok") => "ok", Some("warn") => "warn", _ => "unknown" }}) } else { q.clone() };
                 let serverq = state(&q_state, format!("{}{}", q["status"].as_str().unwrap_or("unknown"), q["age_s"].as_u64().map(|a| format!(", {} old", dur(a))).unwrap_or_default()));
-                let updater = format!("{} · subscription {}", unk(&a["updater"]), unk(&a["subscription"]));
-                let services: Vec<String> = x["services"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .map(|v| {
-                        let name = format!("{}{}", text(&v["service"]), v["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default());
-                        format!("<span title=\"{}\">{}</span>", text(&v["reason"]), badge(v["state"].as_str().unwrap_or("unknown"), &name))
-                    })
-                    .collect();
-                let legacy_cells = if legacy {
-                    format!(
-                        "<td>{snap}</td><td>{}</td><td>{}</td><td>{}</td><td>{updater}</td><td>{}</td>",
-                        ver(&a["monitor"], &a["behind"]),
-                        ver(&a["proxy"], &a["behind"]),
-                        unk(&a["selected"]),
-                        if services.is_empty() { "—".into() } else { services.join(" ") }
-                    )
-                } else {
-                    String::new()
-                };
-                let _ = writeln!(w, "<tr><td>{host}</td><td>{fresh}</td><td>{taskq}</td><td>{agentq}</td><td>{}</td>{legacy_cells}<td>{serverq}</td></tr>", unk(&a["latest"]));
+                let _ = writeln!(w, "<tr><td>{host}</td><td>{fresh}</td><td>{taskq}</td><td>{agentq}</td><td>{}</td><td>{serverq}</td></tr>", unk(&a["latest"]));
             }
             let _ = writeln!(w, "</table>");
         }
@@ -280,29 +255,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{cost}</td></tr>", text(&a["host"]), name(&a["agent"]), text(&m["model"]), num(&m["calls"], &ca), if usage.is_empty() { "—".into() } else { usage.join("<br>") });
             }
         }
-        let _ = writeln!(w, "</table>\n<h3>Compression (successes, normal skips and failures are disjoint)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Compressed</th><th>Normal skips</th><th>Failed</th><th>Unknown</th><th>Characters before → after</th></tr>");
-        let cc = capped("compression");
-        for c in ag["compression"].as_array().into_iter().flatten() {
-            let chars = if c["chars_before"].is_null() { "<span class=\"unknown\" title=\"unknown: not every call has before/after\">—</span>".into() } else { format!("{} → {}", text(&c["chars_before"]), text(&c["chars_after"])) };
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{chars}{}</td></tr>", text(&c["host"]), name(&c["agent"]), num(&c["compressed"], &cc), num(&c["normal_skips"], &cc), num(&c["failed"], &cc), num(&c["unknown"], &cc), trace(&c["trace_id"], base));
-        }
-        let _ = writeln!(w, "</table>\n<h3>Native RTK (estimates, not model tokens or savings)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Events</th><th>Estimated tokens before → after</th><th>Reduced · unchanged · expanded · no estimate</th><th>Origin production · qualification · unknown</th><th>Non-zero exits</th></tr>");
-        let cr = capped("native_tools");
-        for x in ag["native_rtk"].as_array().into_iter().flatten() {
-            let est = if x["input_estimate"].is_null() { "<span class=\"unknown\" title=\"unknown: no estimate\">—</span>".into() } else { format!("{} → {}", text(&x["input_estimate"]), text(&x["output_estimate"])) };
-            let o = &x["origins"];
-            let _ = writeln!(
-                w,
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{est}</td><td>{} · {} · {} · {}</td><td>{} · {} · {}</td><td>{} of {}</td></tr>",
-                text(&x["host"]), name(&x["agent"]), num(&x["calls"], &cr), text(&x["reduced"]), text(&x["unchanged"]), text(&x["expanded"]), text(&x["unknown"]), text(&o["production"]), text(&o["qualification"]), text(&o["unknown"]), text(&x["nonzero_exits"]), text(&x["exit_samples"])
-            );
-        }
-        let _ = writeln!(w, "</table>\n<details>\n<summary>Process counters</summary>\n<p class=\"note\">Counters reset when their process restarts; a reset is not a drop. Values are from the snapshot time.</p>\n<table>\n<tr><th>Host</th><th>Service</th><th>Snapshot</th><th>Counters</th></tr>");
-        for c in ag["counters"].as_array().into_iter().flatten() {
-            let m: Vec<String> = c["metrics"].as_object().into_iter().flatten().map(|(k, v)| format!("{k} {}", text(v))).collect();
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}{}</td><td>{}</td><td>{}</td></tr>", text(&c["host"]), text(&c["service"]), c["agent"].as_str().map(|a| format!(" · {a}")).unwrap_or_default(), at(&c["at"], now), m.join(" · "));
-        }
-        let _ = writeln!(w, "</table>\n</details>\n</section>");
+        let _ = writeln!(w, "</table>\n</section>");
 
     // 5. Server checks
     }

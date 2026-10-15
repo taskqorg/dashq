@@ -22,7 +22,6 @@ Status: **shipped** (dashq reads and renders it today), **stale** (rendered, but
 | agentq `agentq.run`, `agentq.retrieval` | Detail (Agents) | shipped | Usage per period |
 | agentq `agentq.incident` | Attention history | shipped | Deduplicated, 24 h |
 | agentq `agentq.resource` CPU, RAM, filesystems (HMAC id), `*_unknown` | Hosts | proposed | [#23](https://github.com/taskqorg/dashq/issues/23), gated by [agentq #86](https://github.com/taskqorg/agentq/issues/86) |
-| agentq legacy Node monitor snapshots | Hosts services | stale | Until the last Node host is gone (agentq #50) |
 | agentq `status.json` `mcp`, `hooks`, engine versions | Detail | missing | Promised by agentq.md, not written |
 | serverq `report.json` `results`, `incidents`, `manual_rules`, `at` | Attention, Detail (checks) | shipped | One configured host, joined by a configured host id |
 | serverq `installation`, `rules_sha256`, `observed_at`, `reason: probe-failed` | Detail, Hosts join | proposed | serverq follow-up P1 |

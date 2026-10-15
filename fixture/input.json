@@ -8,24 +8,7 @@
   "langfuse": {
     "at": 1791875130, "error": null, "incomplete": true,
     "value": {
-      "truncated": ["native_tools"],
-      "health": [
-        {"id": "h1", "traceId": "tr-fra-1", "startTime": "2026-10-13T07:01:00Z", "statusMessage": "proxy_health_not_agent_liveness",
-         "tags": ["host:fra", "runtime:native", "service:contextq", "state:ok", "agent:codex", "device:dev-fra"],
-         "metadata": {"attributes.agent_context.version": "0.4.16", "attributes.agent_context.proxy.version": "0.4.15", "attributes.agent_context.monitor.codex_ws_frames_attempted": 120, "attributes.agent_context.monitor.queue_batches": 0}},
-        {"id": "h2", "traceId": "tr-fra-2", "startTime": "2026-10-13T07:01:00Z", "statusMessage": "telemetry_delivery_failed",
-         "tags": ["host:fra", "runtime:native", "service:gateway", "state:warning", "device:dev-fra"],
-         "metadata": {"attributes.agent_context.native_failure.schema": 1, "attributes.agent_context.native_failure.stage": "process", "attributes.agent_context.native_failure.exitCode": 1, "attributes.agent_context.native_failure.jobId": "<script>"}},
-        {"id": "h3", "traceId": "tr-fra-3", "startTime": "2026-10-13T07:01:00Z", "statusMessage": "release_subscription_connected",
-         "tags": ["host:fra", "runtime:native", "service:updater", "state:ok", "device:dev-fra"],
-         "metadata": {"attributes.agent_context.update.installed": "0.4.16", "attributes.agent_context.update.available": "0.4.17", "attributes.agent_context.update.status": "current", "attributes.agent_context.update.subscription": "connected"}},
-        {"id": "h0", "traceId": "tr-fra-0", "startTime": "2026-10-13T06:00:00Z", "statusMessage": "proxy_unavailable",
-         "tags": ["host:fra", "runtime:native", "service:contextq", "state:error", "agent:codex", "device:dev-fra"], "metadata": {}},
-        {"id": "h4", "traceId": "tr-mac-1", "startTime": "2026-10-13T05:00:00Z", "statusMessage": "endpoint_reachable",
-         "tags": ["host:mac", "runtime:native", "service:langfuse", "state:ok", "device:dev-mac"], "metadata": {}},
-        {"id": "t-h1", "traceId": "tr-fra-1", "startTime": "2026-10-13T07:02:00Z",
-         "tags": ["host:fra", "runtime:native", "service:contextq", "state:error", "device:dev-fra"], "metadata": {}}
-      ],
+      "truncated": ["agentq.retrieval"],
       "activity": [
         {"id": "a1", "traceId": "tr-a1", "startTime": "2026-10-13T06:50:00Z", "sessionId": "s1", "model": "gpt-5", "level": "DEFAULT",
          "tags": ["host:fra", "runtime:native", "agent:codex"], "usageDetails": {"input": 1000, "output": 200, "input_cached_tokens": 800}, "costDetails": {"total": 0.0125}},
@@ -37,36 +20,6 @@
          "tags": ["host:fra", "runtime:native", "agent:codex"], "usageDetails": {"input": 99999}},
         {"id": "a5", "traceId": "tr-a5", "startTime": "2026-10-13T07:04:00Z", "sessionId": "s9", "model": "gpt-5", "level": "DEFAULT",
          "tags": ["runtime:native", "agent:codex"], "usageDetails": {"input": 1}}
-      ],
-      "compression": [
-        {"id": "c1", "traceId": "tr-c1", "startTime": "2026-10-13T06:55:00Z", "level": "DEFAULT", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.compression.outcome": "compressed", "attributes.agent_context.compression.input_chars": 1000, "attributes.agent_context.compression.output_chars": 400}},
-        {"id": "c2", "traceId": "tr-c2", "startTime": "2026-10-13T06:56:00Z", "level": "DEFAULT", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.compression.outcome": "no_gain", "attributes.agent_context.compression.input_chars": 300, "attributes.agent_context.compression.output_chars": 300}},
-        {"id": "c3", "traceId": "tr-c3", "startTime": "2026-10-13T06:57:00Z", "level": "DEFAULT", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.compression.outcome": "timeout"}},
-        {"id": "c4", "traceId": "tr-c4", "startTime": "2026-10-13T06:58:00Z", "level": "DEFAULT", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {}},
-        {"id": "c5", "traceId": "tr-c5", "startTime": "2026-10-13T06:59:00Z", "level": "DEFAULT", "tags": ["host:mac", "runtime:native", "agent:claude-code"],
-         "metadata": {"attributes.agent_context.compression.outcome": "compressed", "attributes.agent_context.compression.input_chars": 200, "attributes.agent_context.compression.output_chars": 50}}
-      ],
-      "native_tools": [
-        {"id": "n1", "traceId": "tr-n1", "startTime": "2026-10-13T06:50:00Z", "sessionId": "s1", "tags": ["host:fra", "runtime:native", "agent:codex", "device:dev-fra"],
-         "metadata": {"attributes.agent_context.compression.id": "11111111-2222-3333-4444-555555555555", "attributes.agent_context.compression.strategy": "rtk-native", "attributes.agent_context.compression.token_source": "rtk_estimate",
-                      "attributes.agent_context.compression.input_tokens": 400, "attributes.agent_context.compression.output_tokens": 100, "attributes.agent_context.compression.origin": "production",
-                      "attributes.agent_context.tool_call_id": "call-1", "attributes.agent_context.compression.exit_code": 0}},
-        {"id": "n2", "traceId": "tr-n2", "startTime": "2026-10-13T06:51:00Z", "sessionId": "s1", "tags": ["host:fra", "runtime:native", "agent:codex", "device:dev-fra"],
-         "metadata": {"attributes.agent_context.compression.id": "11111111-2222-3333-4444-555555555555", "attributes.agent_context.compression.strategy": "rtk-native", "attributes.agent_context.compression.token_source": "rtk_estimate",
-                      "attributes.agent_context.compression.input_tokens": 400, "attributes.agent_context.compression.output_tokens": 100}},
-        {"id": "n3", "traceId": "tr-n3", "startTime": "2026-10-13T06:52:00Z", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.compression.exit_code": 2}}
-      ],
-      "incidents": [
-        {"id": "i1", "traceId": "tr-i1", "startTime": "2026-10-13T03:00:00Z", "statusMessage": "timeout", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.incident.fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaa", "attributes.agent_context.incident.occurrences": 2}},
-        {"id": "i2", "traceId": "tr-i2", "startTime": "2026-10-13T04:00:00Z", "statusMessage": "timeout", "tags": ["host:fra", "runtime:native", "agent:codex"],
-         "metadata": {"attributes.agent_context.incident.fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaa", "attributes.agent_context.incident.occurrences": 3}},
-        {"id": "i3", "traceId": "tr-i3", "startTime": "2026-10-11T04:00:00Z", "statusMessage": "http_502", "tags": ["host:fra", "runtime:native"], "metadata": {}}
       ],
       "agentq.installation": [
         {"id": "q1", "traceId": "tr-q1", "startTime": "2026-10-13T06:30:00Z",

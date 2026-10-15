@@ -192,16 +192,11 @@ pub fn clock(t: u64, now: u64) -> String {
 
 // ---- Langfuse (D4.1)
 
-/// Event reads of one period: `{health, compression, native_tools, activity, incidents, agentq.*, truncated}`.
-/// The agentq events key by their span name; the legacy Node names stay until agentq#50.
+/// Reads of one period: `{activity, agentq.*, truncated}`. The agentq events key by their span name; `activity` is
+/// every model call (Langfuse `GENERATION` observations), whatever its producer.
 pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value, bool), Fail> {
-    let filter = r#"[{"type":"string","column":"name","operator":"starts with","value":"service.health."}]"#;
-    let queries: [(&str, (&str, &str), u64); 13] = [
-        ("health", ("filter", filter), 86400),
-        ("compression", ("name", "agent-context.compression"), period),
-        ("native_tools", ("name", "agent-context.native-tool"), period),
+    let queries: [(&str, (&str, &str), u64); 9] = [
         ("activity", ("type", "GENERATION"), period),
-        ("incidents", ("name", "service.incident"), 86400),
         // fleet, versions, last seen and health: the hourly heartbeat, health window
         ("agentq.installation", ("name", "agentq.installation"), 86400),
         ("agentq.run", ("name", "agentq.run"), period),

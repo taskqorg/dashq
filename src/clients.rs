@@ -48,8 +48,6 @@ pub struct Ctx<'a> {
     pub heartbeats: Vec<&'a Value>,
     pub compress: Vec<&'a Value>,
     pub retrieval: Vec<&'a Value>,
-    /// `(host, agent)` with legacy compression or native RTK records in the period: presence, as in #116.
-    pub legacy: Vec<(String, String)>,
     /// Absence of 24 h compress or retrieval records is asserted only without these reasons (D6).
     pub compress_gap: Option<String>,
     pub retrieval_gap: Option<String>,
@@ -177,7 +175,6 @@ pub fn build(cx: &Ctx, fleet: &[Value], activity: &[Value], enrolled: &Value, cu
                     let item = |what: String, detail: String| json!({"source": "agentq", "host": host, "client": name(c), "what": format!("{}: {what}", name(c)), "since": null, "detail": detail, "trace_id": null});
                     // records without an agent count for every client (#116); the #116 item already names a silent client
                     let silent = n(0) == 0 && used.get(&(inst.to_string(), "unknown")).is_none_or(|u| u[0] == 0)
-                        && !cx.legacy.iter().any(|(h, a)| host == h && a == c)
                         && !current.iter().any(|i| i["host"] == *host && i["what"] == format!("{}: no compression records", name(c)));
                     let mut unknown = Vec::new();
                     match (&cx.compress_gap, hooks_on && silent) {

@@ -16,79 +16,7 @@ const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
 const SERVERQ_LIMIT: u64 = 7200;
 pub const AQ_HEARTBEAT_LIMIT: u64 = 7200;
-const SERVICES: [&str; 7] = ["contextq", "serverq", "taskq", "gateway", "hermes-gateway", "langfuse", "updater"];
 const USAGE: [&str; 8] = ["input", "output", "total", "input_cached_tokens", "cache_read_input_tokens", "input_cache_creation_1h", "input_cache_creation_5m", "output_reasoning_tokens"];
-const NATIVE_FAILURE: [&str; 27] = [
-    "schema", "at", "jobId", "version", "stage", "nodeCode", "exitCode", "signal", "killed", "stdoutCapturedBytes", "stderrCapturedBytes", "outputCapped", "elapsedMs", "sdkPhase", "httpStatus",
-    "sdkErrorType", "sdkFailure", "sdkRequests", "sdkMaxBodyBytes", "sdkMaxSpanBytes", "sdkMaxSpans", "sdkRequestFinishMs", "sdkResponseMs", "sdkResponseStatus", "sdkRequestMs", "sdkTimedOut", "sdkSocketWrittenBytes",
-];
-const NORMAL: [&str; 9] = ["compressed", "retrieval", "content_type", "ineligible", "no_gain", "empty", "too_large", "request_budget", "passthrough"];
-
-fn reason_text(code: &str) -> &'static str {
-    match code {
-        "worker_retiring" => "New connections use the new version; the old one serves existing ones.",
-        "worker_update_failed" => "New worker failed its check or crashed; see incidents.",
-        "native_stats_unavailable" => "Headroom counters unavailable; Codex processing unconfirmed.",
-        "native_exporter_missing" => "Native exporter not connected or its hooks are off.",
-        "telemetry_delivery_unverified" => "Delivery to Langfuse unconfirmed; the monitor retries.",
-        "proxy_health_not_agent_liveness" => "Proxy reachable; agent activity is shown apart.",
-        "proxy_unavailable" => "Proxy unreachable: check the local ContextQ service.",
-        "compression_telemetry_disabled" => "Compression telemetry is off in the proxy.",
-        "telemetry_delivery_failed" => "Telemetry send failed; data stays queued.",
-        "delivery_backlog" => "Data waits for delivery over 10 min.",
-        "queue_unreadable" => "Telemetry queue unreadable.",
-        "endpoint_reachable" => "Service answered its check.",
-        "endpoint_unavailable" => "Service did not answer its check.",
-        "automated_checks_only" => "Automated serverq checks only; manual checks not verified.",
-        "status_snapshot" => "Status report received.",
-        "report_unavailable" => "No status report: connect the source.",
-        "stale_report" => "Status report is stale.",
-        "invalid_report" => "Status report is invalid.",
-        "updates_disabled" => "Auto-updates are off.",
-        "update_migration_required" => "One-time package migration needed.",
-        "update_failed" => "Update failed its check; the working version stays.",
-        "release_subscription_connected" => "Release subscription works; hourly fallback check.",
-        "release_subscription_unavailable" => "Release subscription unconfirmed.",
-        "invalid_report_policy" => "Invalid report age setting.",
-        _ => "No explanation for this state.",
-    }
-}
-
-fn compression_failure(outcome: &str) -> Option<&'static str> {
-    Some(match outcome {
-        "bridge_unavailable" => "compressor file unavailable",
-        "bridge_failed" => "compressor failed to start",
-        "missing_current_query" => "current query unknown",
-        "timeout" => "compression timeout",
-        "missing_key" | "key_conflict" | "invalid_key_config" => "compressor access misconfigured",
-        "request_failed" | "invalid_response" => "compressor request failed",
-        "neural_unavailable" => "SuperCompress Neural unavailable",
-        "fallback" => "context processing failed",
-        "lost_critical_evidence" => "compressor lost critical data",
-        "invalid_device_config" => "invalid device registration",
-        o if o.len() == 8 && o.starts_with("http_") && matches!(o.as_bytes()[5], b'4' | b'5') && o[6..].bytes().all(|b| b.is_ascii_digit()) => "compressor HTTP error",
-        _ => return None,
-    })
-}
-
-fn incident_title(code: &str) -> String {
-    if code.len() == 8 && code.starts_with("http_") {
-        return format!("Service answered {}", &code[5..]);
-    }
-    match code {
-        "timeout" => "Service timeout",
-        "startup_failed" => "Service failed to start",
-        "configuration_drift" => "Configuration changed",
-        "invalid_response" => "Invalid response",
-        "request_failed" => "Request failed",
-        "missing_key" => "Access not configured",
-        "delivery_failed" => "Telemetry delivery failed",
-        "runtime_integrity" => "Integrity check failed",
-        _ => "Local ContextQ incident",
-    }
-    .into()
-}
-
 pub(crate) fn safe(s: &str, max: usize, extra: &[u8]) -> bool {
     !s.is_empty() && s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || extra.contains(&b))
 }
@@ -232,18 +160,16 @@ fn worst<'a>(states: impl Iterator<Item = (String, &'a Value)>, now: u64) -> Val
     out
 }
 
-/// One Hosts row (hosts.md H1-H7): freshness from the row's agentq heartbeat; `snapshot` only while a legacy health
-/// row exists for it (H5); `reason` names a row that joins no machine (H2).
+/// One Hosts row (hosts.md H1-H7): freshness from the row's agentq heartbeat; `reason` names a row that joins no
+/// machine (H2).
 fn host_row(id: &str) -> Value {
     json!({
         "id": id,
         "reason": null,
         "freshness": {"state": "unknown", "at": null, "age_s": null, "reason": "no agentq heartbeat"},
-        "snapshot": null,
         "taskq": {"version": null, "latest": null, "behind": null, "state": "unknown", "age_s": null, "reason": "no heartbeat"},
-        "agentq": {"installation": null, "running": null, "monitor": null, "proxy": null, "selected": null, "available": null, "latest": null, "updater": null, "subscription": null, "behind": null},
+        "agentq": {"installation": null, "running": null, "latest": null, "behind": null},
         "serverq": {"status": null, "state": "unknown", "age_s": null, "reason": "no serverq report for this host"},
-        "services": [],
     })
 }
 
@@ -333,93 +259,11 @@ pub fn build(inp: &Value) -> Value {
     let capped = |k: &str| lf["value"]["truncated"].as_array().is_some_and(|t| t.iter().any(|x| x == k));
     let mut hosts: BTreeMap<String, Value> = BTreeMap::new();
     let (mut current, mut gaps, mut history) = (Vec::new(), Vec::new(), Vec::new());
-    let mut counters = Vec::new();
-    let (mut legacy, mut heartbeats): (Vec<Value>, BTreeMap<String, Value>) = (Vec::new(), BTreeMap::new());
+    let mut heartbeats: BTreeMap<String, Value> = BTreeMap::new();
     const AQ_KEYS: [&str; 4] = ["agentq.installation", "agentq.run", "agentq.retrieval", "agentq.incident"];
     let machines = Machines::new(AQ_KEYS.iter().flat_map(|k| rows(k)), now);
 
-    // Health snapshots: a device's newest snapshot owns its identity (old labels never duplicate a host).
-    let health = rows("health");
-    let device = |r: &Value| tag(r, "device").map(String::from).unwrap_or_else(|| format!("local:{}", identity(r).0.unwrap_or_default()));
-    let mut newest: HashMap<String, u64> = HashMap::new();
-    for r in &health {
-        if let Some(a) = row_at(r).filter(|a| *a <= now + 60) {
-            let e = newest.entry(device(r)).or_default();
-            *e = (*e).max(a);
-        }
-    }
-    for r in &health {
-        let (Some(id), agent) = identity(r) else { continue };
-        let (Some(at), Some(service), Some(state)) = (row_at(r), tag(r, "service"), tag(r, "state")) else { continue };
-        if newest.get(&device(r)) != Some(&at) || !SERVICES.contains(&service) || !["ok", "warning", "error", "unknown"].contains(&state) {
-            continue;
-        }
-        let h = host_entry(&mut hosts, &machines.canon(&id));
-        if h["snapshot"]["at"].as_u64().is_none_or(|x| at > x) {
-            h["snapshot"] = source(&json!({"value": true, "at": at}), now, SNAPSHOT_LIMIT, None);
-        }
-        let fresh = now.saturating_sub(at) <= SNAPSHOT_LIMIT;
-        if service == "updater" {
-            let u = |k: &str| attr(r, &format!("update.{k}"));
-            let a = &mut h["agentq"];
-            a["selected"] = semver(u("installed"));
-            a["available"] = semver(u("available"));
-            a["updater"] = u("status").as_str().filter(|s| safe(s, 32, b"_")).map_or(json!("unknown"), |s| json!(s));
-            a["subscription"] = u("subscription").as_str().filter(|s| ["connected", "reconnecting", "disabled"].contains(s)).map_or(json!("unknown"), |s| json!(s));
-            if let Some(d) = tag(r, "device").filter(|d| safe_id(d)) {
-                legacy.push(json!({"device": d, "host": id, "at": at, "monitor": semver(attr(r, "version")), "installed": a["selected"], "available": a["available"]}));
-            }
-        }
-        if !semver(attr(r, "version")).is_null() {
-            h["agentq"]["monitor"] = semver(attr(r, "version"));
-        }
-        if service == "contextq" && !semver(attr(r, "proxy.version")).is_null() {
-            h["agentq"]["proxy"] = semver(attr(r, "proxy.version"));
-        }
-        let agent = agent.filter(|a| agent_name(a).is_some());
-        let mut metrics = Map::new();
-        if let Some(meta) = r["metadata"].as_object() {
-            for (k, v) in meta {
-                if let (Some(m), Some(n)) = (k.strip_prefix("attributes.agent_context.monitor."), num(v))
-                    && safe(m, 64, b"_")
-                {
-                    metrics.insert(m.into(), json!(n));
-                }
-            }
-        }
-        let native_failure = (fresh && !attr(r, "native_failure.schema").is_null()).then(|| {
-            let mut o = Map::new();
-            for k in NATIVE_FAILURE {
-                let v = attr(r, &format!("native_failure.{k}"));
-                let ok = v.is_number() || v.is_boolean() || v.as_str().is_some_and(|s| safe(s, 64, b"_.:-"));
-                o.insert(k.into(), if ok { v.clone() } else { Value::Null });
-            }
-            Value::Object(o)
-        });
-        let svc = json!({
-            "service": service, "agent": agent, "at": at, "trace_id": trace(r),
-            "state": if fresh { state } else { "unknown" },
-            "reason": if fresh { reason_text(r["statusMessage"].as_str().unwrap_or("")).to_string() } else { "no check in 10 min".into() },
-        });
-        let what = format!("{service}{}", agent.map(|a| format!(" · {}", agent_name(a).unwrap())).unwrap_or_default());
-        let item = json!({"source": "Langfuse", "host": id, "what": format!("{what}: {}", svc["state"].as_str().unwrap()), "since": at, "detail": svc["reason"], "trace_id": svc["trace_id"], "native_failure": native_failure});
-        match svc["state"].as_str().unwrap() {
-            "error" | "warning" => current.push(item),
-            "unknown" => gaps.push(item),
-            _ => {}
-        }
-        if !metrics.is_empty() {
-            counters.push(json!({"host": id, "service": service, "agent": agent, "at": at, "metrics": metrics}));
-        }
-        h["services"].as_array_mut().unwrap().push(svc);
-    }
-    for (id, h) in &hosts {
-        if !h["snapshot"].is_null() && h["snapshot"]["state"] != "ok" {
-            gaps.push(json!({"source": "Langfuse", "host": id, "what": "no fresh host snapshot", "since": h["snapshot"]["at"], "detail": "Last snapshot older than 10 min: check the monitor and its delivery.", "trace_id": null}));
-        }
-    }
-
-    // Agents: activity, compression, native RTK per host and agent (D8.4).
+    // Agents: model activity per host and agent (D8.4).
     let mut unattributed = 0;
     let mut keyed = |r: &Value| -> Option<(String, String)> {
         let (h, a) = identity(r);
@@ -467,84 +311,6 @@ pub fn build(inp: &Value) -> Value {
             add(m, "cost_samples", 1.0);
         }
     }
-    let mut compression: BTreeMap<(String, String), Value> = BTreeMap::new();
-    for r in rows("compression").into_iter().filter(|r| matches(r) && in_period(r).is_some()) {
-        let Some(k) = keyed(r) else { continue };
-        let c = compression.entry(k.clone()).or_insert_with(|| {
-            json!({"host": k.0, "agent": k.1, "compressed": 0, "normal_skips": 0, "failed": 0, "unknown": 0, "outcomes": {}, "chars_before": 0, "chars_after": 0, "size_samples": 0, "trace_id": null, "error_trace_id": null, "unknown_trace_id": null})
-        });
-        let outcome = attr(r, "compression.outcome").as_str().unwrap_or("");
-        let failure = compression_failure(outcome);
-        if !NORMAL.contains(&outcome) && failure.is_none() && r["level"] != "ERROR" {
-            add(c, "unknown", 1.0);
-            if c["unknown_trace_id"].is_null() {
-                c["unknown_trace_id"] = trace(r);
-            }
-            continue;
-        }
-        let kind = if r["level"] == "ERROR" || failure.is_some() { "failed" } else if outcome == "compressed" { "compressed" } else { "normal_skips" };
-        add(c, kind, 1.0);
-        add(&mut c["outcomes"], if kind == "failed" { failure.unwrap_or("compression error") } else { outcome }, 1.0);
-        if let (Some(b), Some(a)) = (num(attr(r, "compression.input_chars")), num(attr(r, "compression.output_chars"))) {
-            add(c, "chars_before", b);
-            add(c, "chars_after", a);
-            add(c, "size_samples", 1.0);
-        }
-        if c["trace_id"].is_null() {
-            c["trace_id"] = trace(r);
-        }
-        if kind == "failed" && c["error_trace_id"].is_null() {
-            c["error_trace_id"] = trace(r);
-        }
-    }
-    let mut rtk: BTreeMap<(String, String), Value> = BTreeMap::new();
-    let mut seen = HashSet::new();
-    for r in rows("native_tools").into_iter().filter(|r| matches(r) && in_period(r).is_some()) {
-        let Some(k) = keyed(r) else { continue };
-        let event = attr(r, "compression.id").as_str().filter(|e| e.len() == 36 && e.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-'));
-        let dev = tag(r, "device").or(attr(r, "device").as_str()).filter(|d| safe_id(d));
-        // ponytail: old events without device/event ids dedup by observation id; upgrade when producers send both
-        let dedup = match (dev, event, r["id"].as_str()) {
-            (Some(d), Some(e), _) => Some(format!("{d}/{}/{}/{e}", k.0, k.1)),
-            (_, _, Some(id)) => Some(format!("span:{id}")),
-            _ => None,
-        };
-        if dedup.as_ref().is_some_and(|d| !seen.insert(d.clone())) {
-            continue;
-        }
-        let x = rtk.entry(k.clone()).or_insert_with(|| {
-            json!({"host": k.0, "agent": k.1, "calls": 0, "samples": 0, "input_estimate": null, "output_estimate": null, "reduced": 0, "unchanged": 0, "expanded": 0, "unknown": 0,
-                   "origins": {"production": 0, "qualification": 0, "unknown": 0}, "session_links": 0, "call_links": 0, "exit_samples": 0, "nonzero_exits": 0, "trace_id": null})
-        });
-        add(x, "calls", 1.0);
-        if r["sessionId"].as_str().is_some_and(safe_id) {
-            add(x, "session_links", 1.0);
-        }
-        if attr(r, "tool_call_id").as_str().is_some_and(safe_id) {
-            add(x, "call_links", 1.0);
-        }
-        let origin = attr(r, "compression.origin").as_str().filter(|o| ["production", "qualification"].contains(o)).unwrap_or("unknown");
-        add(&mut x["origins"], origin, 1.0);
-        let (b, a) = (num(attr(r, "compression.input_tokens")), num(attr(r, "compression.output_tokens")));
-        match (b, a) {
-            (Some(b), Some(a)) if attr(r, "compression.strategy") == "rtk-native" && attr(r, "compression.token_source") == "rtk_estimate" => {
-                add(x, "samples", 1.0);
-                add(x, "input_estimate", b);
-                add(x, "output_estimate", a);
-                add(x, if a < b { "reduced" } else if a > b { "expanded" } else { "unchanged" }, 1.0);
-            }
-            _ => add(x, "unknown", 1.0),
-        }
-        if let Some(e) = attr(r, "compression.exit_code").as_i64() {
-            add(x, "exit_samples", 1.0);
-            if e != 0 {
-                add(x, "nonzero_exits", 1.0);
-            }
-        }
-        if x["trace_id"].is_null() {
-            x["trace_id"] = trace(r);
-        }
-    }
     let activity: Vec<Value> = activity
         .into_values()
         .map(|mut a| {
@@ -556,52 +322,6 @@ pub fn build(inp: &Value) -> Value {
             a
         })
         .collect();
-    let compression: Vec<Value> = compression
-        .into_values()
-        .map(|mut c| {
-            let name = agent_name(c["agent"].as_str().unwrap()).unwrap();
-            if c["failed"] != 0 {
-                current.push(json!({"source": "Langfuse", "host": c["host"], "what": format!("{name}: compression failures"), "since": null, "detail": format!("{} measured calls failed in the period.", c["failed"]), "trace_id": c["error_trace_id"]}));
-            }
-            if c["unknown"] != 0 {
-                gaps.push(json!({"source": "Langfuse", "host": c["host"], "what": format!("{name}: unknown compression outcome"), "since": null, "detail": format!("{} records with a missing or unknown outcome; counted as neither success nor failure.", c["unknown"]), "trace_id": c["unknown_trace_id"]}));
-            }
-            // character reduction only when every counted call has before/after
-            let counted = ["compressed", "normal_skips", "failed"].iter().map(|k| c[*k].as_f64().unwrap()).sum::<f64>();
-            if c["size_samples"].as_f64() != Some(counted) || counted == 0.0 {
-                c["chars_before"] = Value::Null;
-                c["chars_after"] = Value::Null;
-            }
-            c
-        })
-        .collect();
-    let rtk: Vec<Value> = rtk
-        .into_values()
-        .inspect(|x| {
-            let calls = &x["calls"];
-            if x["unknown"] != 0 || x["session_links"] != *calls || x["call_links"] != *calls || x["origins"]["unknown"] != 0 {
-                let name = agent_name(x["agent"].as_str().unwrap()).unwrap();
-                gaps.push(json!({"source": "Langfuse", "host": x["host"], "what": format!("{name}: incomplete RTK accounting"),
-                    "since": null, "detail": format!("Events {calls}; with session id {}; with tool-call id {}; without estimate {}; unknown origin {}.", x["session_links"], x["call_links"], x["unknown"], x["origins"]["unknown"]), "trace_id": x["trace_id"]}));
-            }
-        })
-        .collect();
-
-    // Incident history: 24 h, deduplicated, never current.
-    let mut by_fp: BTreeMap<String, Value> = BTreeMap::new();
-    for r in rows("incidents") {
-        let Some(at) = row_at(r).filter(|a| *a + 86400 >= now && *a <= now + 60) else { continue };
-        let (h, a) = identity(r);
-        let fp = attr(r, "incident.fingerprint").as_str().filter(|x| x.len() == 24 && x.bytes().all(|b| b.is_ascii_hexdigit())).map(String::from).or(trace(r).as_str().map(String::from));
-        let Some(fp) = fp else { continue };
-        let item = json!({"source": "Langfuse", "host": h, "what": format!("{}: {}", a.and_then(agent_name).unwrap_or("ContextQ"), incident_title(r["statusMessage"].as_str().unwrap_or(""))),
-            "since": at, "occurrences": num(attr(r, "incident.occurrences")), "trace_id": trace(r)});
-        if by_fp.get(&fp).is_none_or(|o| o["since"].as_u64() < Some(at)) {
-            by_fp.insert(fp, item);
-        }
-    }
-    history.extend(by_fp.into_values());
-
     // agentq fleet (D4.1): one row per installation; usage from runs and retrievals, incidents into the history.
     let aq_latest = inp["releases"]["taskqorg/agentq"]["value"].clone();
     let scoped = f["agent"].is_null() && f["session"].is_null();
@@ -837,7 +557,7 @@ pub fn build(inp: &Value) -> Value {
     // AgentQ coverage (#116): a running installation whose host's agents leave no compression or activity records.
     // ponytail: Langfuse heartbeats carry no routing or hook state; those rows come from enrolled snapshots below.
     // Absence is asserted only on a fresh, uncapped read of every record kind it rests on; otherwise it is a gap (D6).
-    let coverage_keys = ["activity", "compression", "native_tools", "agentq.installation", "agentq.compress", "agentq.run"];
+    let coverage_keys = ["activity", "agentq.installation", "agentq.compress", "agentq.run"];
     let lf_gap = match coverage_keys.iter().filter(|k| capped(k)).copied().collect::<Vec<_>>() {
         _ if !matches!(lf_src["state"].as_str(), Some("ok" | "incomplete")) => lf_src["reason"].as_str().map(String::from),
         c if c.is_empty() => None,
@@ -860,7 +580,6 @@ pub fn build(inp: &Value) -> Value {
             };
             *covered.entry((inst, agent)).or_default() += 1;
         }
-        let legacy_rows = |host: &Value, agent: &Value| compression.iter().chain(&rtk).any(|c| c["host"] == *host && c["agent"] == *agent);
         for x in fleet.iter().filter(|x| x["state"] == "ok") {
             let (inst, host) = (x["installation"].as_str().unwrap().to_string(), &x["host"]);
             let n = |a: &str| covered.get(&(inst.clone(), a)).copied().unwrap_or(0);
@@ -868,7 +587,7 @@ pub fn build(inp: &Value) -> Value {
             let calls: Vec<&Value> = activity.iter().filter(|a| a["host"] == *host).collect();
             for a in &calls {
                 let agent = a["agent"].as_str().unwrap();
-                if n(agent) == 0 && n("unknown") == 0 && !legacy_rows(host, &a["agent"]) {
+                if n(agent) == 0 && n("unknown") == 0 {
                     let client = agent_name(agent).unwrap();
                     current.push(json!({"source": "agentq", "host": host, "client": client, "what": format!("{client}: no compression records"), "since": null,
                         "detail": format!("{} model calls in {}, but installation {inst} sent no agentq.compress or agentq.run record for this client.", a["calls"], dur(period)), "trace_id": a["trace_id"]}));
@@ -876,7 +595,7 @@ pub fn build(inp: &Value) -> Value {
             }
             let name = host.as_str().unwrap().to_ascii_lowercase();
             if let Some(tasks) = working.get(&name).filter(|t| !t.is_empty() && calls.is_empty()) {
-                let none = if total == 0 && !compression.iter().chain(&rtk).any(|c| c["host"] == *host) { "activity or compression" } else { "activity" };
+                let none = if total == 0 { "activity or compression" } else { "activity" };
                 current.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": format!("TaskQ workers: no {none} records"), "since": null,
                     "detail": format!("TaskQ attempts {} run on this host, but no {none} records arrived in {} (installation {inst}).", tasks.join(", "), dur(period)), "trace_id": null}));
             }
@@ -923,7 +642,6 @@ pub fn build(inp: &Value) -> Value {
             now, heartbeats: rows("agentq.installation"), compress: rows("agentq.compress.24h"), retrieval: rows("agentq.retrieval.24h"),
             compress_gap: use_gap("agentq.compress.24h"), retrieval_gap: use_gap("agentq.retrieval.24h"),
             incomplete: json!({"agentq.compress.24h": capped("agentq.compress.24h"), "agentq.retrieval.24h": capped("agentq.retrieval.24h")}),
-            legacy: compression.iter().chain(&rtk).map(|c| (c["host"].as_str().unwrap_or("").to_string(), c["agent"].as_str().unwrap_or("").to_string())).collect(),
             scoped, agent: f["agent"].as_str(),
         },
         &fleet, &activity, &inp["installations"], &mut current, &mut gaps,
@@ -979,13 +697,8 @@ pub fn build(inp: &Value) -> Value {
         h["taskq"]["behind"] = behind(&h["taskq"]["latest"], &h["taskq"]["version"]);
         let a = &mut h["agentq"];
         a["latest"] = latest("taskqorg/agentq");
-        // the running installation (H6) decides; legacy monitor and proxy versions only without one
-        a["behind"] = match (behind(&a["latest"], &a["running"]), behind(&a["latest"], &a["monitor"]), behind(&a["latest"], &a["proxy"])) {
-            (Value::Bool(r), _, _) => json!(r),
-            (_, Value::Bool(m), Value::Bool(p)) => json!(m || p),
-            (_, Value::Null, x) => x,
-            (_, x, _) => x,
-        };
+        // the running installation (H6) decides
+        a["behind"] = behind(&a["latest"], &a["running"]);
     }
 
     // Resources (D4.4): enrolled history first, Langfuse samples otherwise; a stale or missing sample is a gap.
@@ -1016,12 +729,12 @@ pub fn build(inp: &Value) -> Value {
         sources["agent_work"] = agent_work["source"].clone();
         att_states.push(("Agent work".to_string(), agent_work["source"].clone()));
     }
-    let versions = crate::version::build(inp, &fleet, &legacy, &heartbeats.into_values().collect::<Vec<_>>());
+    let versions = crate::version::build(inp, &fleet, &heartbeats.into_values().collect::<Vec<_>>());
     if inp["installations"].is_object() {
         sources["enrollment"] = inp["installations"]["source"].clone();
     }
     let mut doc = json!({
-        "schema": 1,
+        "schema": 2,
         "generated_at": now,
         "period": period,
         "filters": f,
@@ -1031,9 +744,9 @@ pub fn build(inp: &Value) -> Value {
                       "current": hostf(&current), "gaps": hostf(&gaps), "incidents": hostf(&history)},
         "boards": boards,
         "resources": resources,
-        "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"), "compression": capped("compression"), "native_tools": capped("native_tools"),
+        "agents": {"source": lf_src, "incomplete": {"activity": capped("activity"),
                                                       "agentq.installation": capped("agentq.installation"), "agentq.run": capped("agentq.run"), "agentq.retrieval": capped("agentq.retrieval")},
-                   "fleet": fleet, "clients": clients, "activity": activity, "compression": compression, "native_rtk": rtk, "counters": hostf(&counters), "unattributed": unattributed},
+                   "fleet": fleet, "clients": clients, "activity": activity, "unattributed": unattributed},
         "checks": {"source": sq_src, "at": sq_src["at"], "results": results, "incidents": open, "manual_rules": manual,
                    "installations": enrolled_checks.into_iter().filter(|c| fhost.is_none_or(|x| c["host"] == x)).collect::<Vec<_>>()},
         "versions": versions,
@@ -1231,7 +944,7 @@ mod tests {
         assert_eq!(ids, ["DESKTOP/native", "DESKTOP/wsl", "hermes-fra1/native", "macbook-m2.local/native", "wsl"]);
         for h in hosts.iter().filter(|h| h["freshness"]["state"] == "ok") {
             assert!(h["agentq"]["running"].is_string() && h["agentq"]["latest"].is_string() && h["agentq"]["behind"].is_boolean(), "{h}");
-            assert!(h["snapshot"].is_null() && h["reason"].is_null(), "{h}");
+            assert!(h["reason"].is_null(), "{h}");
         }
         assert_eq!(hosts[3]["taskq"]["version"], "4.2.0", "H3: the newest version of two heartbeats");
         assert_eq!(hosts[4]["reason"], "no machine line: update taskq");

@@ -167,7 +167,6 @@
         "age_s": 600,
         "reason": null
       },
-      "snapshot": null,
       "taskq": {
         "version": "4.2.0",
         "latest": "4.2.0",
@@ -179,13 +178,7 @@
       "agentq": {
         "installation": "inst-win-new",
         "running": "0.6.0",
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.6.0",
-        "updater": null,
-        "subscription": null,
         "behind": false
       },
       "serverq": {
@@ -193,8 +186,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     },
     {
       "id": "DESKTOP/wsl",
@@ -205,7 +197,6 @@
         "age_s": 900,
         "reason": null
       },
-      "snapshot": null,
       "taskq": {
         "version": null,
         "latest": "4.2.0",
@@ -217,13 +208,7 @@
       "agentq": {
         "installation": "inst-wsl",
         "running": "0.6.0",
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.6.0",
-        "updater": null,
-        "subscription": null,
         "behind": false
       },
       "serverq": {
@@ -231,8 +216,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     },
     {
       "id": "hermes-fra1/native",
@@ -243,7 +227,6 @@
         "age_s": 120,
         "reason": null
       },
-      "snapshot": null,
       "taskq": {
         "version": "4.2.0",
         "latest": "4.2.0",
@@ -255,13 +238,7 @@
       "agentq": {
         "installation": "inst-fra",
         "running": "0.6.0",
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.6.0",
-        "updater": null,
-        "subscription": null,
         "behind": false
       },
       "serverq": {
@@ -271,8 +248,7 @@
         "age_s": 600,
         "reason": null,
         "installation": null
-      },
-      "services": []
+      }
     },
     {
       "id": "macbook-m2.local/native",
@@ -283,7 +259,6 @@
         "age_s": 300,
         "reason": null
       },
-      "snapshot": null,
       "taskq": {
         "version": "4.2.0",
         "latest": "4.2.0",
@@ -295,13 +270,7 @@
       "agentq": {
         "installation": "inst-mac",
         "running": "0.5.9",
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.6.0",
-        "updater": null,
-        "subscription": null,
         "behind": true
       },
       "serverq": {
@@ -309,8 +278,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     },
     {
       "id": "wsl",
@@ -321,7 +289,6 @@
         "age_s": null,
         "reason": "no agentq heartbeat"
       },
-      "snapshot": null,
       "taskq": {
         "version": "4.2.0-dev.1791998010",
         "latest": "4.2.0",
@@ -333,13 +300,7 @@
       "agentq": {
         "installation": null,
         "running": null,
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
         "latest": "0.6.0",
-        "updater": null,
-        "subscription": null,
         "behind": null
       },
       "serverq": {
@@ -347,8 +308,7 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no serverq report for this host"
-      },
-      "services": []
+      }
     }
   ]
 }
