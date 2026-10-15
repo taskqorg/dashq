@@ -1096,11 +1096,13 @@ impl Store {
             tx.execute("DELETE FROM export_gaps WHERE at < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
-            // resolved operations (a result, or expired never delivered) keep the newest per installation; unresolved stay
+            // resolved operations (a result, revoked generation, or expired never delivered) keep the newest per installation; unresolved stay
             tx.execute(
-                "DELETE FROM operations WHERE (result IS NOT NULL OR (delivered = 0 AND expires_at <= ?1)) AND operation NOT IN
+                "DELETE FROM operations WHERE (result IS NOT NULL OR (delivered = 0 AND expires_at <= ?1) OR EXISTS
+                   (SELECT 1 FROM revocations r WHERE r.installation = operations.installation AND r.generation = operations.generation)) AND operation NOT IN
                    (SELECT k.operation FROM operations k WHERE k.installation = operations.installation
-                      AND (k.result IS NOT NULL OR (k.delivered = 0 AND k.expires_at <= ?1)) ORDER BY k.queued DESC, k.operation DESC LIMIT ?2)",
+                      AND (k.result IS NOT NULL OR (k.delivered = 0 AND k.expires_at <= ?1) OR EXISTS
+                        (SELECT 1 FROM revocations r WHERE r.installation = k.installation AND r.generation = k.generation)) ORDER BY k.queued DESC, k.operation DESC LIMIT ?2)",
                 params![now, KEEP_RESOLVED],
             )?;
             Ok(())
@@ -1385,5 +1387,11 @@ mod tests {
         let left: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 65);
         assert!(s.operation(&format!("{:032x}", 1000)).unwrap().is_some() && s.operation(&format!("{:032x}", 0)).unwrap().is_none());
+        // Revoke resolves the delivered plan too; it now shares the 64-row resolved bound.
+        s.revoke_credential(b"v1", NOW + 70 * (OPERATION_SECS + 1)).unwrap();
+        s.prune(NOW + 70 * (OPERATION_SECS + 1)).unwrap();
+        let left: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0)).unwrap();
+        assert_eq!(left, KEEP_RESOLVED);
+        assert!(s.operation(&format!("{:032x}", 1000)).unwrap().is_none());
     }
 }
