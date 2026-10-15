@@ -190,7 +190,10 @@ pub fn render(doc: &Value, links: &Value) -> String {
         if hosts.is_empty() {
             let _ = writeln!(w, "<p class=\"note\">No host seen in any source.</p>");
         } else {
-            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Snapshot</th><th>taskq</th><th>Monitor</th><th>Proxy</th><th>Selected</th><th>agentq latest</th><th>Updater</th><th>serverq</th><th>Services</th></tr>");
+            // hosts.md H5: legacy monitor columns only while a legacy health row exists
+            let legacy = hosts.iter().any(|x| !x["snapshot"].is_null());
+            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Freshness</th><th>taskq</th><th>agentq</th><th>agentq latest</th>{}<th>serverq</th></tr>",
+                if legacy { "<th>Snapshot</th><th>Monitor</th><th>Proxy</th><th>Selected</th><th>Updater</th><th>Services</th>" } else { "" });
             for x in hosts {
                 let (s, t, a, q) = (&x["snapshot"], &x["taskq"], &x["agentq"], &x["serverq"]);
                 let state = |o: &Value, label: String| -> String {
@@ -203,7 +206,11 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 };
                 let unk = |v: &Value| if v.is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".to_string() } else { text(v) };
                 let ver = |v: &Value, behind: &Value| format!("{}{}", unk(v), if behind == true { " <span class=\"s warn\">behind</span>" } else { "" });
-                let snap = state(s, s["age_s"].as_u64().map_or("no snapshot".into(), |a| format!("{} old", dur(a))));
+                let age = |o: &Value, none: &str| o["age_s"].as_u64().map_or(none.into(), |a| format!("{} old", dur(a)));
+                let fresh = state(&x["freshness"], age(&x["freshness"], "unknown"));
+                let snap = if s.is_null() { "<span class=\"unknown\" title=\"no legacy monitor on this host\">—</span>".into() } else { state(s, age(s, "no snapshot")) };
+                let host = format!("{}{}", text(&x["id"]), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
+                let agentq = format!("{}{}", ver(&a["running"], &a["behind"]), a["installation"].as_str().map(|i| format!(" <span class=\"detail\">{}</span>", esc(i))).unwrap_or_default());
                 let taskq = format!("{} {}", ver(&t["version"], &t["behind"]), state(t, t["age_s"].as_u64().map_or("unknown".into(), |a| format!("{} old", dur(a)))));
                 // green only for a fresh report whose checks are all ok
                 let q_state = if q["state"] == "ok" { json!({"state": match q["status"].as_str() { Some("ok") => "ok", Some("warn") => "warn", _ => "unknown" }}) } else { q.clone() };
@@ -218,16 +225,18 @@ pub fn render(doc: &Value, links: &Value) -> String {
                         format!("<span title=\"{}\">{}</span>", text(&v["reason"]), badge(v["state"].as_str().unwrap_or("unknown"), &name))
                     })
                     .collect();
-                let _ = writeln!(
-                    w,
-                    "<tr><td>{}</td><td>{snap}</td><td>{taskq}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{updater}</td><td>{serverq}</td><td>{}</td></tr>",
-                    text(&x["id"]),
-                    ver(&a["monitor"], &a["behind"]),
-                    ver(&a["proxy"], &a["behind"]),
-                    unk(&a["selected"]),
-                    unk(&a["latest"]),
-                    if services.is_empty() { "—".into() } else { services.join(" ") }
-                );
+                let legacy_cells = if legacy {
+                    format!(
+                        "<td>{snap}</td><td>{}</td><td>{}</td><td>{}</td><td>{updater}</td><td>{}</td>",
+                        ver(&a["monitor"], &a["behind"]),
+                        ver(&a["proxy"], &a["behind"]),
+                        unk(&a["selected"]),
+                        if services.is_empty() { "—".into() } else { services.join(" ") }
+                    )
+                } else {
+                    String::new()
+                };
+                let _ = writeln!(w, "<tr><td>{host}</td><td>{fresh}</td><td>{taskq}</td><td>{agentq}</td><td>{}</td>{legacy_cells}<td>{serverq}</td></tr>", unk(&a["latest"]));
             }
             let _ = writeln!(w, "</table>");
         }
@@ -369,7 +378,7 @@ fn versions(w: &mut String, versions: &Value, now: u64) {
         let key = id(r);
         let obs = &r["observation"];
         let update = match r["update"]["state"].as_str() { Some("available") => "Update available", Some("current") => "Version current", Some("error") => "Update error reported", _ => "Update unknown" };
-        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small></span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>Current health unknown</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), version(&r["running"]), version(&r["selected"]), version(&r["release"]), at(&r["release"]["at"], now), text(&r["release"]["state"]), text(&obs["state"]), at(&obs["at"], now));
+        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small>{}</span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>Current health unknown</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), r["reason"].as_str().map(|s| format!("<small>{}</small>", esc(s))).unwrap_or_default(), version(&r["running"]), version(&r["selected"]), version(&r["release"]), at(&r["release"]["at"], now), text(&r["release"]["state"]), text(&obs["state"]), at(&obs["at"], now));
     }
     let _ = writeln!(w, "</div>");
     for (i, r) in rows.iter().enumerate() {

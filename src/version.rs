@@ -247,7 +247,7 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
                 json!({"state": "unknown", "at": null, "age_s": null, "reason": "no version event"})
             }
         };
-        rows.push(row(
+        let mut x = row(
             "agentq",
             "langfuse",
             f["installation"].clone(),
@@ -258,7 +258,12 @@ pub fn build(inp: &Value, fleet: &[Value], legacy: &[Value], heartbeats: &[Value
             Value::Null,
             json!({}),
             inp,
-        ));
+        );
+        // hosts.md H7: it left the Hosts row, never silently
+        if let Some(s) = f["superseded"].as_str() {
+            x["reason"] = json!(s);
+        }
+        rows.push(x);
     }
     for l in legacy {
         let obs = source(&json!({"value": true, "at": l["at"]}), now, 600, None);
