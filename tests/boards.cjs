@@ -41,3 +41,13 @@ assert(all.includes('Partial: taskqorg/agentq') && caps(all).every(c => c[2].end
 const done = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'doing')};
 assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good'], ['closed', 'quiet']], 'zero hidden, Closed quiet');
 console.log('PASS counters: order, zero hidden, unknown, Closed quiet, partial aggregate');
+
+// B4: released long-title/count fixtures reach the same renderer as dashboard rows; catch dropped identity or counts.
+const shared = require('../assets/taskq/project-blocks.json');
+for (const count of shared.counts) {
+  const project = {...shared.project, closed: count};
+  assert(blocks.summary(project).includes(project.name), 'released project identity');
+  assert.equal(caps(blocks.summary(project)).length, count === 0 ? 0 : 1, 'released count ' + count);
+}
+assert(blocks.task(shared.project, shared.row).includes(shared.row.title), 'released long task title');
+console.log('PASS released project-block fixtures');

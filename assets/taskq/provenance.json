@@ -1,15 +1,25 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "commit": "a32b7e17fbbed879b6480c266baeb4ce9c1d383f",
-  "release": null,
+  "commit": "81ed23f1f866dd2f80bac3d21e8d96d1293f58f6",
+  "release": "v4.4.0",
   "files": {
-    "answer-card.css": "b33ea8d5ba6ec70931ecc2cac745bf1808181b4939019bf478f09cdd7791a796",
     "answer-card.js": "35662bb6d71975e54345097b51aa871db7c8b81c6a137faa1c1c2d72b24b8b92",
+    "answer-card.css": "b33ea8d5ba6ec70931ecc2cac745bf1808181b4939019bf478f09cdd7791a796",
     "answer-card.json": "dd98bda612d83617685c504637dd6a995180f88a3c0a8944d067633422eee0a5",
-    "project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
-    "project-blocks.css": "dd5514a2cf93936b4cb085f6768f68ce6a70460a0f8a0e741c9b5b4cec0d33a9",
-    "project-blocks.js": "8e76f224c87ba17500b671430d92fe5515db86ee0f2fb481ee6bc75bdc44220b",
+    "project-blocks.js": "e63affe681aad856ee785fae6bff4dbc90541c84c4aca280b7b68e6f570c5238",
+    "project-blocks.css": "1a2471d13a850a66eb3f8ea9f5745ad2fa3bad1ce67305173d17ba1ae2f0ca64",
     "project-blocks.json": "48b22ee923e8acf8bd4620aef9696db7a0e3a8ee520335cf3a8a71f50617c760",
-    "project-blocks.sources.json": "a56665334e00fabd8401de03415cc84dcd795025648f8ce3361cd8a7490a8787"
+    "project-blocks.sources.json": "de700804254888cfa27b3ba34b6b2b95cbacb6eeed8157622a4a31915e7dd78a",
+    "project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
+  },
+  "assets": {
+    "answer-card.js": "taskq-4.4.0-answer-card.js",
+    "answer-card.css": "taskq-4.4.0-answer-card.css",
+    "answer-card.json": "taskq-4.4.0-answer-card-fixtures.json",
+    "project-blocks.js": "taskq-4.4.0-project-blocks.js",
+    "project-blocks.css": "taskq-4.4.0-project-blocks.css",
+    "project-blocks.json": "taskq-4.4.0-project-blocks-fixtures.json",
+    "project-blocks.sources.json": "taskq-4.4.0-project-blocks-sources.json",
+    "project-blocks.LICENSE": "taskq-4.4.0-project-blocks.LICENSE"
   }
 }
