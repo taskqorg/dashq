@@ -697,6 +697,12 @@ pub fn build(inp: &Value) -> Value {
         let x = &fleet[o];
         let h = host_entry(&mut hosts, x["host"].as_str().unwrap_or(""));
         h["freshness"] = json!({"state": x["state"], "at": x["heartbeat_at"], "age_s": x["age_s"], "reason": x["reason"]});
+        // a failed, stale or capped Langfuse read leaves the cached heartbeat unconfirmed, never green (D6)
+        let rank = |v: &Value| RANK.iter().position(|k| v["state"] == *k).unwrap_or(4);
+        if rank(&lf_src) > rank(&h["freshness"]) {
+            h["freshness"]["state"] = lf_src["state"].clone();
+            h["freshness"]["reason"] = json!(format!("Langfuse: {}", lf_src["reason"].as_str().unwrap_or("read not confirmed")));
+        }
         h["agentq"]["installation"] = x["installation"].clone();
         h["agentq"]["running"] = x["version"].clone();
     }
@@ -1232,6 +1238,15 @@ mod tests {
         let old = doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "inst-win-old").unwrap();
         assert_eq!(old["reason"], "superseded by inst-win-new 0.6.0");
         assert!(!doc["attention"]["gaps"].to_string().contains("inst-win-old"), "a superseded installation is no gap");
+        // D6: a failed, stale or capped Langfuse read never leaves a Hosts row green.
+        let now = fx["input"]["now"].as_u64().unwrap();
+        for (k, v, state) in [("error", json!("timeout"), "unconfirmed"), ("at", json!(now - 3600), "stale"), ("incomplete", json!(true), "incomplete")] {
+            let mut inp = fx["input"].clone();
+            inp["langfuse"][k] = v;
+            let mac = build(&inp)["hosts"][3]["freshness"].clone();
+            assert_eq!(mac["state"], state, "{k}: {mac}");
+            assert!(mac["reason"].as_str().is_some_and(|r| r.starts_with("Langfuse: ")), "{k}: {mac}");
+        }
     }
 
     /// Chain #116 A1: routing, hook and silent-compression failures of AgentQ installations reach Attention with host,

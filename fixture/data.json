@@ -45,10 +45,10 @@
       "id": "fra/native",
       "reason": null,
       "freshness": {
-        "state": "ok",
+        "state": "incomplete",
         "at": 1791873000,
         "age_s": 2139,
-        "reason": null
+        "reason": "Langfuse: capped query"
       },
       "snapshot": {
         "state": "ok",
