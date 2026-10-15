@@ -31,6 +31,13 @@
       "age_s": 39,
       "reason": "taskqorg/dashq: read failed (taskq timeout)",
       "incomplete": false
+    },
+    "agent_work": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "fra: read failed (log missing)",
+      "incomplete": true
     }
   },
   "hosts": [
@@ -248,7 +255,7 @@
       "state": "unknown",
       "at": 1791871539,
       "age_s": 3600,
-      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout)",
+      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout); Agent work: fra: read failed (log missing)",
       "incomplete": true
     },
     "current": [
@@ -1732,5 +1739,399 @@
       "reason": "data is 10m old (limit 10m)",
       "incomplete": true
     }
+  },
+  "agent_work": {
+    "source": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "fra: read failed (log missing)",
+      "incomplete": true
+    },
+    "window_s": 1800,
+    "from": 1791873339,
+    "to": 1791875139,
+    "hosts": [
+      {
+        "host": "macbook-m2",
+        "source": {
+          "state": "incomplete",
+          "at": 1791875119,
+          "age_s": 20,
+          "reason": "log retains stages from 06:37 UTC; earlier unknown",
+          "incomplete": true
+        },
+        "records": 28,
+        "retained_from": 1791873439,
+        "coverage": "log retains stages from 06:37 UTC; earlier unknown"
+      },
+      {
+        "host": "fra",
+        "source": {
+          "state": "unknown",
+          "at": null,
+          "age_s": null,
+          "reason": "read failed (log missing)",
+          "incomplete": false
+        },
+        "records": null,
+        "retained_from": null,
+        "coverage": null
+      }
+    ],
+    "rows": [
+      {
+        "host": "macbook-m2",
+        "runtime": "claude",
+        "attempts": 4,
+        "tasks": 4,
+        "outcomes": {
+          "ask": 1,
+          "failed": 1,
+          "ok": 2
+        },
+        "time_ms": 4572180.0,
+        "untimed": 0,
+        "tokens": {
+          "sum": 15210000,
+          "known": 3,
+          "of": 4,
+          "reasons": [
+            "no-usage"
+          ]
+        },
+        "calls": {
+          "sum": 295,
+          "known": 4,
+          "of": 4,
+          "reasons": []
+        },
+        "stages": [
+          {
+            "stage": "build",
+            "count": 4,
+            "timed": 4,
+            "p50_ms": 840000.0,
+            "p95_ms": 1860000.0,
+            "max_ms": 1860000.0,
+            "total_ms": 4560000.0,
+            "outcomes": {
+              "ask": 1,
+              "failed": 1,
+              "ok": 2
+            },
+            "errors": {
+              "exit": 1
+            },
+            "calls": {
+              "sum": 295,
+              "known": 4,
+              "of": 4,
+              "reasons": []
+            },
+            "tokens": {
+              "sum": 15210000,
+              "known": 3,
+              "of": 4,
+              "reasons": [
+                "no-usage"
+              ]
+            }
+          },
+          {
+            "stage": "claim",
+            "count": 4,
+            "timed": 4,
+            "p50_ms": 1930.0,
+            "p95_ms": 2110.0,
+            "max_ms": 2110.0,
+            "total_ms": 7900.0,
+            "outcomes": {
+              "ok": 4
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 4,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 4,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          },
+          {
+            "stage": "start",
+            "count": 4,
+            "timed": 4,
+            "p50_ms": 1050.0,
+            "p95_ms": 1130.0,
+            "max_ms": 1130.0,
+            "total_ms": 4280.0,
+            "outcomes": {
+              "ok": 4
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 4,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 4,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "host": "macbook-m2",
+        "runtime": "codex-app",
+        "attempts": 1,
+        "tasks": 1,
+        "outcomes": {
+          "ok": 1
+        },
+        "time_ms": 660000.0,
+        "untimed": 0,
+        "tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "stages": [
+          {
+            "stage": "review",
+            "count": 1,
+            "timed": 1,
+            "p50_ms": 660000.0,
+            "p95_ms": 660000.0,
+            "max_ms": 660000.0,
+            "total_ms": 660000.0,
+            "outcomes": {
+              "ok": 1
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 1,
+              "reasons": [
+                "app-turn"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 1,
+              "reasons": [
+                "app-turn"
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "host": "macbook-m2",
+        "runtime": "codex",
+        "attempts": 3,
+        "tasks": 3,
+        "outcomes": {
+          "ok": 3
+        },
+        "time_ms": 2233800.0,
+        "untimed": 1,
+        "tokens": {
+          "sum": 2140000,
+          "known": 2,
+          "of": 3,
+          "reasons": [
+            "adopted"
+          ]
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 3,
+          "reasons": [
+            "adopted",
+            "not-reported"
+          ]
+        },
+        "stages": [
+          {
+            "stage": "review",
+            "count": 3,
+            "timed": 2,
+            "p50_ms": 240000.0,
+            "p95_ms": 360000.0,
+            "max_ms": 360000.0,
+            "total_ms": 600000.0,
+            "outcomes": {
+              "ok": 3
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "adopted",
+                "not-reported"
+              ]
+            },
+            "tokens": {
+              "sum": 2140000,
+              "known": 2,
+              "of": 3,
+              "reasons": [
+                "adopted"
+              ]
+            }
+          },
+          {
+            "stage": "close",
+            "count": 3,
+            "timed": 3,
+            "p50_ms": 300000.0,
+            "p95_ms": 360000.0,
+            "max_ms": 360000.0,
+            "total_ms": 900000.0,
+            "outcomes": {
+              "ok": 3
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          },
+          {
+            "stage": "checks",
+            "count": 3,
+            "timed": 3,
+            "p50_ms": 240000.0,
+            "p95_ms": 300000.0,
+            "max_ms": 300000.0,
+            "total_ms": 720000.0,
+            "outcomes": {
+              "ok": 3
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          },
+          {
+            "stage": "start",
+            "count": 3,
+            "timed": 3,
+            "p50_ms": 2500.0,
+            "p95_ms": 2600.0,
+            "max_ms": 2600.0,
+            "total_ms": 7500.0,
+            "outcomes": {
+              "ok": 3
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          },
+          {
+            "stage": "claim",
+            "count": 3,
+            "timed": 3,
+            "p50_ms": 2100.0,
+            "p95_ms": 2100.0,
+            "max_ms": 2100.0,
+            "total_ms": 6300.0,
+            "outcomes": {
+              "ok": 3
+            },
+            "errors": {},
+            "calls": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            },
+            "tokens": {
+              "sum": null,
+              "known": 0,
+              "of": 3,
+              "reasons": [
+                "no-model"
+              ]
+            }
+          }
+        ]
+      }
+    ]
   }
 }

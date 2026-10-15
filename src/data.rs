@@ -896,6 +896,12 @@ pub fn build(inp: &Value) -> Value {
         sources["taskq"] = t.clone();
         att_states.push(("taskq".to_string(), t));
     }
+    let agent_work = crate::agent_work::build(inp);
+    // listed only when configured, like the taskq adapter
+    if !inp["agent_work"].is_null() {
+        sources["agent_work"] = agent_work["source"].clone();
+        att_states.push(("Agent work".to_string(), agent_work["source"].clone()));
+    }
     let versions = crate::version::build(inp, &fleet, &legacy, &heartbeats.into_values().collect::<Vec<_>>());
     if inp["installations"].is_object() {
         sources["enrollment"] = inp["installations"]["source"].clone();
@@ -918,6 +924,7 @@ pub fn build(inp: &Value) -> Value {
                    "installations": enrolled_checks.into_iter().filter(|c| fhost.is_none_or(|x| c["host"] == x)).collect::<Vec<_>>()},
         "versions": versions,
         "optimization": crate::optimization::build(inp),
+        "agent_work": agent_work,
     });
     if inp["installations"].is_object() {
         doc["installations"] = inp["installations"].clone();
