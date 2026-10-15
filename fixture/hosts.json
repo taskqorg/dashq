@@ -1,0 +1,354 @@
+{
+  "input": {
+    "now": 1792026600,
+    "period": 1800,
+    "filters": {},
+    "projects": [
+      "taskqorg/taskq",
+      "taskqorg/agentq"
+    ],
+    "serverq_host": "hermes-fra1/native",
+    "langfuse": {
+      "at": 1792026600,
+      "error": null,
+      "incomplete": false,
+      "value": {
+        "agentq.installation": [
+          {
+            "id": "agentq.installation-inst-mac-300",
+            "name": "agentq.installation",
+            "startTime": "2026-10-15T01:05:00.000Z",
+            "traceId": "tinstmac300",
+            "metadata": {
+              "attributes.agentq.installation": "inst-mac",
+              "attributes.host.name": "macbook-m2.local",
+              "attributes.agentq.runtime": "macos",
+              "attributes.agentq.version": "0.5.9",
+              "attributes.agentq.stage": "heartbeat"
+            }
+          },
+          {
+            "id": "agentq.installation-inst-win-new-600",
+            "name": "agentq.installation",
+            "startTime": "2026-10-15T01:00:00.000Z",
+            "traceId": "tinstwinnew600",
+            "metadata": {
+              "attributes.agentq.installation": "inst-win-new",
+              "attributes.host.name": "DESKTOP",
+              "attributes.agentq.runtime": "windows",
+              "attributes.agentq.version": "0.6.0",
+              "attributes.agentq.stage": "heartbeat"
+            }
+          },
+          {
+            "id": "agentq.installation-inst-win-old-18000",
+            "name": "agentq.installation",
+            "startTime": "2026-10-14T20:10:00.000Z",
+            "traceId": "tinstwinold18000",
+            "metadata": {
+              "attributes.agentq.installation": "inst-win-old",
+              "attributes.host.name": "DESKTOP",
+              "attributes.agentq.runtime": "windows",
+              "attributes.agentq.version": "0.5.0",
+              "attributes.agentq.stage": "heartbeat"
+            }
+          },
+          {
+            "id": "agentq.installation-inst-wsl-900",
+            "name": "agentq.installation",
+            "startTime": "2026-10-15T00:55:00.000Z",
+            "traceId": "tinstwsl900",
+            "metadata": {
+              "attributes.agentq.installation": "inst-wsl",
+              "attributes.host.name": "DESKTOP",
+              "attributes.agentq.runtime": "linux",
+              "attributes.agentq.version": "0.6.0",
+              "attributes.agentq.stage": "heartbeat"
+            }
+          },
+          {
+            "id": "agentq.installation-inst-fra-120",
+            "name": "agentq.installation",
+            "startTime": "2026-10-15T01:08:00.000Z",
+            "traceId": "tinstfra120",
+            "metadata": {
+              "attributes.agentq.installation": "inst-fra",
+              "attributes.host.name": "hermes-fra1",
+              "attributes.agentq.runtime": "linux",
+              "attributes.agentq.version": "0.6.0",
+              "attributes.agentq.stage": "heartbeat"
+            }
+          }
+        ]
+      }
+    },
+    "boards": {
+      "taskqorg/taskq": {
+        "at": 1792026600,
+        "error": null,
+        "incomplete": false,
+        "value": {
+          "issues": [],
+          "date": 1792026600,
+          "hosts": [
+            {
+              "title": "taskq host mac",
+              "body": "version 4.2.0\nservice 18535c594451\nmachine macbook-m2.local\n#1179 6182023643",
+              "updated_at": "2026-10-15T01:09:00.000Z"
+            },
+            {
+              "title": "taskq host win",
+              "body": "version 4.2.0\nservice 202953da20cf\nmachine DESKTOP\n#1174 6182018992",
+              "updated_at": "2026-10-15T01:08:30.000Z"
+            },
+            {
+              "title": "taskq host hermes-fra1",
+              "body": "version 4.2.0\nservice 8d8c701e0317\nmachine hermes-fra1\nfocus off",
+              "updated_at": "2026-10-15T01:08:50.000Z"
+            },
+            {
+              "title": "taskq host wsl",
+              "body": "version 4.2.0-dev.1791998010\nservice 383a0516e138",
+              "updated_at": "2026-10-14T17:23:20.000Z"
+            }
+          ]
+        }
+      },
+      "taskqorg/agentq": {
+        "at": 1792026600,
+        "error": null,
+        "incomplete": false,
+        "value": {
+          "issues": [],
+          "date": 1792026600,
+          "hosts": [
+            {
+              "title": "taskq host macbook-m2.local",
+              "body": "version 4.1.2\nservice 18535c594451\nmachine macbook-m2.local",
+              "updated_at": "2026-10-15T01:09:30.000Z"
+            }
+          ]
+        }
+      }
+    },
+    "releases": {
+      "taskqorg/taskq": {
+        "at": 1792026600,
+        "value": "4.2.0"
+      },
+      "taskqorg/agentq": {
+        "at": 1792026600,
+        "value": "0.6.0"
+      }
+    },
+    "serverq": {
+      "at": 1792026600,
+      "value": {
+        "schema": 1,
+        "at": 1792026000,
+        "results": {
+          "disk": {
+            "status": "ok",
+            "detail": "fine"
+          }
+        },
+        "incidents": {},
+        "manual_rules": []
+      }
+    }
+  },
+  "hosts": [
+    {
+      "id": "DESKTOP/native",
+      "reason": null,
+      "freshness": {
+        "state": "ok",
+        "at": 1792026000,
+        "age_s": 600,
+        "reason": null
+      },
+      "snapshot": null,
+      "taskq": {
+        "version": "4.2.0",
+        "latest": "4.2.0",
+        "behind": false,
+        "state": "ok",
+        "age_s": 90,
+        "reason": null
+      },
+      "agentq": {
+        "installation": "inst-win-new",
+        "running": "0.6.0",
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.6.0",
+        "updater": null,
+        "subscription": null,
+        "behind": false
+      },
+      "serverq": {
+        "status": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no serverq report for this host"
+      },
+      "services": []
+    },
+    {
+      "id": "DESKTOP/wsl",
+      "reason": null,
+      "freshness": {
+        "state": "ok",
+        "at": 1792025700,
+        "age_s": 900,
+        "reason": null
+      },
+      "snapshot": null,
+      "taskq": {
+        "version": null,
+        "latest": "4.2.0",
+        "behind": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no heartbeat"
+      },
+      "agentq": {
+        "installation": "inst-wsl",
+        "running": "0.6.0",
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.6.0",
+        "updater": null,
+        "subscription": null,
+        "behind": false
+      },
+      "serverq": {
+        "status": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no serverq report for this host"
+      },
+      "services": []
+    },
+    {
+      "id": "hermes-fra1/native",
+      "reason": null,
+      "freshness": {
+        "state": "ok",
+        "at": 1792026480,
+        "age_s": 120,
+        "reason": null
+      },
+      "snapshot": null,
+      "taskq": {
+        "version": "4.2.0",
+        "latest": "4.2.0",
+        "behind": false,
+        "state": "ok",
+        "age_s": 70,
+        "reason": null
+      },
+      "agentq": {
+        "installation": "inst-fra",
+        "running": "0.6.0",
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.6.0",
+        "updater": null,
+        "subscription": null,
+        "behind": false
+      },
+      "serverq": {
+        "status": "ok",
+        "state": "ok",
+        "at": 1792026000,
+        "age_s": 600,
+        "reason": null,
+        "installation": null
+      },
+      "services": []
+    },
+    {
+      "id": "macbook-m2.local/native",
+      "reason": null,
+      "freshness": {
+        "state": "ok",
+        "at": 1792026300,
+        "age_s": 300,
+        "reason": null
+      },
+      "snapshot": null,
+      "taskq": {
+        "version": "4.2.0",
+        "latest": "4.2.0",
+        "behind": false,
+        "state": "ok",
+        "age_s": 30,
+        "reason": null
+      },
+      "agentq": {
+        "installation": "inst-mac",
+        "running": "0.5.9",
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.6.0",
+        "updater": null,
+        "subscription": null,
+        "behind": true
+      },
+      "serverq": {
+        "status": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no serverq report for this host"
+      },
+      "services": []
+    },
+    {
+      "id": "wsl",
+      "reason": "no machine line: update taskq",
+      "freshness": {
+        "state": "unknown",
+        "at": null,
+        "age_s": null,
+        "reason": "no agentq heartbeat"
+      },
+      "snapshot": null,
+      "taskq": {
+        "version": "4.2.0-dev.1791998010",
+        "latest": "4.2.0",
+        "behind": true,
+        "state": "stale",
+        "age_s": 28000,
+        "reason": "heartbeat 7h old (ttl 5m)"
+      },
+      "agentq": {
+        "installation": null,
+        "running": null,
+        "monitor": null,
+        "proxy": null,
+        "selected": null,
+        "available": null,
+        "latest": "0.6.0",
+        "updater": null,
+        "subscription": null,
+        "behind": null
+      },
+      "serverq": {
+        "status": null,
+        "state": "unknown",
+        "age_s": null,
+        "reason": "no serverq report for this host"
+      },
+      "services": []
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Host identity
 
-Owner decision for the Hosts view ([#138](https://github.com/taskqorg/dashq/issues/138), option A). Status: approved rule; implementation is a follow-up task.
+Owner decision for the Hosts view ([#138](https://github.com/taskqorg/dashq/issues/138), option A). Status: approved rule; implemented in [#140](https://github.com/taskqorg/dashq/issues/140), pinned by [fixture/hosts.json](../../fixture/hosts.json).
 
 ## Observed problem
 
@@ -21,8 +21,3 @@ Live `/data` on FRA showed 12 host rows for three machines. Each source named ho
 - H5. Freshness: the row's freshness is the newest agentq `agentq.installation` heartbeat. The legacy snapshot column and its `no snapshot in 24 h` reason appear only while a legacy health row exists for that machine.
 - H6. agentq columns: running version, latest release and `behind` come from the freshest installation of the row (D4.1 fleet). A row with a fresh fleet entry never shows empty agentq columns.
 - H7. Superseded installations: an installation of the same product on the same row whose newest observation is older than another fresh installation's, or whose version is lower while both are fresh, is marked `superseded by <installation> <version>` in `versions` and leaves the Hosts row. It is never deleted silently: it still reports, so it stays visible with the reason.
-
-## Follow-ups
-
-1. taskq: write the `machine <host.name> [wsl]` heartbeat line (taskq repository).
-2. dashq: implement H1–H7, pin them in a hosts fixture, release and update FRA, then verify live `/data` has one row per machine and kind.

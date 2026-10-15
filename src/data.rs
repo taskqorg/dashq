@@ -232,15 +232,71 @@ fn worst<'a>(states: impl Iterator<Item = (String, &'a Value)>, now: u64) -> Val
     out
 }
 
+/// One Hosts row (hosts.md H1-H7): freshness from the row's agentq heartbeat; `snapshot` only while a legacy health
+/// row exists for it (H5); `reason` names a row that joins no machine (H2).
 fn host_row(id: &str) -> Value {
     json!({
         "id": id,
-        "snapshot": {"state": "unknown", "at": null, "age_s": null, "reason": "no snapshot in 24 h"},
+        "reason": null,
+        "freshness": {"state": "unknown", "at": null, "age_s": null, "reason": "no agentq heartbeat"},
+        "snapshot": null,
         "taskq": {"version": null, "latest": null, "behind": null, "state": "unknown", "age_s": null, "reason": "no heartbeat"},
-        "agentq": {"monitor": null, "proxy": null, "selected": null, "available": null, "latest": null, "updater": null, "subscription": null, "behind": null},
+        "agentq": {"installation": null, "running": null, "monitor": null, "proxy": null, "selected": null, "available": null, "latest": null, "updater": null, "subscription": null, "behind": null},
         "serverq": {"status": null, "state": "unknown", "age_s": null, "reason": "no serverq report for this host"},
         "services": [],
     })
+}
+
+/// The Hosts row keyed case-insensitively: one machine is one row whatever the spelling (H1).
+fn host_entry<'a>(hosts: &'a mut BTreeMap<String, Value>, id: &str) -> &'a mut Value {
+    hosts.entry(id.to_ascii_lowercase()).or_insert_with(|| host_row(id))
+}
+
+/// Machines of the Hosts view (hosts.md H1): agentq `host.name`, compared case-insensitively and spelled as its newest
+/// event; a `linux` installation on a machine that also runs a `windows` one is that machine's `wsl` kind.
+struct Machines {
+    names: HashMap<String, (String, u64)>,
+    windows: HashSet<String>,
+}
+
+impl Machines {
+    fn new<'a>(rows: impl Iterator<Item = &'a Value>, now: u64) -> Self {
+        let mut m = Machines { names: HashMap::new(), windows: HashSet::new() };
+        for r in rows {
+            let (Some(name), Some(at)) = (aq(r, "host.name").as_str().filter(|h| safe(h, 64, b"_.-")), row_at(r).filter(|a| *a <= now + 60)) else { continue };
+            let e = m.names.entry(name.to_ascii_lowercase()).or_insert_with(|| (name.into(), at));
+            if at >= e.1 {
+                *e = (name.into(), at);
+            }
+            if aq(r, "agentq.runtime") == "windows" {
+                m.windows.insert(name.to_ascii_lowercase());
+            }
+        }
+        m
+    }
+
+    fn known(&self, name: &str) -> bool {
+        self.names.contains_key(&name.to_ascii_lowercase())
+    }
+
+    /// `<machine>/<kind>`, the machine spelled as agentq reports it.
+    fn id(&self, name: &str, kind: &str) -> String {
+        format!("{}/{kind}", self.names.get(&name.to_ascii_lowercase()).map_or(name, |(d, _)| d.as_str()))
+    }
+
+    /// A configured or legacy `<name>/<kind>` id in the same spelling.
+    fn canon(&self, id: &str) -> String {
+        let (name, kind) = id.split_once('/').unwrap_or((id, "native"));
+        self.id(name, kind)
+    }
+
+    /// The row of an agentq event (H1).
+    fn of(&self, r: &Value) -> Option<String> {
+        let name = aq(r, "host.name").as_str().filter(|h| safe(h, 64, b"_.-"))?;
+        let rt = aq(r, "agentq.runtime");
+        let wsl = rt == "wsl" || (rt == "linux" && self.windows.contains(&name.to_ascii_lowercase()));
+        Some(self.id(name, if wsl { "wsl" } else { "native" }))
+    }
 }
 
 fn behind(latest: &Value, running: &Value) -> Value {
@@ -279,6 +335,8 @@ pub fn build(inp: &Value) -> Value {
     let (mut current, mut gaps, mut history) = (Vec::new(), Vec::new(), Vec::new());
     let mut counters = Vec::new();
     let (mut legacy, mut heartbeats): (Vec<Value>, BTreeMap<String, Value>) = (Vec::new(), BTreeMap::new());
+    const AQ_KEYS: [&str; 4] = ["agentq.installation", "agentq.run", "agentq.retrieval", "agentq.incident"];
+    let machines = Machines::new(AQ_KEYS.iter().flat_map(|k| rows(k)), now);
 
     // Health snapshots: a device's newest snapshot owns its identity (old labels never duplicate a host).
     let health = rows("health");
@@ -296,7 +354,7 @@ pub fn build(inp: &Value) -> Value {
         if newest.get(&device(r)) != Some(&at) || !SERVICES.contains(&service) || !["ok", "warning", "error", "unknown"].contains(&state) {
             continue;
         }
-        let h = hosts.entry(id.clone()).or_insert_with(|| host_row(&id));
+        let h = host_entry(&mut hosts, &machines.canon(&id));
         if h["snapshot"]["at"].as_u64().is_none_or(|x| at > x) {
             h["snapshot"] = source(&json!({"value": true, "at": at}), now, SNAPSHOT_LIMIT, None);
         }
@@ -356,7 +414,7 @@ pub fn build(inp: &Value) -> Value {
         h["services"].as_array_mut().unwrap().push(svc);
     }
     for (id, h) in &hosts {
-        if h["snapshot"]["state"] != "ok" {
+        if !h["snapshot"].is_null() && h["snapshot"]["state"] != "ok" {
             gaps.push(json!({"source": "Langfuse", "host": id, "what": "no fresh host snapshot", "since": h["snapshot"]["at"], "detail": "Last snapshot older than 10 min: check the monitor and its delivery.", "trace_id": null}));
         }
     }
@@ -487,9 +545,6 @@ pub fn build(inp: &Value) -> Value {
             x["trace_id"] = trace(r);
         }
     }
-    for k in activity.keys().chain(compression.keys()).chain(rtk.keys()) {
-        hosts.entry(k.0.clone()).or_insert_with(|| host_row(&k.0));
-    }
     let activity: Vec<Value> = activity
         .into_values()
         .map(|mut a| {
@@ -552,13 +607,12 @@ pub fn build(inp: &Value) -> Value {
     let scoped = f["agent"].is_null() && f["session"].is_null();
     let mut fleet: BTreeMap<String, Value> = BTreeMap::new();
     let mut aq_seen = HashSet::new();
-    for key in ["agentq.installation", "agentq.run", "agentq.retrieval", "agentq.incident"] {
+    for key in AQ_KEYS {
         for r in rows(key) {
-            let (Some((inst, host)), Some(at)) = (aq_identity(r), row_at(r).filter(|a| *a <= now + 60)) else { continue };
-            if fhost.is_some_and(|x| x != host) {
+            let (Some((inst, _)), Some(host), Some(at)) = (aq_identity(r), machines.of(r), row_at(r).filter(|a| *a <= now + 60)) else { continue };
+            if fhost.is_some_and(|x| !x.eq_ignore_ascii_case(&host)) {
                 continue;
             }
-            hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
             let x = fleet.entry(inst.clone()).or_insert_with(|| {
                 json!({"installation": inst, "host": host, "runtime": null, "version": null, "version_at": null, "last_seen": 0, "heartbeat_at": null,
                        "runs": if scoped { json!(0) } else { Value::Null }, "nonzero_exits": if scoped { json!(0) } else { Value::Null }, "exit_samples": 0,
@@ -594,22 +648,64 @@ pub fn build(inp: &Value) -> Value {
             }
         }
     }
-    let fleet: Vec<Value> = fleet
+    let mut fleet: Vec<Value> = fleet
         .into_values()
         .map(|mut x| {
-            let hb = x["heartbeat_at"].as_u64();
-            let age = hb.map(|h| now.saturating_sub(h));
+            let age = x["heartbeat_at"].as_u64().map(|h| now.saturating_sub(h));
             let fresh = age.is_some_and(|a| a <= AQ_HEARTBEAT_LIMIT);
             x["state"] = json!(if fresh { "ok" } else { "stale" });
+            x["age_s"] = json!(age);
             x["reason"] = if fresh { Value::Null } else { json!(age.map_or("no heartbeat in 24 h".into(), |a| format!("heartbeat {} old (limit {})", dur(a), dur(AQ_HEARTBEAT_LIMIT)))) };
             x["latest"] = aq_latest.clone();
             x["behind"] = behind(&aq_latest, &x["version"]);
-            if !fresh {
-                gaps.push(json!({"source": "Langfuse", "host": x["host"], "what": format!("agentq installation {}: stale", x["installation"].as_str().unwrap()), "since": hb, "detail": x["reason"], "trace_id": x["trace_id"]}));
-            }
             x
         })
         .collect();
+    // One installation owns a row's agentq columns (H6): fresh first, then the higher version, then the newest event.
+    // Another one on the row is superseded (H7) when a fresh owner saw newer events or runs a higher version.
+    let better = |a: &Value, b: &Value| {
+        if (a["state"] == "ok") != (b["state"] == "ok") {
+            return a["state"] == "ok";
+        }
+        match (behind(&a["version"], &b["version"]), behind(&b["version"], &a["version"])) {
+            (Value::Bool(true), _) => return true,
+            (_, Value::Bool(true)) => return false,
+            _ if a["version"].is_null() != b["version"].is_null() => return b["version"].is_null(),
+            _ => {}
+        }
+        a["last_seen"].as_u64() > b["last_seen"].as_u64()
+    };
+    let mut owners: BTreeMap<String, usize> = BTreeMap::new();
+    for (i, x) in fleet.iter().enumerate() {
+        let k = x["host"].as_str().unwrap_or("").to_ascii_lowercase();
+        if owners.get(&k).is_none_or(|&o| better(x, &fleet[o])) {
+            owners.insert(k, i);
+        }
+    }
+    for i in 0..fleet.len() {
+        let (w, x) = (&fleet[owners[&fleet[i]["host"].as_str().unwrap_or("").to_ascii_lowercase()]], &fleet[i]);
+        let superseded = x["installation"] != w["installation"]
+            && w["state"] == "ok"
+            && (x["last_seen"].as_u64() < w["last_seen"].as_u64() || (x["state"] == "ok" && behind(&w["version"], &x["version"]) == true));
+        let by = superseded.then(|| json!(format!("superseded by {} {}", w["installation"].as_str().unwrap_or(""), w["version"].as_str().unwrap_or("(version unknown)"))));
+        fleet[i]["superseded"] = by.unwrap_or(Value::Null);
+    }
+    for x in fleet.iter().filter(|x| x["state"] != "ok" && x["superseded"].is_null()) {
+        gaps.push(json!({"source": "Langfuse", "host": x["host"], "what": format!("agentq installation {}: stale", x["installation"].as_str().unwrap()), "since": x["heartbeat_at"], "detail": x["reason"], "trace_id": x["trace_id"]}));
+    }
+    for &o in owners.values() {
+        let x = &fleet[o];
+        let h = host_entry(&mut hosts, x["host"].as_str().unwrap_or(""));
+        h["freshness"] = json!({"state": x["state"], "at": x["heartbeat_at"], "age_s": x["age_s"], "reason": x["reason"]});
+        // a failed, stale or capped Langfuse read leaves the cached heartbeat unconfirmed, never green (D6)
+        let rank = |v: &Value| RANK.iter().position(|k| v["state"] == *k).unwrap_or(4);
+        if rank(&lf_src) > rank(&h["freshness"]) {
+            h["freshness"]["state"] = lf_src["state"].clone();
+            h["freshness"]["reason"] = json!(format!("Langfuse: {}", lf_src["reason"].as_str().unwrap_or("read not confirmed")));
+        }
+        h["agentq"]["installation"] = x["installation"].clone();
+        h["agentq"]["running"] = x["version"].clone();
+    }
 
     // Heartbeats and boards (D4.2).
     let releases = &inp["releases"];
@@ -617,7 +713,7 @@ pub fn build(inp: &Value) -> Value {
     let mut boards = Vec::new();
     let mut gh_states = Vec::new();
     let mut taskq_states = Vec::new();
-    // live taskq attempts per lowercase host name from fresh heartbeats: agents run there (#116);
+    // live taskq attempts per lowercase Hosts row id from fresh heartbeats: agents run there (#116);
     // `unconfirmed`: hosts whose heartbeat came from a failed, stale or cached board read, with that reason
     let mut working: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unconfirmed: BTreeMap<String, String> = BTreeMap::new();
@@ -641,6 +737,16 @@ pub fn build(inp: &Value) -> Value {
         for (index, hb) in v["hosts"].as_array().into_iter().flatten().enumerate() {
             let Some(name) = hb["title"].as_str().and_then(|t| t.strip_prefix("taskq host ")).filter(|n| safe(n, 64, b"_.-")) else { continue };
             let body = hb["body"].as_str().unwrap_or("");
+            // H2: the `machine <host.name>[ wsl]` line names the row; without it a label that is a machine joins its native row
+            let machine = body.lines().find_map(|l| l.strip_prefix("machine ")).and_then(|m| {
+                let mut p = m.split_whitespace();
+                p.next().filter(|n| safe(n, 64, b"_.-")).map(|n| (n, p.next() == Some("wsl")))
+            });
+            let (row, joined) = match machine {
+                Some((n, wsl)) => (machines.id(n, if wsl { "wsl" } else { "native" }), true),
+                None if machines.known(name) => (machines.id(name, "native"), true),
+                None => (name.to_string(), false),
+            };
             let ttl = body.lines().find_map(|l| l.strip_prefix("ttl ")?.trim().parse().ok()).unwrap_or(HEARTBEAT_TTL);
             let first = attempts.len();
             for l in body.lines() {
@@ -655,9 +761,9 @@ pub fn build(inp: &Value) -> Value {
             let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
             let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
             if src["state"] != "ok" {
-                unconfirmed.entry(name.to_ascii_lowercase()).or_insert_with(|| format!("{repo}: {}", src["reason"].as_str().unwrap_or("board read not confirmed")));
+                unconfirmed.entry(row.to_ascii_lowercase()).or_insert_with(|| format!("{repo}: {}", src["reason"].as_str().unwrap_or("board read not confirmed")));
             } else if cached_age.is_some_and(|a| a <= ttl) {
-                let tasks = working.entry(name.to_ascii_lowercase()).or_default();
+                let tasks = working.entry(row.to_ascii_lowercase()).or_default();
                 tasks.extend(attempts[first..].iter().map(|a| format!("{repo}#{}", a["task"])));
             }
             let version = semver(&json!(body.lines().find_map(|l| l.strip_prefix("version ")).map(str::trim)));
@@ -665,15 +771,21 @@ pub fn build(inp: &Value) -> Value {
             let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
             let key = format!("{repo}:{}", service.map_or_else(|| format!("unidentified:{index}"), String::from));
             if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| cached_age.is_some_and(|x| x < a))) {
-                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": name, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src}));
+                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": row, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src}));
             }
-            let h = hosts.entry(name.into()).or_insert_with(|| host_row(name));
+            let h = host_entry(&mut hosts, &row);
+            if !joined {
+                h["reason"] = json!("no machine line: update taskq");
+            }
+            // H3: several heartbeats on one row show the newest version and the freshest state
+            if h["taskq"]["version"].is_null() || behind(&version, &h["taskq"]["version"]) == true {
+                h["taskq"]["version"] = version.clone();
+            }
             if h["taskq"]["age_s"].as_u64().is_some_and(|a| age.is_none_or(|x| x >= a)) {
                 continue;
             }
             let fresh = age.is_some_and(|a| a <= ttl);
             let t = &mut h["taskq"];
-            t["version"] = version;
             t["age_s"] = json!(age);
             t["state"] = json!(if age.is_none() { "unknown" } else if fresh { "ok" } else { "stale" });
             t["reason"] = if fresh { Value::Null } else { json!(age.map_or("heartbeat age unknown".into(), |a| format!("heartbeat {} old (ttl {})", dur(a), dur(ttl)))) };
@@ -762,7 +874,7 @@ pub fn build(inp: &Value) -> Value {
                         "detail": format!("{} model calls in {}, but installation {inst} sent no agentq.compress or agentq.run record for this client.", a["calls"], dur(period)), "trace_id": a["trace_id"]}));
                 }
             }
-            let name = host.as_str().unwrap().split('/').next().unwrap().to_ascii_lowercase();
+            let name = host.as_str().unwrap().to_ascii_lowercase();
             if let Some(tasks) = working.get(&name).filter(|t| !t.is_empty() && calls.is_empty()) {
                 let none = if total == 0 && !compression.iter().chain(&rtk).any(|c| c["host"] == *host) { "activity or compression" } else { "activity" };
                 current.push(json!({"source": "agentq", "host": host, "client": "TaskQ workers", "what": format!("TaskQ workers: no {none} records"), "since": null,
@@ -856,21 +968,23 @@ pub fn build(inp: &Value) -> Value {
     }
     if !sq_host.is_empty() && !sq.is_null() {
         let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
-        let h = hosts.entry(sq_host.into()).or_insert_with(|| host_row(sq_host));
+        let h = host_entry(&mut hosts, &machines.canon(sq_host));
         h["serverq"] = json!({"status": worst_status, "state": sq_src["state"], "at": sq_src["at"], "age_s": sq_src["age_s"], "reason": sq_src["reason"], "installation": null});
     }
     let manual: Vec<Value> = report["manual_rules"].as_array().into_iter().flatten().map(|r| json!({"rule": r, "status": "not verified"})).collect();
-    let enrolled_checks = serverq_enrolled(inp, now, &mut hosts, &mut current, &mut gaps, &mut history);
+    let enrolled_checks = serverq_enrolled(inp, now, &machines, &mut hosts, &mut current, &mut gaps, &mut history);
 
     for h in hosts.values_mut() {
         h["taskq"]["latest"] = latest("taskqorg/taskq");
         h["taskq"]["behind"] = behind(&h["taskq"]["latest"], &h["taskq"]["version"]);
         let a = &mut h["agentq"];
         a["latest"] = latest("taskqorg/agentq");
-        a["behind"] = match (behind(&a["latest"], &a["monitor"]), behind(&a["latest"], &a["proxy"])) {
-            (Value::Bool(m), Value::Bool(p)) => json!(m || p),
-            (Value::Null, x) => x,
-            (x, _) => x,
+        // the running installation (H6) decides; legacy monitor and proxy versions only without one
+        a["behind"] = match (behind(&a["latest"], &a["running"]), behind(&a["latest"], &a["monitor"]), behind(&a["latest"], &a["proxy"])) {
+            (Value::Bool(r), _, _) => json!(r),
+            (_, Value::Bool(m), Value::Bool(p)) => json!(m || p),
+            (_, Value::Null, x) => x,
+            (_, x, _) => x,
         };
     }
 
@@ -912,7 +1026,7 @@ pub fn build(inp: &Value) -> Value {
         "period": period,
         "filters": f,
         "sources": sources,
-        "hosts": hosts.into_values().filter(|h| fhost.is_none_or(|x| h["id"] == x)).collect::<Vec<_>>(),
+        "hosts": hosts.into_values().filter(|h| fhost.is_none_or(|x| h["id"].as_str().is_some_and(|i| i.eq_ignore_ascii_case(x)))).collect::<Vec<_>>(),
         "attention": {"source": worst(att_states.iter().map(|(n, s)| (n.clone(), s)), now),
                       "current": hostf(&current), "gaps": hostf(&gaps), "incidents": hostf(&history)},
         "boards": boards,
@@ -936,7 +1050,7 @@ pub fn build(inp: &Value) -> Value {
 /// installation and workspace, its hosts cell and Attention items. Producer time dates everything (serverq limit
 /// 7200 s, enroll::stale_secs); manual rules stay not verified, unknown stays unknown, a revoked grant shows nothing
 /// current. A host keeps the newest observation when several installations share its label and runtime.
-fn serverq_enrolled(inp: &Value, now: u64, hosts: &mut BTreeMap<String, Value>, current: &mut Vec<Value>, gaps: &mut Vec<Value>, history: &mut Vec<Value>) -> Vec<Value> {
+fn serverq_enrolled(inp: &Value, now: u64, machines: &Machines, hosts: &mut BTreeMap<String, Value>, current: &mut Vec<Value>, gaps: &mut Vec<Value>, history: &mut Vec<Value>) -> Vec<Value> {
     let rule_id = |k: &str| (1..=64).contains(&k.len()) && k.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-'));
     let mut out = Vec::new();
     for r in inp["installations"]["rows"].as_array().into_iter().flatten() {
@@ -944,7 +1058,7 @@ fn serverq_enrolled(inp: &Value, now: u64, hosts: &mut BTreeMap<String, Value>, 
             continue;
         }
         let label = r["host_label"].as_str().filter(|h| safe(h, 64, b"_.-")).unwrap_or("unknown");
-        let host = format!("{label}/{}", if r["runtime"] == "wsl" { "wsl" } else { "native" });
+        let host = machines.id(label, if r["runtime"] == "wsl" { "wsl" } else { "native" });
         let installation = r["installation"].clone();
         let p = &r["snapshot"]["payload"];
         let mut src = r["observation"].clone();
@@ -984,7 +1098,7 @@ fn serverq_enrolled(inp: &Value, now: u64, hosts: &mut BTreeMap<String, Value>, 
             }
         }
         let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
-        let h = hosts.entry(host.clone()).or_insert_with(|| host_row(&host));
+        let h = host_entry(hosts, &host);
         if h["serverq"]["at"].as_u64().is_none_or(|a| src["at"].as_u64().is_some_and(|b| b >= a)) {
             h["serverq"] = json!({"status": worst_status, "state": src["state"], "at": src["at"], "age_s": src["age_s"], "reason": src["reason"], "installation": installation});
         }
@@ -1098,6 +1212,41 @@ mod tests {
         let incidents = doc["attention"]["incidents"].as_array().unwrap();
         assert_eq!(incidents.iter().filter(|i| i["source"] == "agentq").count(), 1, "one event id is one incident");
         assert!(doc["attention"]["gaps"].as_array().unwrap().iter().any(|g| g["what"] == "agentq installation inst-win: stale"));
+    }
+
+    /// Chain hosts.md H1-H7 (#140): live-shaped sources give one Hosts row per machine and kind; taskq heartbeats join
+    /// by their machine line, the freshest agentq installation fills the agentq columns and an older one is superseded
+    /// with its reason. Risk: one machine split over several rows, or a fresh host with empty agentq columns.
+    #[test]
+    fn hosts_join_one_row_per_machine() {
+        let mut fx: Value = serde_json::from_str(include_str!("../fixture/hosts.json")).unwrap();
+        let doc = build(&fx["input"]);
+        if std::env::var_os("DASHQ_UPDATE_FIXTURE").is_some() {
+            fx["hosts"] = doc["hosts"].clone();
+            std::fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/fixture/hosts.json"), serde_json::to_string_pretty(&fx).unwrap() + "\n").unwrap();
+        }
+        assert_eq!(doc["hosts"], fx["hosts"], "rerun with DASHQ_UPDATE_FIXTURE=1 after an intended change");
+        let hosts = doc["hosts"].as_array().unwrap();
+        let ids: Vec<&str> = hosts.iter().filter_map(|h| h["id"].as_str()).collect();
+        assert_eq!(ids, ["DESKTOP/native", "DESKTOP/wsl", "hermes-fra1/native", "macbook-m2.local/native", "wsl"]);
+        for h in hosts.iter().filter(|h| h["freshness"]["state"] == "ok") {
+            assert!(h["agentq"]["running"].is_string() && h["agentq"]["latest"].is_string() && h["agentq"]["behind"].is_boolean(), "{h}");
+            assert!(h["snapshot"].is_null() && h["reason"].is_null(), "{h}");
+        }
+        assert_eq!(hosts[3]["taskq"]["version"], "4.2.0", "H3: the newest version of two heartbeats");
+        assert_eq!(hosts[4]["reason"], "no machine line: update taskq");
+        let old = doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "inst-win-old").unwrap();
+        assert_eq!(old["reason"], "superseded by inst-win-new 0.6.0");
+        assert!(!doc["attention"]["gaps"].to_string().contains("inst-win-old"), "a superseded installation is no gap");
+        // D6: a failed, stale or capped Langfuse read never leaves a Hosts row green.
+        let now = fx["input"]["now"].as_u64().unwrap();
+        for (k, v, state) in [("error", json!("timeout"), "unconfirmed"), ("at", json!(now - 3600), "stale"), ("incomplete", json!(true), "incomplete")] {
+            let mut inp = fx["input"].clone();
+            inp["langfuse"][k] = v;
+            let mac = build(&inp)["hosts"][3]["freshness"].clone();
+            assert_eq!(mac["state"], state, "{k}: {mac}");
+            assert!(mac["reason"].as_str().is_some_and(|r| r.starts_with("Langfuse: ")), "{k}: {mac}");
+        }
     }
 
     /// Chain #116 A1: routing, hook and silent-compression failures of AgentQ installations reach Attention with host,

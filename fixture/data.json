@@ -42,12 +42,20 @@
   },
   "hosts": [
     {
-      "id": "fra",
+      "id": "fra/native",
+      "reason": null,
+      "freshness": {
+        "state": "incomplete",
+        "at": 1791873000,
+        "age_s": 2139,
+        "reason": "Langfuse: capped query"
+      },
       "snapshot": {
-        "state": "unknown",
-        "at": null,
-        "age_s": null,
-        "reason": "no snapshot in 24 h"
+        "state": "ok",
+        "at": 1791874860,
+        "age_s": 279,
+        "reason": null,
+        "incomplete": false
       },
       "taskq": {
         "version": "4.2.0",
@@ -58,41 +66,8 @@
         "reason": "heartbeat 65m old (ttl 5m)"
       },
       "agentq": {
-        "monitor": null,
-        "proxy": null,
-        "selected": null,
-        "available": null,
-        "latest": "0.4.17",
-        "updater": null,
-        "subscription": null,
-        "behind": null
-      },
-      "serverq": {
-        "status": null,
-        "state": "unknown",
-        "age_s": null,
-        "reason": "no serverq report for this host"
-      },
-      "services": []
-    },
-    {
-      "id": "fra/native",
-      "snapshot": {
-        "state": "ok",
-        "at": 1791874860,
-        "age_s": 279,
-        "reason": null,
-        "incomplete": false
-      },
-      "taskq": {
-        "version": null,
-        "latest": "4.2.0",
-        "behind": null,
-        "state": "unknown",
-        "age_s": null,
-        "reason": "no heartbeat"
-      },
-      "agentq": {
+        "installation": "inst-fra",
+        "running": "0.5.0",
         "monitor": "0.4.16",
         "proxy": "0.4.15",
         "selected": "0.4.16",
@@ -100,7 +75,7 @@
         "latest": "0.4.17",
         "updater": "current",
         "subscription": "connected",
-        "behind": true
+        "behind": false
       },
       "serverq": {
         "status": "warn",
@@ -139,6 +114,13 @@
     },
     {
       "id": "mac/native",
+      "reason": null,
+      "freshness": {
+        "state": "unknown",
+        "at": null,
+        "age_s": null,
+        "reason": "no agentq heartbeat"
+      },
       "snapshot": {
         "state": "stale",
         "at": 1791867600,
@@ -155,6 +137,8 @@
         "reason": "no heartbeat"
       },
       "agentq": {
+        "installation": null,
+        "running": null,
         "monitor": null,
         "proxy": null,
         "selected": null,
@@ -183,12 +167,14 @@
     },
     {
       "id": "macbook-m2.local",
-      "snapshot": {
+      "reason": "no machine line: update taskq",
+      "freshness": {
         "state": "unknown",
         "at": null,
         "age_s": null,
-        "reason": "no snapshot in 24 h"
+        "reason": "no agentq heartbeat"
       },
+      "snapshot": null,
       "taskq": {
         "version": "4.1.2",
         "latest": "4.2.0",
@@ -198,6 +184,8 @@
         "reason": null
       },
       "agentq": {
+        "installation": null,
+        "running": null,
         "monitor": null,
         "proxy": null,
         "selected": null,
@@ -217,12 +205,14 @@
     },
     {
       "id": "win-1/native",
-      "snapshot": {
-        "state": "unknown",
+      "reason": null,
+      "freshness": {
+        "state": "stale",
         "at": null,
         "age_s": null,
-        "reason": "no snapshot in 24 h"
+        "reason": "no heartbeat in 24 h"
       },
+      "snapshot": null,
       "taskq": {
         "version": null,
         "latest": "4.2.0",
@@ -232,6 +222,8 @@
         "reason": "no heartbeat"
       },
       "agentq": {
+        "installation": "inst-win",
+        "running": "0.4.0",
         "monitor": null,
         "proxy": null,
         "selected": null,
@@ -239,7 +231,7 @@
         "latest": "0.4.17",
         "updater": null,
         "subscription": null,
-        "behind": null
+        "behind": true
       },
       "serverq": {
         "status": null,
@@ -941,9 +933,11 @@
         "failed_retrievals": 0,
         "trace_id": "tr-q4",
         "state": "ok",
+        "age_s": 2139,
         "reason": null,
         "latest": "0.4.17",
-        "behind": false
+        "behind": false,
+        "superseded": null
       },
       {
         "installation": "inst-win",
@@ -960,9 +954,11 @@
         "failed_retrievals": 1,
         "trace_id": "tr-q5",
         "state": "stale",
+        "age_s": null,
         "reason": "no heartbeat in 24 h",
         "latest": "0.4.17",
-        "behind": true
+        "behind": true,
+        "superseded": null
       }
     ],
     "clients": {
@@ -1511,7 +1507,7 @@
         "provenance": "taskq-heartbeat",
         "installation": null,
         "workspace": "taskqorg/taskq",
-        "host": "fra",
+        "host": "fra/native",
         "observation": {
           "state": "stale",
           "at": 1791871200,
