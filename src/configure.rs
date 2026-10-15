@@ -205,7 +205,8 @@ fn reply_of(posted: &Value) -> &Value {
 /// `status`: plans `planning`, `planned` or `rejected`; applies `accepted` (stored or host-accepted, not yet
 /// confirmed), `configured` (host applied and a fresh snapshot after the result shows every intended value),
 /// `verified` (configured and AgentQ verified each changed profile), `rejected`, `partial` or `unknown`. `reason`
-/// names why; an operation that never reached the host reads `rejected` with `expired` or `revoked`.
+/// names why; an operation that never reached the host reads `rejected` with `expired` or `revoked`, as does a
+/// delivered one revoked before its result.
 pub fn status(e: &Enroll, subject: &str, id: &str, now: i64) -> Result<Option<Value>, store::Error> {
     let Some(rb) = e.readback(subject, id, now)? else { return Ok(None) };
     let Some(rec) = e.store().operation(id)? else { return Ok(None) };
@@ -241,8 +242,8 @@ pub fn status(e: &Enroll, subject: &str, id: &str, now: i64) -> Result<Option<Va
             Some(o @ ("partial" | "unknown" | "rejected")) => (o, word(&host["reason"])),
             _ => ("unknown", Some("invalid_result".into())),
         },
-        // delivered, then revoked before any result: the host may have run it
-        _ => ("unknown", Some("revoked".into())),
+        // delivered, then revoked before any result: resolved rejected (#147); no result can arrive after the revoke
+        _ => ("rejected", Some("revoked".into())),
     };
     let reason = reason.or_else(|| (status == "unknown").then(|| "no_reason".into()));
     Ok(Some(json!({"operation": id, "kind": rb["kind"], "installation": rb["installation"], "state": rb["state"], "status": status, "reason": reason,
@@ -516,7 +517,7 @@ mod tests {
         // a plan never delivered before expiry: rejected, expired; the browser must plan again
         t.post("github|1", &plan_body(1), T0);
         assert_eq!(st(&t, 1, T0 + 300), "rejected:expired");
-        // an apply delivered (host may run it), then revoked before any result: unknown, never success
+        // an apply delivered, then revoked before any result: rejected, never success
         t.post("github|1", &plan_body(2), T0 + 300);
         t.host(&op(2), host_plan(2, "r1", &[], T0 + 600), T0 + 301);
         t.post("github|1", &apply(3, 2), T0 + 302);
@@ -529,7 +530,7 @@ mod tests {
         let t = T { e: Enroll::open(&d, HOST), d, enabled: true };
         assert_eq!(st(&t, 3, T0 + 304), "accepted:");
         assert!(t.e.as_ref().unwrap().store().revoke(INST, T0 + 305).unwrap());
-        assert_eq!(st(&t, 3, T0 + 306), "unknown:revoked");
+        assert_eq!(st(&t, 3, T0 + 306), "rejected:revoked");
         assert_eq!(t.post("github|1", &plan_body(4), T0 + 306), (403, json!({"reason": "no_grant"})));
         // storage unavailable: the store refuses, nothing is reported as accepted
         let t2 = T::new("broken");
