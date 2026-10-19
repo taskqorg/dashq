@@ -211,3 +211,6 @@ tr:target td { background: #eef4ff; }
 #boards { color-scheme: light dark; }
 .board-blocks > div { margin-block: 8px; }
 #agentwork td{white-space:nowrap}
+
+.finding { overflow-wrap: anywhere; padding: 8px 0; }
+.finding summary { cursor: pointer; }

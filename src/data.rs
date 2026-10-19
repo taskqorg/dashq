@@ -685,7 +685,9 @@ pub fn build(inp: &Value) -> Value {
         }
     }
     if !sq_host.is_empty() && !sq.is_null() {
-        let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
+        let worst_status = if results.iter().any(|r| r["status"] == "warn") { Some("warn") }
+            else if results.iter().any(|r| r["status"] == "unknown" || r["source"]["state"] != "ok") { Some("unknown") }
+            else if results.is_empty() { None } else { Some("ok") };
         let h = host_entry(&mut hosts, &machines.canon(sq_host));
         h["serverq"] = json!({"status": worst_status, "state": sq_src["state"], "at": sq_src["at"], "age_s": sq_src["age_s"], "reason": sq_src["reason"], "installation": null});
     }
@@ -779,6 +781,11 @@ fn serverq_enrolled(inp: &Value, now: u64, machines: &Machines, hosts: &mut BTre
         if !valid {
             src = json!({"state": "unknown", "at": src["at"], "age_s": src["age_s"], "reason": "unsupported serverq projection (schema 1 expected)", "incomplete": false});
         }
+        if valid && (p["complete"] == false || p["incomplete"] == true) {
+            src["state"] = json!("incomplete");
+            src["incomplete"] = json!(true);
+            src["reason"] = json!("producer projection incomplete");
+        }
         let last = if src["state"] == "ok" { "" } else { " Last known: the report is not fresh." };
         let (mut results, mut manual, mut open) = (Vec::new(), Vec::new(), Vec::new());
         for (name, x) in p["rules"].as_object().into_iter().flatten().filter(|(k, _)| rule_id(k)) {
@@ -798,25 +805,45 @@ fn serverq_enrolled(inp: &Value, now: u64, machines: &Machines, hosts: &mut BTre
                 "unknown" => gaps.push(item),
                 _ => {}
             }
-            results.push(json!({"check": name, "status": status, "reason": reason, "observed_at": observed, "evidence": evidence}));
-        }
-        for (name, i) in p["incidents"].as_object().into_iter().flatten().filter(|(k, _)| rule_id(k)) {
-            let t = |k: &str| i[k].as_f64().filter(|t| t.is_finite() && *t >= 0.0).map(|a| a as u64);
-            let state = i["state"].as_str().filter(|s| ["observed", "verified"].contains(s)).unwrap_or("unknown");
-            if state != "verified" {
-                open.push(json!({"check": name, "state": state, "first_seen": t("first_seen"), "last_seen": t("last_seen"), "occurrences": i["occurrences"]}));
+            let mut rule_source = src.clone();
+            if src["state"] == "ok" {
+                let (state, reason) = match observed.as_u64() {
+                    None => ("unknown", Some("rule observation time unavailable")),
+                    Some(t) if t > now => ("unknown", Some("clock uncertain")),
+                    Some(t) if now - t > crate::enroll::SERVERQ_STALE_SECS => ("stale", Some("rule observation stale")),
+                    _ => ("ok", None),
+                };
+                rule_source = json!({"state": state, "at": observed, "age_s": observed.as_u64().and_then(|t| now.checked_sub(t)), "reason": reason, "incomplete": false});
             }
-            if t("last_seen").is_some_and(|l| l + 86400 >= now) {
-                history.push(json!({"source": "serverq", "host": host, "installation": installation, "what": format!("{name}: {state}"), "since": t("first_seen"), "occurrences": i["occurrences"], "trace_id": null}));
+            results.push(json!({"check": name, "status": status, "reason": reason, "observed_at": observed, "evidence": evidence, "source": rule_source}));
+        }
+        let retained = inp["serverq_samples"].as_array().into_iter().flatten().find(|s| s["installation"] == installation && s["workspace"] == r["workspace"]).cloned().unwrap_or(Value::Null);
+        let findings = crate::findings::build(r, &retained, now);
+        if findings["incomplete"] == true {
+            gaps.push(json!({"source": "serverq", "host": host, "installation": installation, "workspace": r["workspace"], "what": "retained episode history incomplete", "since": src["at"], "detail": "History capped or unavailable; no recovery inferred.", "trace_id": null}));
+        }
+        for f in findings["episodes"].as_array().into_iter().flatten() {
+            if f["state"] == "open" {
+                open.push(json!({"check": f["rule"], "state": "observed", "first_seen": f["first_seen"], "last_seen": f["last_seen"], "occurrences": f["occurrences"]}));
+            }
+            if f["last_seen"].as_u64().is_some_and(|t| t.saturating_add(86400) >= now) {
+                history.push(json!({"source": "serverq", "host": host, "installation": installation, "workspace": r["workspace"], "what": format!("{}: {}", f["rule"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")), "since": f["first_seen"], "verified_at": f["verified_at"], "occurrences": f["occurrences"], "episode": f, "trace_id": null}));
             }
         }
-        let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
+        for f in findings["episodes"].as_array().into_iter().flatten().filter(|f| f["state"] == "open") {
+            if p["rules"][f["rule"].as_str().unwrap_or("")]["status"] != "warn" {
+                gaps.push(json!({"source": "serverq", "host": host, "installation": installation, "workspace": r["workspace"], "what": format!("{}: open episode, verification unavailable", f["rule"].as_str().unwrap_or("unknown")), "since": f["first_seen"], "detail": "A stale, unknown or incomplete observation does not resolve an episode.", "episode": f, "trace_id": null}));
+            }
+        }
+        let worst_status = if results.iter().any(|r| r["status"] == "warn") { Some("warn") }
+            else if results.iter().any(|r| r["status"] == "unknown" || r["source"]["state"] != "ok") { Some("unknown") }
+            else if results.is_empty() { None } else { Some("ok") };
         let h = host_entry(hosts, &host);
         if h["serverq"]["at"].as_u64().is_none_or(|a| src["at"].as_u64().is_some_and(|b| b >= a)) {
             h["serverq"] = json!({"status": worst_status, "state": src["state"], "at": src["at"], "age_s": src["age_s"], "reason": src["reason"], "installation": installation});
         }
         out.push(json!({"installation": installation, "workspace": r["workspace"], "host": host, "version": p["version"].as_str().filter(|v| safe(v, 64, b".+-")),
-            "catalog": p["catalog"].as_str().filter(|c| safe(c, 64, b"")), "source": src, "at": src["at"], "results": results, "incidents": open, "manual_rules": manual}));
+            "findings": findings["episodes"], "findings_incomplete": findings["incomplete"], "catalog": p["catalog"].as_str().filter(|c| safe(c, 64, b"")), "source": src, "at": src["at"], "results": results, "incidents": open, "manual_rules": manual}));
     }
     out
 }
@@ -843,6 +870,17 @@ pub fn all_failed(doc: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// H2: producer verification time must survive the enrolled read-to-page path.
+    #[test]
+    fn serverq_verified_episode_preserves_producer_time() {
+        let mut input: Value = serde_json::from_str(crate::FIXTURE).unwrap();
+        let p: Value = serde_json::from_str(include_str!("../fixture/serverq/linux.json")).unwrap();
+        input["now"] = json!(1792000000u64);
+        input["installations"] = json!({"rows": [{"product": "serverq", "installation": "sq-1", "workspace": "ws-1", "host_label": "same", "runtime": "native", "connection": "active", "observation": {"state": "ok", "at": 1792000000u64}, "snapshot": {"schema": "serverq-report/1", "payload": p}}]});
+        let doc = build(&input);
+        assert_eq!(doc["checks"]["installations"][0]["findings"][0]["verified_at"], 1791907200u64);
+    }
 
     /// D19 U2: cached resource collection failure is unconfirmed, with producer ages and other boards retained.
     #[test]

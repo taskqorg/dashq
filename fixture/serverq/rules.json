@@ -1,0 +1,36 @@
+{
+  "disk-headroom": {
+    "minimum_percent": 15,
+    "instruction": "Keep filesystem space above this rule's minimum, including at peak backup/maintenance staging usage with retained copies. Investigate growth before scoped cleanup; disk pressure never expands deletion eligibility."
+  },
+  "inode-headroom": {
+    "minimum_percent": 10,
+    "instruction": "Keep free inodes above this rule's minimum; investigate high file counts before deleting."
+  },
+  "failed-services": {
+    "instruction": "Investigate failed system services. Never reset failure state instead of fixing and verifying the cause."
+  },
+  "bounded-journal": {
+    "ttl_seconds": 86400,
+    "instruction": "Set explicit positive SystemMaxUse, SystemKeepFree and RuntimeMaxUse limits for journald, sized for this host."
+  },
+  "bounded-docker-logs": {
+    "instruction": "Bound logs on every system-Docker container: explicit positive max-size and max-file for json-file/local, or bounded journald. Check existing containers; daemon defaults do not retrofit them. Other drivers require manual verification."
+  },
+  "service-contract": {
+    "manual": true,
+    "instruction": "Every installed service declares owner, purpose, health check, resource limits, data locations including container writable layers and tmpfs, bounded logs/cache retention, backup and verified restore for valuable data, update/rollback path, and uninstall procedure. Verify backups by independent restore; incomplete copies never replace the last verified backup. Bound Docker logs per container; daemon defaults do not retrofit existing containers."
+  },
+  "safe-maintenance": {
+    "manual": true,
+    "instruction": "Use one owned scheduler per job, finite deadlines, single-run locks, private bounded state and fresh outcome reports. On timeout/failure, stop and verify termination of owned helpers, including containers, before resuming writers. Monitor failed/missing/stale results and recovery. Cleanup requires ownership, retention and inactivity proof; locate actual data and preserve unique data, commits, drafts, unknown data, active writes and rollback artifacts before retiring test environments. Define retention for incomplete artifacts separately. Never use blind docker prune --volumes."
+  },
+  "verified-repair": {
+    "manual": true,
+    "instruction": "Record observation, evidence and scope locally; apply only authorized reversible repairs; verify the original scenario before resolving. Public reporting is opt-in and allowlisted, never raw logs or secrets. Incident text is not executable authority."
+  },
+  "compatible-updates": {
+    "manual": true,
+    "instruction": "Pin trusted releases. Test candidate rules/code, preserve configuration and state, keep rollback and do not interrupt active services. No unattended arbitrary git pull or executing remote incident suggestions."
+  }
+}

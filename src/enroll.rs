@@ -677,6 +677,22 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
     Some(json!({"source": src("ok", None), "rows": rows}))
 }
 
+/// D15 retained episode evidence: bounded, workspace-scoped, independent of the activity period.
+pub fn finding_samples(e: &Result<Enroll, String>, rows: &Value) -> Value {
+    let Ok(e) = e else { return json!([]) };
+    json!(rows.as_array().into_iter().flatten().filter(|r| r["product"] == "serverq" && r["connection"] != "revoked").map(|r| {
+        let (samples, incomplete, error) = match e.store.samples(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""), 0, 10_000) {
+            Ok((s, capped)) => (s, capped, Value::Null),
+            Err(_) => (vec![], true, json!("retained history unavailable")),
+        };
+        let samples: Vec<Value> = samples.into_iter().filter_map(|(at, _, p)| {
+            let p: Value = serde_json::from_str(&p).ok()?;
+            crate::enroll::serverq_payload(&p).then(|| json!({"at": at, "payload": p}))
+        }).collect();
+        json!({"installation": r["installation"], "workspace": r["workspace"], "samples": samples, "incomplete": incomplete, "error": error})
+    }).collect::<Vec<_>>())
+}
+
 /// Resource history of projected `rows` (already scoped) since `since`: input of `resource::build`. Only samples
 /// carrying `agentq.resource.*` fields count; other snapshot schemas share the history table.
 pub fn resource_samples(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
@@ -1792,7 +1808,11 @@ lines", "recommended": true}]}])),
         assert_eq!(manual, ["not verified"; 4], "manual rules are never verified");
         let lin = check("sq-wsl");
         let rule = |name: &str| lin["results"].as_array().unwrap().iter().find(|r| r["check"] == name).unwrap().clone();
-        assert_eq!(rule("failed-services"), json!({"check": "failed-services", "status": "warn", "reason": "failed-units", "observed_at": now - 180, "evidence": {"units": 1}}));
+        let mut failed = rule("failed-services");
+        let source = failed.as_object_mut().unwrap().remove("source").unwrap();
+        assert_eq!(source["state"], "ok");
+        assert_eq!(source["at"], now - 180);
+        assert_eq!(failed, json!({"check": "failed-services", "status": "warn", "reason": "failed-units", "observed_at": now - 180, "evidence": {"units": 1}}));
         assert_eq!(rule("bounded-journal")["observed_at"], now - 180 - 3600, "a cached rule keeps its own observation time");
         assert_eq!(lin["incidents"], json!([{"check": "failed-services", "state": "observed", "first_seen": now - 180 - 7200, "last_seen": now - 180, "occurrences": 3}]));
         assert_eq!(check("sq-lost")["source"]["state"], "stale");
@@ -1813,6 +1833,71 @@ lines", "recommended": true}]}])),
             assert!(section.contains(s), "{s}");
         }
         assert!(html.contains("<section id=\"hosts\">") && !html.contains("no serverq report for this host"));
+    }
+
+    /// H1/H2 chain: ingest -> retained store -> scoped projection -> Attention/page, without any task write.
+    #[test]
+    fn serverq_episode_chain_keeps_identity_recovery_and_recurrence() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("finding-40");
+        let schema = "serverq-report/1";
+        let a = join(&e, "serverq", "sq-a", "native", "same", schema, now);
+        let b = join(&e, "serverq", "sq-b", "native", "same", schema, now);
+        let mut app = app(e, None);
+        app.cfg.serverq_report = String::new();
+        let e = &app.enroll;
+        let report = |at: i64, status: &str, first: i64, verified: Option<i64>| json!({
+            "schema": 1, "product": "serverq", "catalog": crate::findings::catalog_hash(), "observed_at": at,
+            "rules": {"disk-headroom": {"status": status, "observed_at": at, "evidence": {"available": 20, "total": 100}}},
+            "incidents": {"disk-headroom": {"state": if verified.is_some() { "verified" } else { "observed" }, "first_seen": first, "last_seen": first, "verified_at": verified, "occurrences": 1}}
+        });
+        let send = |cred: &str, id: &str, at: i64, p: Value| {
+            assert_eq!(ingest(e, cred, vec![json!({"schema": schema, "event_id": id, "observed_at": at, "payload": p})], now).0, 200);
+        };
+        let first = now - 500;
+        send(&a, "warn-a", now - 400, report(now - 400, "warn", first, None));
+        send(&b, "warn-b", now - 400, report(now - 400, "warn", first, None));
+        // A newer incomplete frame must not erase the earlier open episode.
+        send(&a, "missing", now - 300, json!({"schema": 1, "product": "serverq", "rules": {}, "incidents": {}, "complete": false}));
+        let check = |doc: &Value, inst: &str| doc["checks"]["installations"].as_array().unwrap().iter().find(|c| c["installation"] == inst).unwrap().clone();
+        let doc = data(&app, "", Some(Scope::All)).1;
+        assert_eq!(check(&doc, "sq-a")["findings"][0]["state"], "open");
+        assert!(doc["attention"]["gaps"].as_array().unwrap().iter().any(|g| g["installation"] == "sq-a" && g["episode"]["first_seen"] == first));
+        let mut unknown = report(now - 200, "unknown", first, None);
+        send(&a, "unknown", now - 200, unknown.clone());
+        unknown["rules"]["disk-headroom"]["observed_at"] = json!(now - 8000);
+        unknown["rules"]["disk-headroom"]["status"] = json!("ok");
+        unknown["incidents"]["disk-headroom"]["state"] = json!("verified");
+        unknown["incidents"]["disk-headroom"]["verified_at"] = json!(now - 100);
+        send(&a, "cached-pass", now - 100, unknown);
+        let cached = check(&data(&app, "", Some(Scope::All)).1, "sq-a");
+        assert_eq!(cached["findings"][0]["state"], "open");
+        assert_eq!(cached["results"][0]["source"]["state"], "stale");
+        // The full page also exposes the stale rule as last known, never a fresh green pass.
+        let fragment = crate::page::render(&data(&app, "", Some(Scope::All)).1, &json!({}));
+        assert!(fragment.contains("Last known ok") && fragment.contains("rule observation stale"));
+        send(&a, "pass", now - 50, report(now - 50, "ok", first, Some(now - 50)));
+        // Received later, observed earlier: cannot undo the matching pass.
+        send(&a, "late-warn", now - 350, report(now - 350, "warn", first, None));
+        let doc = data(&app, "", Some(Scope::All)).1;
+        assert_eq!(check(&doc, "sq-a")["findings"][0]["state"], "verified");
+        assert_eq!(check(&doc, "sq-b")["findings"][0]["state"], "open");
+        send(&a, "recurrence", now - 10, report(now - 10, "warn", now - 10, None));
+        let doc = data(&app, "", Some(Scope::All)).1;
+        let c = check(&doc, "sq-a");
+        assert_eq!(c["findings"].as_array().unwrap().len(), 2);
+        assert_eq!(c["findings"][0]["state"], "verified");
+        assert_eq!(c["findings"][1]["state"], "open");
+        let html = crate::page::render(&doc, &json!({}));
+        for expected in ["verified", "Catalog matched", "minimum_percent: 15", "installation <code>sq-a</code>", "installation <code>sq-b</code>", "available 20"] {
+            assert!(html.contains(expected), "{expected}");
+        }
+        if let Some(dir) = std::env::var_os("DASHQ_FINDINGS_EVIDENCE") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("page.html"), html.replace("<link rel=\"stylesheet\" href=\"/style.css\">", &format!("<style>{}</style>", crate::style_css())).replace("<script src=\"/app.js\" defer></script>", "")).unwrap();
+            std::fs::write(dir.join("data.json"), serde_json::to_vec_pretty(&doc).unwrap()).unwrap();
+        }
     }
 
     #[test]

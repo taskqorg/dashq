@@ -24,9 +24,9 @@ Status: **shipped** (dashq reads and renders it today), **stale** (rendered, but
 | agentq `agentq.resource` CPU, RAM, filesystems (HMAC id), `*_unknown` | Hosts | proposed | [#23](https://github.com/taskqorg/dashq/issues/23), gated by [agentq #86](https://github.com/taskqorg/agentq/issues/86) |
 | agentq `status.json` `mcp`, `hooks`, engine versions | Detail | missing | Promised by agentq.md, not written |
 | serverq `report.json` `results`, `incidents`, `manual_rules`, `at` | Attention, Detail (checks) | shipped | One configured host, joined by a configured host id |
-| serverq `installation`, `rules_sha256`, `observed_at`, `reason: probe-failed` | Detail, Hosts join | proposed | serverq follow-up P1 |
-| serverq `serverq-findings/1` projection | Attention, Detail | proposed | serverq follow-up P2; required for any remote host |
-| serverq recommendation text | Detail | missing | Only in `rules.json` `instruction`; resolve by `{rule, rules_sha256, version}` |
+| serverq `installation`, `catalog`, per-rule `observed_at`, allowlisted reasons | Detail | shipped | #40 preserves installation/workspace/episode identity; Hosts H4/H7 is unchanged |
+| serverq `serverq-report/1` projection | Attention, Detail | shipped | #40, ServerQ #28 schema 1 projection |
+| serverq recommendation text | Detail | shipped | #40 vendors exact catalog bytes; expose only on matching `catalog` SHA-256 and rule ID |
 | coreq `status.json` common keys | Hosts | missing | Local only; raw export forbidden (paths, error text) |
 | GitHub `releases/latest` per product | Hosts `behind` | shipped | 10 min cache |
 
@@ -41,13 +41,13 @@ Each adapter reads one existing producer interface and returns the coreq source 
 | `agentq-langfuse` | Langfuse events (D4.1) | `fleet`, `activity`, `incidents`, later `resources` | shipped, `resources` proposed |
 | `agentq-ingest` | enrollment snapshot and samples (C2, C4) | same as above | proposed |
 | `serverq-report` | local `report.json` (D4.3) | `findings`, `incidents` | shipped |
-| `serverq-findings` | `serverq-findings/1` through enrollment | `findings`, `incidents` | proposed |
+| `serverq-findings` | `serverq-report/1` through enrollment and retained samples | `findings`, `incidents` | shipped (#40), observation only |
 
 Composition (integration I1–I7, A7):
 
 - **Independent producers.** Each view needs only its capability. TaskQ alone shows boards and questions; ServerQ alone shows checks; AgentQ alone shows fleet and resources. No placeholder panel for an absent product.
 - **Optional connections.** Per source: not configured (hidden, listed once in the source legend), disconnected or revoked (last observation kept with age, not an active failure), unsupported capability (field in `unknown[]`), stale observation, failed read (D6 `unconfirmed`).
-- **Verified joins.** Rows join only through an owner-made `installation → host` mapping (C3). Equal `host.name` values are display text. Native Windows and WSL are separate installations. Without a mapping, each installation keeps its own row; no resource is counted twice.
+- **Verified joins.** Finding/resource links join only through an owner-made `installation → host` mapping (C3). Equal `host.name` values are display text. Native Windows and WSL are separate installations. Without a mapping, findings stay separate by installation/workspace; no resource is counted twice. The owner answer on #40 retains Hosts H4/H7 grouping separately.
 - **Mixed versions.** A missing additive key is an `unknown[]` entry; the view stays. An unknown schema major is `unsupported` with the last good frame. No fleet-wide update is required.
 - **Disconnects.** Removing dashq or one source stops nothing on a host. Another source's views remain complete.
 - **Freshness.** `observed` against the producer's own limit: taskq heartbeat `ttl`, agentq heartbeat 7200 s and samples 900 s, serverq `stale_after`. A working connection never refreshes an old observation.
