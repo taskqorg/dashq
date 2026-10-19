@@ -453,7 +453,8 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
     let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
     for r in ch["results"].as_array().into_iter().flatten() {
         let st = r["status"].as_str().unwrap_or("unknown");
-        let status = if ch["source"]["state"] == "ok" { badge(st, st) } else { badge("unconfirmed", &format!("Last known {st}")) };
+        let source = r.get("source").unwrap_or(&ch["source"]);
+        let status = if source["state"] == "ok" { badge(st, st) } else { badge("unconfirmed", &format!("Last known {st}")) };
         // a local report carries its own detail; a projection only fixed reasons, times and counts
         let detail = if r.get("detail").is_some() {
             text(&r["detail"])
@@ -466,12 +467,33 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
             }
             parts.join(" · ")
         };
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{detail}</td></tr>", text(&r["check"]), status);
+        let source_note = r.get("source").map(unknown_line).unwrap_or_default();
+        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{detail}{source_note}</td></tr>", text(&r["check"]), status);
     }
     for m in ch["manual_rules"].as_array().into_iter().flatten() {
         let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
     }
-    let _ = writeln!(w, "</table>\n<h3>Open incidents</h3>");
+    let _ = writeln!(w, "</table>");
+    for f in ch["findings"].as_array().into_iter().flatten() {
+        let identity = serde_json::to_vec(&json!([f["workspace"], f["installation"], f["rule"], f["first_seen"]])).unwrap();
+        let key: String = ring::digest::digest(&ring::digest::SHA256, &identity).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+        let st = if f["state"] == "verified" && f["source"]["state"] == "ok" { "ok" } else { "unknown" };
+        let _ = writeln!(w, "<details class=\"finding\" id=\"finding-{key}\"><summary id=\"finding-summary-{key}\">{} · {} · episode {}</summary><p>Workspace {} · installation <code>{}</code></p><p>First {} · last {} · observed {} · verified {}</p><p>Catalog {} <code>{}</code></p>", text(&f["rule"]), badge(st, f["state"].as_str().unwrap_or("unknown")), text(&f["first_seen"]), text(&f["workspace"]), text(&f["installation"]), at(&f["first_seen"], now), at(&f["last_seen"], now), at(&f["observed_at"], now), at(&f["verified_at"], now), text(&f["catalog"]["state"]), text(&f["catalog"]["sha256"]));
+        let _ = writeln!(w, "{}", unknown_line(&f["source"]));
+        if let Some(evidence) = f["evidence"].as_object() {
+            for (key, value) in evidence { let _ = writeln!(w, "<p>{} {}</p>", esc(key), text(value)); }
+        }
+        if let Some(rec) = f["recommendation"].as_object() {
+            for (key, value) in rec { let _ = writeln!(w, "<p>{}: {}</p>", esc(key), text(value)); }
+        } else {
+            let _ = writeln!(w, "<p>Thresholds and recommendation unavailable: no matching catalog.</p>");
+        }
+        let _ = writeln!(w, "</details>");
+    }
+    if ch["findings_incomplete"] == true {
+        let _ = writeln!(w, "<p>Retained episode history incomplete; no recovery inferred.</p>");
+    }
+    let _ = writeln!(w, "<h3>Open incidents</h3>");
     let open = ch["incidents"].as_array().cloned().unwrap_or_default();
     if open.is_empty() {
         let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");

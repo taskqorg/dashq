@@ -10,6 +10,8 @@ Review title, scope, numeric evidence, source time, catalog reference and accept
 
 The accepted reference is [finding-task-reference.html](finding-task-reference.html), [standalone preview](finding-task-preview.html), and [source manifest](finding-task-reference.sources.json). Its numeric data, project mapping, issue #2401, times, repair and price are synthetic. The parent functions are reused with documented fixture adapters; creation/recovery are simulations, not production assets.
 
+Observation boundary (#40 owner answer): Hosts H4/H7 grouping stays unchanged. Findings and episodes stay separate by installation/workspace, with no inferred resource join. Task creation and project mapping remain the #53 handoff.
+
 ## H2. Independent readback
 
 | TaskQ observation | ServerQ observation | Dashboard |

@@ -8,6 +8,7 @@ mod configure;
 mod data;
 mod enroll;
 mod export;
+mod findings;
 mod optimization;
 mod page;
 mod policy;
@@ -250,12 +251,13 @@ impl App {
         // committed snapshots never wait for or depend on the optional sources above (D11)
         let projection = enroll::projection(&self.enroll, scope, host.as_deref(), now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
+        let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
         profile::step("enrollment", t0);
         let t0 = std::time::Instant::now();
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "installations": projection, "agent_work": agent_work,
+            "installations": projection, "agent_work": agent_work, "serverq_samples": findings,
         }));
         profile::step("build", t0);
         let mut doc = doc;

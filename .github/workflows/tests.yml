@@ -18,7 +18,7 @@ jobs:
       - run: node tests/resources.cjs
       - name: cargo checks
         run: |
-          DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" cargo test --locked
+          DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" cargo test --locked
           cargo run -- selftest
       - name: shared resource browser chain
         run: |
@@ -28,3 +28,4 @@ jobs:
           "$RUNNER_TEMP/resource-browser/node_modules/.bin/playwright" install --with-deps chromium
           DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" node tests/resources-browser.cjs
           DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" node tests/startup-browser.cjs
+          DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" node tests/findings-browser.cjs
