@@ -369,8 +369,8 @@ fn actor<'a>(host: Option<&str>, public_host: &str, subject: Option<&'a str>) ->
 fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::Scope>) -> (&'static str, &'static str, Vec<u8>) {
     const HTML: &str = "text/html; charset=utf-8";
     const JSON: &str = "application/json";
-    if !["/", "/app.js", "/style.css", "/data"].contains(&path) {
-        return ("404 Not Found", "text/plain", b"not found".to_vec());
+    if !["/app.js", "/style.css", "/data"].contains(&path) && !page::VIEWS.iter().any(|(p, _)| *p == path) {
+        return ("404 Not Found", HTML, b"<!doctype html><title>View not found</title><h1>View not found</h1><p>The requested path is unsupported.</p><a href=\"/\">Return to overview</a>".to_vec());
     }
     if method != "GET" {
         return ("405 Method Not Allowed", "text/plain", b"method not allowed".to_vec());
@@ -383,8 +383,8 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
             };
             let doc = app.doc(period, filters, scope);
-            if path == "/" {
-                return ("200 OK", HTML, page::render(&doc, &app.cfg.links).into_bytes());
+            if path != "/data" {
+                return ("200 OK", HTML, page::render_view(&doc, &app.cfg.links, path).into_bytes());
             }
             if data::all_failed(&doc) {
                 return ("503 Service Unavailable", JSON, br#"{"error":"all sources failed"}"#.to_vec());
@@ -808,6 +808,15 @@ mod tests {
     fn routes_and_headers() {
         let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
+        let missing = route(&app, "GET", "/nope", "", None);
+        assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
+        assert_eq!(route(&app, "GET", "/projects", "period=5", None).0, "400 Bad Request");
+        // D22 / F7: direct shared view URLs must resolve, not become 404 or JSON.
+        for path in ["/projects", "/hosts", "/agents", "/services", "/checks", "/integrations"] {
+            let r = route(&app, "GET", path, "period=7200&host=fixture", None);
+            assert_eq!(r.0, "200 OK", "{path}");
+            assert!(String::from_utf8(r.2).unwrap().contains(&format!("data-view=\"{path}\"")));
+        }
         assert_eq!(route(&app, "POST", "/data", "", None).0, "405 Method Not Allowed");
         assert_eq!(route(&app, "GET", "/data", "period=5", None).0, "400 Bad Request");
         assert_eq!(route(&app, "GET", "/app.js", "", None).0, "200 OK");

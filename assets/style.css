@@ -214,3 +214,25 @@ tr:target td { background: #eef4ff; }
 
 .finding { overflow-wrap: anywhere; padding: 8px 0; }
 .finding summary { cursor: pointer; }
+
+/* D22: same projection and controls, stable view URLs. */
+#views { display:flex; flex-wrap:wrap; gap:8px 16px; margin:12px 0; }
+#views [aria-current=page] { font-weight:bold; text-decoration-thickness:3px; }
+body[data-view]:not([data-view="/"]) :where(#main > section,#main > details,#main > .first) { display:none; }
+body[data-view="/projects"] #boards { display:block; }
+body[data-view="/projects"] #main > .first { display:block; }
+body[data-view="/projects"] .first > section { display:none; }
+body[data-view="/projects"] .first > #boards { display:block; }
+body[data-view="/hosts"] #servers,
+body[data-view="/hosts"] #hosts,
+body[data-view="/hosts"] #resources { display:block; }
+body[data-view="/hosts"] #main > .first { display:block; }
+body[data-view="/hosts"] .first > section { display:none; }
+body[data-view="/hosts"] .first > #servers { display:block; }
+body[data-view="/agents"] #agents,
+body[data-view="/agents"] #agentwork,
+body[data-view="/agents"] #aqresults { display:block; }
+body[data-view="/services"] #qversions { display:block; }
+body[data-view="/checks"] #checks { display:block; }
+body[data-view="/integrations"] #installations,
+body[data-view="/integrations"] #integrations { display:block; }

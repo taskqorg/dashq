@@ -1,5 +1,50 @@
 // dashq.md D5: fetch /data on load, every 60 s and on Refresh; a failure keeps the last page and shows the banner.
 'use strict';
+
+// D22 / F7: navigation never remounts controls or discards local drafts.
+const viewSections = {'/': [], '/projects': ['boards'], '/hosts': ['servers', 'hosts', 'resources'],
+  '/agents': ['agents', 'agentwork', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
+  '/integrations': ['installations', 'integrations']};
+const viewPositions = new Map();
+history.scrollRestoration = 'manual';
+let viewURL = location.href;
+function rememberView() {
+  viewPositions.set(viewURL, {y: scrollY, focus: document.activeElement?.id});
+}
+function applyView() {
+  if (!(location.pathname in viewSections)) return;
+  document.body.dataset.view = location.pathname;
+  document.querySelectorAll('[data-view-link]').forEach(a => {
+    const u = new URL(a.href); u.search = location.search; a.href = u.pathname + u.search;
+    if (u.pathname === location.pathname) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+  document.querySelectorAll('.bar a').forEach(a => {
+    const u = new URL(a.href); u.pathname = location.pathname; a.href = u.pathname + u.search;
+  });
+  const missing = document.getElementById('view-unavailable');
+  if (missing) {
+    missing.hidden = location.pathname === '/' || viewSections[location.pathname].some(id => document.getElementById(id));
+    missing.querySelector('a').href = '/' + location.search;
+  }
+}
+function navigateView(url, pop = false) {
+  rememberView();
+  const previous = new URL(viewURL);
+  if (!pop) history.pushState(null, '', url);
+  viewURL = location.href;
+  applyView();
+  const position = viewPositions.get(viewURL);
+  if (position?.focus) document.getElementById(position.focus)?.focus({preventScroll: true});
+  window.scrollTo(0, position?.y || 0);
+  if (previous.search !== location.search) refresh();
+}
+addEventListener('popstate', () => navigateView(location.href, true));
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-view-link], .bar a');
+  if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  e.preventDefault(); navigateView(a.href);
+});
+
 let busy = false;
 let ageUpdatedAt = Date.now();
 async function refresh() {
@@ -9,13 +54,15 @@ async function refresh() {
   const banner = document.getElementById('banner');
   const shown = document.querySelector('main time')?.textContent || 'unknown';
   try {
-    const data = await fetch('/data' + location.search, { cache: 'no-store' });
+    const query = location.search;
+    const data = await fetch('/data' + query, { cache: 'no-store' });
     // D7's first-ever total failure still has an honest server-rendered page, never demo data.
     if (!data.ok && data.status !== 503) throw new Error('HTTP ' + data.status);
-    const page = await fetch('/' + location.search, { cache: 'no-store' });
+    const page = await fetch('/' + query, { cache: 'no-store' });
     if (!page.ok) throw new Error('HTTP ' + page.status);
     const main = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById('main');
     if (!main) throw new Error('invalid page');
+    if (query !== location.search) { busy = false; queueMicrotask(refresh); return; }
     // D10: new values keep open disclosures, focus and reading position
     // a disclosure is keyed by its id, else its nearest id and summary, so added rows do not shift the others
     const key = d => d.id || (d.parentElement.closest('[id]')?.id + ':' + d.querySelector('summary')?.textContent);
@@ -99,6 +146,7 @@ async function refresh() {
   }
 }
 function bind() {
+  applyView();
   document.getElementById('refresh')?.addEventListener('click', refresh);
   document.querySelectorAll('.aq-edit').forEach(box => { aqRender(box); aqLoad(box); });
   DashqResources.bind();
@@ -294,5 +342,5 @@ document.addEventListener('change', e => {
   const url = new URL(location.href);
   if (e.target.value) url.searchParams.set(key, e.target.value); else url.searchParams.delete(key);
   url.hash = 'aqresults';
-  location.assign(url);
+  navigateView(url);
 });

@@ -7,7 +7,7 @@ const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/
 const css = ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(f => fs.readFileSync(f, 'utf8')).join('\n');
 const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'pending', 'warmup', 'partial', 'all-failed', 'recovery'];
 (async () => {
-  const browser = await chromium.launch({headless: true});
+  const browser = await chromium.launch({headless: true, ...(process.env.DASHQ_CHROME ? {executablePath: process.env.DASHQ_CHROME} : {})});
   try {
     for (const [width, size, theme] of [[1024, 16, 'light'], [360, 20, 'dark']]) {
       const page = await browser.newPage({viewport: {width, height: 768}, colorScheme: theme, reducedMotion: 'reduce'});
@@ -82,6 +82,24 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       await page.evaluate(() => scrollTo(0, 200));
       const before = await page.evaluate(() => [document.activeElement.id, scrollY]);
       const ageBefore = await page.$eval('#servers [data-age-s]', e => Number(e.dataset.ageS));
+      // D22 / F7: same DOM/card and drafts across tabs and browser history; shared entry retains filters.
+      const projection = await page.locator('#boards').getAttribute('data-boards');
+      for (const view of ['projects', 'hosts', 'agents', 'services', 'checks', 'integrations']) {
+        await page.locator('[data-view-link]').filter({hasText: new RegExp('^' + view + '$', 'i')}).evaluate(e => e.click());
+        assert.equal(new URL(page.url()).pathname, '/' + view);
+        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view);
+        assert.equal(await page.locator('#boards').getAttribute('data-boards'), projection);
+        assert.equal(await page.locator(card + ' textarea').inputValue(), 'Retained draft');
+        if (view === 'projects') assert(await page.locator('#boards').isVisible());
+        if (view === 'hosts') { assert(await page.locator('#servers').isVisible()); assert(!await page.locator('#boards').isVisible()); }
+      }
+      await page.goBack(); assert.equal(new URL(page.url()).pathname, '/checks');
+      await page.goForward(); assert.equal(new URL(page.url()).pathname, '/integrations');
+      await page.locator('[data-view-link]').filter({hasText: /^Overview$/}).evaluate(e => e.click());
+      assert.equal(await page.locator(card + ' textarea').inputValue(), 'Retained draft');
+      // Root restores its saved reading state; navigation never resets a disclosure or component.
+      assert(await page.locator('#attention-gaps').evaluate(e => e.open));
+      assert.equal(await page.locator(card).evaluate(e => e.marked), 1);
       offline = true;
       await page.clock.fastForward(61000);
       await page.waitForFunction(() => !busy);
@@ -100,6 +118,32 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       assert.equal(await page.locator('#banner').isVisible(), false, 'recovery clears banner');
       assert.deepEqual(writes, [], 'no reconnect writes');
       assert.deepEqual(errors, [], 'no browser errors');
+      recoveryTest = false; state = 'recovery'; offline = false; unavailable = false;
+      for (const view of ['projects', 'hosts', 'agents', 'services', 'checks', 'integrations']) {
+        await page.goto('http://fixture/' + view + '?period=7200&host=fixture&agent=codex&session=safe');
+        await page.waitForFunction(() => !busy);
+        await page.reload(); await page.waitForFunction(() => !busy);
+        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view);
+        assert.equal(new URL(page.url()).searchParams.get('session'), 'safe');
+        await page.addStyleTag({content: 'html{font-size:' + size + 'px}'});
+        await page.locator('#view-' + view).focus();
+        for (let i = 0; i < 2; i++) { await page.clock.fastForward(60000); await page.waitForFunction(() => !busy); }
+        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view, 'refresh retains tab');
+        assert.equal(await page.evaluate(() => document.activeElement.id), 'view-' + view, 'refresh retains tab focus');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'view overflow');
+        await page.locator('[data-view-link]').filter({hasText: /^Overview$/}).click();
+        assert.equal(new URL(page.url()).searchParams.get('host'), 'fixture');
+        if (process.env.DASHQ_NAV_SHOTS && view === 'projects') {
+          fs.mkdirSync(process.env.DASHQ_NAV_SHOTS, {recursive: true});
+          await page.evaluate(() => scrollTo(0, 0));
+          await page.screenshot({path: path.join(process.env.DASHQ_NAV_SHOTS, 'overview-' + width + '-' + theme + '.png')});
+          await page.locator('[data-view-link]').filter({hasText: /^Projects$/}).click();
+          await page.evaluate(() => scrollTo(0, 0));
+          await page.screenshot({fullPage: true, path: path.join(process.env.DASHQ_NAV_SHOTS, 'projects-' + width + '-' + theme + '.png')});
+        }
+      }
+      assert.deepEqual(errors, [], 'navigation has no browser errors');
+      assert.deepEqual(writes, [], 'navigation has no writes');
       await page.close();
     }
     console.log('PASS D19 read-only startup/outage/recovery at 1024/16 light and 360/20 dark');
