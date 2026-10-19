@@ -1882,6 +1882,16 @@ lines", "recommended": true}]}])),
         let doc = data(&app, "", Some(Scope::All)).1;
         assert_eq!(check(&doc, "sq-a")["findings"][0]["state"], "verified");
         assert_eq!(check(&doc, "sq-b")["findings"][0]["state"], "open");
+        // A3/H2: reconstruct history through the real retained-store boundary after expiry.
+        let aged = projection(e, Some(Scope::All), None, (now + 7201) as u64).unwrap();
+        let samples = finding_samples(e, &aged["rows"]);
+        for inst in ["sq-a", "sq-b"] {
+            let row = aged["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap();
+            let retained = samples.as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap();
+            let findings = crate::findings::build(row, retained, (now + 7201) as u64);
+            assert_eq!(findings["episodes"][0]["state"], if inst == "sq-a" { "verified" } else { "open" });
+            assert_eq!(findings["episodes"][0]["source"]["state"], "stale");
+        }
         send(&a, "recurrence", now - 10, report(now - 10, "warn", now - 10, None));
         let doc = data(&app, "", Some(Scope::All)).1;
         let c = check(&doc, "sq-a");

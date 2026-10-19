@@ -18,7 +18,7 @@ fn id(s: &str) -> bool {
 pub fn build(row: &Value, retained: &Value, now: u64) -> Value {
     let current = &row["snapshot"]["payload"];
     let mut samples: Vec<Value> = retained["samples"].as_array().cloned().unwrap_or_default();
-    samples.push(json!({"at": row["observation"]["at"], "payload": current}));
+    samples.push(json!({"at": row["observation"]["at"], "payload": current, "current": true}));
     samples.sort_by_key(|s| time(&s["at"]).unwrap_or(0));
     let mut episodes: BTreeMap<(String, String), Value> = BTreeMap::new();
     let incomplete = retained["incomplete"] == true || retained["error"].is_string() || current["complete"] == false || current["incomplete"] == true;
@@ -36,8 +36,12 @@ pub fn build(row: &Value, retained: &Value, now: u64) -> Value {
             let verified = time(&incident["verified_at"]);
             let fresh = |t: Option<u64>| t.is_some_and(|t| t <= now && now - t <= crate::enroll::SERVERQ_STALE_SECS);
             let complete = p["complete"] != false && p["incomplete"] != true && current["complete"] != false && current["incomplete"] != true && !incomplete;
+            // A retained complete report proves history at its producer time, not at refresh time.
+            let historical = s["current"] != true && at.is_some_and(|t| t <= now)
+                && p["complete"] != false && p["incomplete"] != true
+                && observed.is_some_and(|o| at.is_some_and(|a| o <= a && a - o <= crate::enroll::SERVERQ_STALE_SECS));
             let recovered = incident["state"] == "verified" && x["status"] == "ok"
-                && row["observation"]["state"] == "ok" && fresh(at) && fresh(observed) && complete
+                && (historical || (row["observation"]["state"] == "ok" && fresh(at) && fresh(observed) && complete))
                 && verified.is_some_and(|v| v > last && observed.is_some_and(|o| o >= v) && at.is_some_and(|a| a >= observed.unwrap()));
             let matching = p["catalog"] == expected && catalog[rule].is_object();
             let catalog_state = if p["catalog"].is_null() { "unknown" } else if matching { "matched" } else { "mismatch" };
@@ -117,6 +121,44 @@ mod tests {
             assert_ne!(f["catalog"]["state"], "matched");
         }
         assert_eq!(build(&good, &json!({"incomplete": true}), NOW)["episodes"][0]["state"], "open");
+    }
+    /// A3/D6/H2: aging or losing current coverage cannot reopen proved history.
+    #[test]
+    fn serverq_verified_history_survives_aging_and_observation_gaps() {
+        let good = row();
+        let history = json!({"samples": [{"at": NOW, "payload": good["snapshot"]["payload"]}]});
+        assert_eq!(build(&good, &history, NOW)["episodes"][0]["state"], "verified");
+        for state in ["ok", "stale", "unknown"] {
+            let mut current = good.clone();
+            current["observation"]["state"] = json!(state);
+            let f = build(&current, &history, NOW + 7201)["episodes"][0].clone();
+            assert_eq!(f["state"], "verified", "{state}");
+            assert_eq!(f["verified_at"], 19200);
+            assert_ne!(f["source"]["state"], "ok");
+        }
+        let mut bad = good["snapshot"]["payload"].clone();
+        bad["complete"] = json!(false);
+        let mut incomplete_row = good.clone();
+        incomplete_row["snapshot"]["payload"] = bad.clone();
+        assert_eq!(build(&incomplete_row, &json!({"samples": [{"at": NOW, "payload": bad}]}), NOW + 7201)["episodes"][0]["state"], "open");
+        let mut current = good.clone();
+        current["snapshot"]["payload"]["complete"] = json!(false);
+        let mut capped = history.clone();
+        capped["incomplete"] = json!(true);
+        assert_eq!(build(&current, &capped, NOW)["episodes"][0]["state"], "verified");
+        // Retention does not make stale-at-report or incomplete evidence a passing check.
+        for (pointer, value) in [
+            ("/rules/disk-headroom/observed_at", json!(NOW - 7201)),
+            ("/rules/disk-headroom/status", json!("unknown")),
+            ("/incidents/disk-headroom/verified_at", json!(null)),
+        ] {
+            let mut bad = good["snapshot"]["payload"].clone();
+            *bad.pointer_mut(pointer).unwrap_or_else(|| panic!("{pointer}")) = value;
+            let mut current = good.clone();
+            current["snapshot"]["payload"] = bad.clone();
+            let history = json!({"samples": [{"at": NOW, "payload": bad}]});
+            assert_eq!(build(&current, &history, NOW + 7201)["episodes"][0]["state"], "open");
+        }
     }
     /// H1/H2: recurrence is a distinct episode; missing/late frames cannot erase retained episodes.
     #[test]

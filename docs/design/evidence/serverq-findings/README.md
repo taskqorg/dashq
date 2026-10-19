@@ -25,7 +25,20 @@ catalog hash and recommendation without clipping.
 
 Retained evidence uses the existing seven-day enrollment history and at most
 10,000 samples per installation/workspace. Capped/unavailable history is marked
-incomplete and cannot establish recovery. This is not an unlimited episode archive.
+incomplete and cannot establish recovery from an incomplete report. A retained complete
+report can preserve its independently proved historical recovery despite a later gap.
+This is not an unlimited episode archive.
 Task creation, task-completion ordering and real producer transport on production
 remain unqualified here; they belong to the separate handoff/live qualification.
 No deployment or grant change.
+
+## Review regression: historical recovery after expiry
+
+A3/D6/H2: `cargo test --locked serverq_verified_history_survives_aging_and_observation_gaps`
+failed before the fix: after 7201 seconds the verified episode became open without
+another warning. After the fix the affected `cargo test --locked serverq_` passed.
+Historical verification uses the complete retained report and its producer time;
+current source state and age remain stale/unknown/incomplete. The regression also
+retains false-recovery protection for stale-at-report, unknown and incomplete
+passing evidence. The ingest/store projection chain advances time by 7201 seconds
+and checks both a verified episode and a still-open episode.
