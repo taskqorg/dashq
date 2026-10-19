@@ -62,6 +62,12 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
+pub const VIEWS: [(&str, &str); 7] = [("/", "Overview"), ("/projects", "Projects"), ("/hosts", "Hosts"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Integrations")];
+
+pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
+    render(doc, links).replacen("<body>", &format!("<body data-view=\"{}\">", esc(path)), 1)
+}
+
 /// `links`: `{traces, dashboards}` Langfuse project URLs.
 pub fn render(doc: &Value, links: &Value) -> String {
     let now = doc["generated_at"].as_u64().unwrap_or(0);
@@ -76,6 +82,9 @@ pub fn render(doc: &Value, links: &Value) -> String {
             format!("<nav><a href=\"{}\">Langfuse traces</a> · <a href=\"{}\">Langfuse dashboards</a></nav>", text(&links["traces"]), text(&links["dashboards"]))
         } else { String::new() }
     );
+    let query = format!("?period={}{}", doc["period"].as_u64().unwrap_or(1800), filters);
+    let nav = VIEWS.iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-link href=\"{path}{}\">{name}</a>", name.to_ascii_lowercase(), esc(&query))).collect::<Vec<_>>().join(" ");
+    let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav}</nav><p id=\"view-unavailable\" class=\"note\" hidden>No observations available for this view. <a href=\"/{}\">Return to overview</a>.</p>", esc(&query));
     let period = doc["period"].as_u64().unwrap_or(1800);
     let periods: Vec<String> = PERIODS
         .iter()
