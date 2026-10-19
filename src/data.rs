@@ -685,9 +685,7 @@ pub fn build(inp: &Value) -> Value {
         }
     }
     if !sq_host.is_empty() && !sq.is_null() {
-        let worst_status = if results.iter().any(|r| r["status"] == "warn") { Some("warn") }
-            else if results.iter().any(|r| r["status"] == "unknown" || r["source"]["state"] != "ok") { Some("unknown") }
-            else if results.is_empty() { None } else { Some("ok") };
+        let worst_status = ["warn", "unknown", "ok"].into_iter().find(|s| results.iter().any(|r| r["status"] == *s));
         let h = host_entry(&mut hosts, &machines.canon(sq_host));
         h["serverq"] = json!({"status": worst_status, "state": sq_src["state"], "at": sq_src["at"], "age_s": sq_src["age_s"], "reason": sq_src["reason"], "installation": null});
     }
