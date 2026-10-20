@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS operations(operation TEXT PRIMARY KEY, installation T
 CREATE INDEX IF NOT EXISTS operations_by_installation ON operations(installation, generation);
 CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, status TEXT, payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS telemetry_by_installation ON telemetry(installation, workspace, observed);
+CREATE TABLE IF NOT EXISTS resources(installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (installation, workspace));
 ";
 
 /// C5 bounds; tests shrink them.
@@ -131,6 +132,8 @@ pub enum Kind {
     Export,
     /// A `taskq-telemetry/1` block: stored once, bounded by `Limits::telemetry_*`, never a snapshot.
     Telemetry,
+    /// A `taskq-resources/1` projection (D11 #160): the newest one per installation and workspace, never a snapshot.
+    Resources,
 }
 
 pub struct Event<'a> {
@@ -181,6 +184,8 @@ pub struct Row {
     /// Stored `taskq-telemetry/1` blocks of this installation and workspace, the newest receipt time and the
     /// newest block's `status` JSON (`None`: not reported).
     pub telemetry: (i64, Option<i64>, Option<String>),
+    /// Payload of the newest `taskq-resources/1` record of this installation and workspace and its generation.
+    pub resources: Option<(i64, String)>,
 }
 
 /// A pairing session as the approval page shows it.
@@ -869,7 +874,7 @@ impl Store {
             let mut outbox = tx.query_row("SELECT COALESCE(SUM(length(payload)), 0) FROM outbox", [], |r| r.get::<_, i64>(0))? as u64;
             let mut out = Vec::with_capacity(events.len());
             for e in events {
-                let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry" };
+                let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry", Kind::Resources => "resources" };
                 let content = format!("{kind}\n{}\n{}\n{}", e.schema, e.observed, e.payload);
                 let seen: Option<(String, String)> = tx
                     .query_row(
@@ -896,6 +901,10 @@ impl Store {
                                 params![g.installation, g.workspace, g.generation, e.id, e.observed, now, status, e.payload])?;
                             // ponytail: one global byte cap, oldest blocks leave first; per-installation shares if one host crowds out the rest
                             tx.execute("DELETE FROM telemetry WHERE id IN (SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry) WHERE total > ?1)", [l.telemetry_bytes as i64])?;
+                        } else if e.kind == Kind::Resources {
+                            // the newest projection replaces the last one whole: a project taskq stops listing leaves
+                            tx.execute("INSERT INTO resources VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (installation, workspace) DO UPDATE SET generation = excluded.generation, event_id = excluded.event_id, observed = excluded.observed, payload = excluded.payload WHERE excluded.observed >= resources.observed",
+                                params![g.installation, g.workspace, g.generation, e.id, e.observed, e.payload])?;
                         } else if e.kind == Kind::Export {
                             outbox += e.payload.len() as u64;
                             tx.execute("INSERT INTO outbox (installation, generation, event_id, observed, queued, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, g.generation, e.id, e.observed, now, e.payload])?;
@@ -967,7 +976,9 @@ impl Store {
                    (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
                    (SELECT COUNT(*) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
                    (SELECT MAX(received) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
-                   (SELECT status FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace ORDER BY observed DESC, id DESC LIMIT 1)
+                   (SELECT status FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace ORDER BY observed DESC, id DESC LIMIT 1),
+                   (SELECT generation FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace),
+                   (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace)
                  FROM grants g JOIN installations i ON i.id = g.installation
                  LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
                  WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
@@ -997,6 +1008,7 @@ impl Store {
                         board: r.get(18)?,
                         capabilities: r.get(19)?,
                         telemetry: (r.get(20)?, r.get(21)?, r.get(22)?),
+                        resources: r.get::<_, Option<i64>>(23)?.zip(r.get::<_, Option<String>>(24)?),
                     };
                     Ok(row)
                 })?

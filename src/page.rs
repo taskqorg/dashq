@@ -428,6 +428,20 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             };
             let _ = writeln!(w, "<p>Board {}:{}/{} · {totals} · {} tasks observed</p>", text(&b["kind"]), text(&b["host"]), text(&b["repo"]), p["tasks"].as_array().map_or(0, Vec::len));
         }
+        let l = &r["project_limits"];
+        if r["product"] == "taskq" && !revoked && l.is_object() && l["state"] != "off" {
+            let age = match l["age_s"].as_u64() {
+                Some(a) => format!("observed {} ago{}", dur(a), l["reason"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default()),
+                None => format!("Unknown · {}", text(&l["reason"])),
+            };
+            let _ = writeln!(w, "<p class=\"detail\">Project limits: {age}</p>");
+            for t in l["targets"].as_array().into_iter().flatten() {
+                let limit = if t["limit"].is_null() { "no override".into() } else { text(&t["limit"]) };
+                let why = t["blockers"].as_array().into_iter().flatten().map(|b| format!("{} {}", text(&b["code"]), text(&b["knowledge"]))).collect::<Vec<_>>().join(", ");
+                let effective = num(&t["effective"], &json!({"reason": if why.is_empty() { "not reported".into() } else { why } }));
+                let _ = writeln!(w, "<p>{} · {}: limit {limit} · effective {effective} · {}</p>", text(&t["project_id"]), text(&t["runtime_id"]), text(&t["completeness"]));
+            }
+        }
         let t = &r["telemetry"];
         if r["product"] == "taskq" && !revoked && t["state"] != "off" {
             let line = if t["state"] == "ok" {
