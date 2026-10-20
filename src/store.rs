@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS resource_grants(grant_id TEXT PRIMARY KEY, actor_id T
 CREATE TABLE IF NOT EXISTS resource_ops(op_id TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, actor_id TEXT NOT NULL, grant_id TEXT NOT NULL, submit TEXT NOT NULL, expires_at INTEGER NOT NULL, delivered INTEGER NOT NULL, cancel INTEGER NOT NULL, state TEXT NOT NULL, receipt TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS operations(operation TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, capability TEXT NOT NULL, workspace TEXT NOT NULL, actor TEXT NOT NULL, apply INTEGER NOT NULL, digest TEXT NOT NULL, expires_at INTEGER NOT NULL, op TEXT NOT NULL, queued INTEGER NOT NULL, delivered INTEGER NOT NULL, result TEXT, result_at INTEGER);
 CREATE INDEX IF NOT EXISTS operations_by_installation ON operations(installation, generation);
+CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, status TEXT, payload TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS telemetry_by_installation ON telemetry(installation, workspace, observed);
 ";
 
 /// C5 bounds; tests shrink them.
@@ -40,6 +42,9 @@ pub struct Limits {
     pub reserve_bytes: u64,
     pub outbox_bytes: u64,
     pub history_secs: i64,
+    /// `taskq-telemetry/1` blocks (D11 #161): kept this long after receipt, and at most this many payload bytes.
+    pub telemetry_secs: i64,
+    pub telemetry_bytes: u64,
     pub receipt_secs: i64,
     pub outbox_secs: i64,
     /// ponytail: 300 s skew marks a sample clock-uncertain; qualify with real hosts.
@@ -54,6 +59,8 @@ pub const LIMITS: Limits = Limits {
     reserve_bytes: 64 << 20,
     outbox_bytes: 1 << 30,
     history_secs: 7 * 86400,
+    telemetry_secs: 7 * 86400,
+    telemetry_bytes: 256 << 20,
     receipt_secs: 8 * 86400,
     outbox_secs: 7 * 86400,
     future_secs: 300,
@@ -122,6 +129,8 @@ pub enum Kind {
     Snapshot,
     /// Telemetry for the export outbox.
     Export,
+    /// A `taskq-telemetry/1` block: stored once, bounded by `Limits::telemetry_*`, never a snapshot.
+    Telemetry,
 }
 
 pub struct Event<'a> {
@@ -169,6 +178,9 @@ pub struct Row {
     pub scopes: String,
     pub board: Option<String>,
     pub capabilities: Option<String>,
+    /// Stored `taskq-telemetry/1` blocks of this installation and workspace, the newest receipt time and the
+    /// newest block's `status` JSON (`None`: not reported).
+    pub telemetry: (i64, Option<i64>, Option<String>),
 }
 
 /// A pairing session as the approval page shows it.
@@ -857,7 +869,7 @@ impl Store {
             let mut outbox = tx.query_row("SELECT COALESCE(SUM(length(payload)), 0) FROM outbox", [], |r| r.get::<_, i64>(0))? as u64;
             let mut out = Vec::with_capacity(events.len());
             for e in events {
-                let kind = if e.kind == Kind::Snapshot { "snapshot" } else { "export" };
+                let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry" };
                 let content = format!("{kind}\n{}\n{}\n{}", e.schema, e.observed, e.payload);
                 let seen: Option<(String, String)> = tx
                     .query_row(
@@ -876,8 +888,15 @@ impl Store {
                     None if e.kind == Kind::Export && crate::export::nanos(e.observed).is_none() => Outcome::Rejected("payload"),
                     None if full => Outcome::Rejected("store_full"),
                     None if e.kind == Kind::Export && outbox + e.payload.len() as u64 > l.outbox_bytes => Outcome::Rejected("outbox_full"),
+                    None if e.kind == Kind::Telemetry && e.payload.len() as u64 > l.telemetry_bytes => Outcome::Rejected("payload"),
                     None => {
-                        if e.kind == Kind::Export {
+                        if e.kind == Kind::Telemetry {
+                            let status = serde_json::from_str::<serde_json::Value>(e.payload).ok().and_then(|p| p.get("status").map(|x| x.to_string()));
+                            tx.execute("INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, status, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                params![g.installation, g.workspace, g.generation, e.id, e.observed, now, status, e.payload])?;
+                            // ponytail: one global byte cap, oldest blocks leave first; per-installation shares if one host crowds out the rest
+                            tx.execute("DELETE FROM telemetry WHERE id IN (SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry) WHERE total > ?1)", [l.telemetry_bytes as i64])?;
+                        } else if e.kind == Kind::Export {
                             outbox += e.payload.len() as u64;
                             tx.execute("INSERT INTO outbox (installation, generation, event_id, observed, queued, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![g.installation, g.generation, e.id, e.observed, now, e.payload])?;
                         } else {
@@ -945,7 +964,10 @@ impl Store {
                    s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation,
                    (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
                    (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
-                   (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities
+                   (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
+                   (SELECT COUNT(*) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
+                   (SELECT MAX(received) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
+                   (SELECT status FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace ORDER BY observed DESC, id DESC LIMIT 1)
                  FROM grants g JOIN installations i ON i.id = g.installation
                  LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
                  WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
@@ -974,6 +996,7 @@ impl Store {
                         scopes: r.get(17)?,
                         board: r.get(18)?,
                         capabilities: r.get(19)?,
+                        telemetry: (r.get(20)?, r.get(21)?, r.get(22)?),
                     };
                     Ok(row)
                 })?
@@ -1095,6 +1118,7 @@ impl Store {
             tx.execute("DELETE FROM outbox WHERE queued < ?1", [cut])?;
             tx.execute("DELETE FROM export_gaps WHERE at < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
+            tx.execute("DELETE FROM telemetry WHERE received < ?1", [now - l.telemetry_secs])?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
             // resolved operations (a result, revoked generation, or expired never delivered) keep the newest per installation; unresolved stay
             tx.execute(
@@ -1297,6 +1321,25 @@ mod tests {
         s.project(Scope::All, |_, _| true).unwrap();
         assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert!(s.authorize(b"v1").unwrap().is_some());
+    }
+
+    /// #161 A3: stored telemetry blocks stay under the configured byte cap (oldest leave first; a block over the
+    /// cap alone is refused) and leave after the configured retention.
+    #[test]
+    fn telemetry_blocks_stay_bounded() {
+        let s = Store::open(&dir("telemetry").join("dashq.db"), Limits { telemetry_bytes: 25, telemetry_secs: 86400, ..LIMITS }).unwrap();
+        let tq = Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac-1" };
+        s.grant(&tq, "w", "a", r#"["taskq-telemetry/1"]"#, b"v1", NOW).unwrap();
+        let ev = |id, payload| Event { id, schema: "taskq-telemetry/1", observed: NOW, kind: Kind::Telemetry, payload };
+        let ids = |s: &Store| s.write(|tx| Ok(tx.prepare("SELECT event_id FROM telemetry ORDER BY id")?.query_map([], |r| r.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?)).unwrap();
+        let (b10, big) = (r#"{"n":1234}"#, "x".repeat(26));
+        assert_eq!(s.accept(b"v1", &[ev("t1", b10), ev("t2", b10), ev("t3", b10), ev("big", &big)], NOW).unwrap(), [Outcome::Accepted, Outcome::Accepted, Outcome::Accepted, Outcome::Rejected("payload")]);
+        assert_eq!(ids(&s), ["t2", "t3"]);
+        s.accept(b"v1", &[ev("t4", b10)], NOW + 86400).unwrap();
+        s.prune(NOW + 86400).unwrap();
+        assert_eq!(ids(&s), ["t3", "t4"], "at the retention edge nothing older leaves early");
+        s.prune(NOW + 86401).unwrap();
+        assert_eq!(ids(&s), ["t4"]);
     }
 
     #[test]

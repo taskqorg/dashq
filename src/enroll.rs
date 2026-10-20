@@ -108,6 +108,11 @@ fn paths(dir: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
 impl Enroll {
     /// Opens a set-up deployment; `Err` when `dashq admin` never ran there or the key is unusable.
     pub fn open(dir: &Path, public_host: &str) -> Result<Enroll, String> {
+        Self::open_with(dir, public_host, store::LIMITS)
+    }
+
+    /// `open` with the configured telemetry bounds (config `telemetry`).
+    pub fn open_with(dir: &Path, public_host: &str, limits: store::Limits) -> Result<Enroll, String> {
         let (db, key) = paths(dir);
         if !db.exists() || !key.exists() {
             return Err("enrollment not set up (dashq admin)".into());
@@ -120,7 +125,7 @@ impl Enroll {
         if k.len() != 32 {
             return Err("dashq.key: must be 32 bytes".into());
         }
-        let store = Store::open(&db, store::LIMITS).map_err(|e| format!("dashq.db: {e:?}"))?;
+        let store = Store::open(&db, limits).map_err(|e| format!("dashq.db: {e:?}"))?;
         Ok(Enroll {
             store,
             seal: aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &k).map_err(|_| "dashq.key: bad key")?),
@@ -536,6 +541,11 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
             // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
             (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
             (Some(schema), Some(_)) if !in_board(schema, &r["payload"], g) => out[i] = Some("scope"),
+            (Some(TELEMETRY), Some(observed)) if telemetry(&r["payload"]) => {
+                events.push(Event { id: ids[i], schema: TELEMETRY, observed, kind: Kind::Telemetry, payload: &payloads[i] });
+                index.push(i);
+            }
+            (Some(TELEMETRY), Some(_)) => out[i] = Some("payload"),
             (Some(schema), Some(observed)) if snapshot_metadata(schema, &r["payload"]) => {
                 let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
                 events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
@@ -569,6 +579,67 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         receipts.push(json!({"event_id": id, "state": "rejected", "reason": reason}));
     }
     json("200 OK", json!({"protocol": 1, "receipts": receipts}))
+}
+
+/// TaskQ export blocks (taskq#1353 S3, D11 #161).
+pub const TELEMETRY: &str = "taskq-telemetry/1";
+/// S3: at most 512 KiB compressed per record; decompressed rows are bounded by the same 1 MiB a request may carry.
+const TELEMETRY_GZIP: usize = 512 << 10;
+const TELEMETRY_BYTES: u64 = MAX_BODY as u64;
+
+/// A `taskq-telemetry/1` payload `{schema: 1, first, last, rows, bytes, gzip, status?}`: `gzip` is the base64 gzip of
+/// `bytes` bytes holding `rows` JSON lines of `taskq profile export`, each one metadata (C4) like any snapshot, so
+/// nothing outside the allowlist hides inside the block. `status` carries the sender's `connection.telemetry`
+/// counters `backlog_rows`, `backlog_bytes`, `gap_rows` (numbers or null).
+fn telemetry(p: &Value) -> bool {
+    use std::io::Read;
+    let Some(o) = p.as_object() else { return false };
+    let n = |k: &str| o.get(k).and_then(Value::as_u64);
+    let status = o.get("status").is_none_or(|s| {
+        s.as_object().is_some_and(|s| s.iter().all(|(k, v)| ["backlog_rows", "backlog_bytes", "gap_rows"].contains(&k.as_str()) && (v.is_null() || v.is_u64())))
+    });
+    let (Some(first), Some(last), Some(rows), Some(bytes), Some(gzip)) = (n("first"), n("last"), n("rows"), n("bytes"), o.get("gzip").and_then(Value::as_str)) else { return false };
+    if p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first > last || rows == 0 || bytes > TELEMETRY_BYTES {
+        return false;
+    }
+    let Some(z) = unbase64(gzip).filter(|z| z.len() <= TELEMETRY_GZIP) else { return false };
+    let mut plain = Vec::new();
+    if flate2::read::GzDecoder::new(z.as_slice()).take(bytes + 1).read_to_end(&mut plain).is_err() || plain.len() as u64 != bytes {
+        return false;
+    }
+    let Ok(plain) = String::from_utf8(plain) else { return false };
+    let lines: Vec<&str> = plain.lines().collect();
+    lines.len() as u64 == rows && lines.iter().all(|l| serde_json::from_str::<Value>(l).is_ok_and(|v| v.is_object() && metadata(&v, 0)))
+}
+
+/// Standard padded base64; `None` on any other byte.
+fn unbase64(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| match c {
+        b'A'..=b'Z' => Some(c - b'A'),
+        b'a'..=b'z' => Some(c - b'a' + 26),
+        b'0'..=b'9' => Some(c - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    let b = s.as_bytes();
+    if !b.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(b.len() / 4 * 3);
+    for (i, q) in b.chunks(4).enumerate() {
+        let pad = if i + 1 == b.len() / 4 { q.iter().rev().take_while(|&&c| c == b'=').count() } else { 0 };
+        if pad > 2 {
+            return None;
+        }
+        let mut n = 0u32;
+        for &c in &q[..4 - pad] {
+            n = n << 6 | val(c)? as u32;
+        }
+        n <<= 6 * pad as u32;
+        out.extend_from_slice(&n.to_be_bytes()[1..4 - pad]);
+    }
+    Some(out)
 }
 
 /// Metadata only (C4): objects of short identifier keys, numbers, booleans and short single-line strings;
@@ -666,7 +737,20 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             } else {
                 json!({"gap_events": 0, "state": if r.product == "agentq" { "unknown" } else { "not_applicable" }, "reason": if r.product == "agentq" { "export forwarding not qualified" } else { "no Langfuse export required" }})
             };
-            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace,
+            // sync state from taskq's own status counters, carried by its newest block (A4); dashq never infers them
+            let (blocks, synced, status) = &r.telemetry;
+            let status = status.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null);
+            let count = |k: &str| status.get(k).cloned().unwrap_or(Value::Null);
+            let telemetry = if !serde_json::from_str::<Vec<String>>(&r.scopes).unwrap_or_default().iter().any(|s| s == TELEMETRY) {
+                json!({"state": "off", "reason": "telemetry not in grant"})
+            } else if *blocks == 0 {
+                json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet"})
+            } else {
+                let missing = ["backlog_rows", "backlog_bytes", "gap_rows"].iter().any(|k| count(k).is_null());
+                json!({"state": "ok", "blocks": blocks, "last_synced": synced, "backlog_rows": count("backlog_rows"), "backlog_bytes": count("backlog_bytes"), "gap_rows": count("gap_rows"),
+                    "reason": if missing { json!("status not reported by taskq") } else { Value::Null }})
+            };
+            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry,
                 "generation": r.generation, "connection": r.connection,
                 "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
                 "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
@@ -1131,6 +1215,114 @@ mod tests {
         assert_eq!(machine(&e, "/machine/connect/ack", Some("forged"), json!({"protocol": 1}), T0 + 62), (401, json!({"protocol": 1, "error": "invalid_credential"})));
         assert_eq!(machine(&e, "/machine/connect/ack", None, json!({"protocol": 1}), T0 + 62).0, 401);
         assert!(e.as_ref().unwrap().store.authorize(&sha256(cred)).unwrap().is_none());
+    }
+
+    /// A `taskq-telemetry/1` block (taskq#1353 S3) of `lines`, with optional sender `status`.
+    fn block(first: u64, lines: &[Value], status: Option<Value>) -> Value {
+        use std::io::Write;
+        let plain: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        z.write_all(plain.as_bytes()).unwrap();
+        let mut p = json!({"schema": 1, "first": first, "last": first + lines.len() as u64 - 1, "rows": lines.len(), "bytes": plain.len(), "gzip": crate::base64(&z.finish().unwrap())});
+        if let Some(s) = status {
+            p["status"] = s;
+        }
+        p
+    }
+
+    /// The coreq client whose next `lose` replies are lost after the server committed them.
+    struct Lossy<'a, 'b> {
+        w: &'b mut Wire<'a>,
+        lose: usize,
+    }
+
+    impl coreq::enroll::Wire for Lossy<'_, '_> {
+        fn post(&mut self, d: &str, route: &str, auth: Option<&str>, body: &Value) -> Result<(u16, Value), String> {
+            let r = self.w.post(d, route, auth, body);
+            if self.lose > 0 {
+                self.lose -= 1;
+                return Err("timeout".into());
+            }
+            r
+        }
+        fn now(&self) -> u64 {
+            self.w.now()
+        }
+        fn sleep(&mut self, secs: u64) {
+            self.w.sleep(secs)
+        }
+        fn show(&mut self, uri: &str, code: &str) {
+            self.w.show(uri, code)
+        }
+    }
+
+    /// #161 A2/A4/A5 with the coreq reference client: a granted block is stored once across a lost reply and a
+    /// restart, replays return the stored receipt, blocks outside the grant or the allowlist are refused, the
+    /// projection shows taskq's sync counters (unknown with a reason when missing), and a revoke stops delivery.
+    #[test]
+    fn taskq_telemetry_blocks_through_the_coreq_client() {
+        let (d, e) = setup("telemetry");
+        let host = dir("telemetry-host");
+        let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: "mac-1", schemas: &[TELEMETRY], scope: None, capabilities: &[] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        let inst = a["installation"].as_str().unwrap().to_string();
+        let row = |e: &Result<Enroll, String>| projection(e, Some(Scope::All), None, T0 as u64 + 100).unwrap()["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap()["telemetry"].clone();
+        assert_eq!(row(&e), json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet"}));
+        let stored = |e: &Result<Enroll, String>| e.as_ref().unwrap().store.write(|tx| Ok(tx.query_row("SELECT COUNT(*) FROM telemetry", [], |r| r.get::<_, i64>(0))?)).unwrap();
+        let line = |n: u64| json!({"at_ms": n, "op": "service.pass", "ms": 12, "outcome": "ok"});
+        let status = json!({"backlog_rows": 5, "backlog_bytes": 900, "gap_rows": 2});
+        let r1 = coreq::enroll::stamp(&host, TELEMETRY, "t-1", T0 as u64, block(1, &[line(1), line(2)], Some(status.clone()))).unwrap();
+        // lost reply: the server committed, the client retries the same record and gets the stored receipt
+        let got = coreq::enroll::deliver(&host, std::slice::from_ref(&r1), &mut Default::default(), &mut Lossy { w: &mut w, lose: 1 });
+        assert!(matches!(got, Err(coreq::enroll::Delivery::Retry(_))), "{got:?}");
+        let ok = json!([{"event_id": "t-1", "state": "accepted"}]);
+        assert_eq!(json!(coreq::enroll::deliver(&host, std::slice::from_ref(&r1), &mut Default::default(), &mut w).unwrap()), ok);
+        assert_eq!(stored(&e), 1);
+        // restart of both sides: the client resends from its cursor, nothing is stored twice
+        drop(w);
+        drop(e);
+        let e = Enroll::open(&d, HOST);
+        let mut w = Wire { e: &e, now: T0 + 10, code: None, calls: vec![], tick: false };
+        assert_eq!(json!(coreq::enroll::deliver(&host, std::slice::from_ref(&r1), &mut Default::default(), &mut w).unwrap()), ok);
+        assert_eq!(coreq::enroll::receipt(&host, &r1, &mut w).unwrap(), "accepted");
+        let r2 = coreq::enroll::stamp(&host, TELEMETRY, "t-2", T0 as u64 + 10, block(3, &[line(3)], None)).unwrap();
+        // allowlist inside the block: a content field, a bad block and a changed replay are refused, never stored
+        let bad = [
+            coreq::enroll::stamp(&host, TELEMETRY, "t-cmd", T0 as u64, block(4, &[json!({"op": "x", "command": "rm"})], None)).unwrap(),
+            coreq::enroll::stamp(&host, TELEMETRY, "t-rows", T0 as u64, {
+                let mut p = block(4, &[line(4)], None);
+                p["rows"] = json!(2);
+                p
+            })
+            .unwrap(),
+            coreq::enroll::stamp(&host, TELEMETRY, "t-1", T0 as u64, block(1, &[line(9)], None)).unwrap(),
+        ];
+        let got: Vec<Value> = coreq::enroll::deliver(&host, &[vec![r2.clone()], bad.to_vec()].concat(), &mut Default::default(), &mut w).unwrap();
+        assert_eq!(json!(got.iter().map(|r| format!("{}{}", r["state"].as_str().unwrap(), r["reason"].as_str().map(|x| format!(":{x}")).unwrap_or_default())).collect::<Vec<_>>()),
+            json!(["accepted", "rejected:payload", "rejected:payload", "rejected:replay_mismatch"]));
+        assert_eq!(stored(&e), 2);
+        // the newest block's counters are taskq's own; a block without status leaves them unknown with the reason
+        let t = row(&e);
+        assert_eq!((&t["state"], &t["blocks"], &t["last_synced"], &t["backlog_rows"], &t["reason"]), (&json!("ok"), &json!(2), &json!(T0 + 10), &Value::Null, &json!("status not reported by taskq")));
+        let r3 = coreq::enroll::stamp(&host, TELEMETRY, "t-3", T0 as u64 + 20, block(4, &[line(4)], Some(status))).unwrap();
+        coreq::enroll::deliver(&host, std::slice::from_ref(&r3), &mut Default::default(), &mut w).unwrap();
+        let t = row(&e);
+        assert_eq!((&t["backlog_rows"], &t["backlog_bytes"], &t["gap_rows"], &t["reason"]), (&json!(5), &json!(900), &json!(2), &Value::Null));
+        // outside the grant: another taskq connection without the schema
+        let host2 = dir("telemetry-host2");
+        let req2 = coreq::enroll::Request { installation: None, product: "taskq", host_label: "mac-2", schemas: &["taskq-board/1"], scope: None, capabilities: &[] };
+        let a2 = coreq::enroll::pair(&host2, "https://dash.example.com/machine", &req2, &mut w).unwrap();
+        let out = coreq::enroll::stamp(&host2, TELEMETRY, "t-x", T0 as u64, block(1, &[line(1)], None)).unwrap();
+        assert_eq!(json!(coreq::enroll::deliver(&host2, &[out], &mut Default::default(), &mut w).unwrap()), json!([{"event_id": "t-x", "state": "rejected", "reason": "scope"}]));
+        let off = projection(&e, Some(Scope::All), None, T0 as u64 + 100).unwrap()["rows"].as_array().unwrap().iter().find(|r| r["installation"] == a2["installation"]).unwrap()["telemetry"].clone();
+        assert_eq!(off, json!({"state": "off", "reason": "telemetry not in grant"}));
+        // revoke: the client stops at once, the old credential stores nothing more
+        coreq::enroll::disconnect(&host, &mut w).unwrap();
+        let r4 = json!({"schema": TELEMETRY, "event_id": "t-4", "observed_at": T0 + 30, "payload": block(5, &[line(5)], None)});
+        assert!(matches!(coreq::enroll::deliver(&host, std::slice::from_ref(&r4), &mut Default::default(), &mut w), Err(coreq::enroll::Delivery::Stopped(_))));
+        assert_eq!(ingest(&e, a["credential"].as_str().unwrap(), vec![r4], T0 + 30), (401, json!({"protocol": 1, "error": "revoked"})));
+        assert_eq!(stored(&e), 3);
     }
 
     #[test]
@@ -1599,7 +1791,7 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![] };
+        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
         crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
     }
 
