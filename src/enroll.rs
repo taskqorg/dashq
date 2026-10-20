@@ -662,7 +662,26 @@ fn project_limits(r: &store::Row, now: u64) -> Value {
             "blockers": blockers, "completeness": t["completeness"]})
     }).collect();
     let reason = src["reason"].as_str().filter(|s| !s.is_empty());
-    json!({"state": src["state"], "observed_at": p["observed_at"], "age_s": src["age_s"], "targets": targets, "reason": reason})
+    json!({"state": src["state"], "observed_at": p["observed_at"], "age_s": src["age_s"], "targets": targets, "reason": reason, "groups": limit_groups(r, &p)})
+}
+
+/// The shared component's input for the project-limits editor (#159): one group per registered project of an active
+/// connection, its projection targets unchanged, labelled by the opaque project ID (no name is in the projection,
+/// and a hostname is never a join). The browser decides editability from the actor's own grants.
+fn limit_groups(r: &store::Row, p: &Value) -> Value {
+    if r.connection != "active" {
+        return json!([]);
+    }
+    let mut groups: Vec<Value> = Vec::new();
+    for t in p["targets"].as_array().into_iter().flatten() {
+        let Some(project) = t["target"]["project_id"].as_str() else { continue };
+        let key = format!("{}:{}:{project}", r.installation, r.workspace);
+        match groups.iter_mut().find(|g| g["key"] == key.as_str()) {
+            Some(g) => g["targets"].as_array_mut().into_iter().for_each(|a| a.push(t.clone())),
+            None => groups.push(json!({"key": key, "observed_at": p["observed_at"], "labels": {"host": r.label, "project": project}, "targets": [t]})),
+        }
+    }
+    json!(groups)
 }
 
 /// Standard padded base64; `None` on any other byte.
@@ -2638,5 +2657,43 @@ lines", "recommended": true}]}])),
         assert_eq!(post(&e, &cred3, &op5, T0 + 901).1["reason"], "unknown_operation");
         assert_eq!(pull(&e, &cred3, T0 + 901).1["operations"], json!([]));
         assert_eq!(machine(&e, "/machine/operations/result", Some(&cred3), json!({"protocol": 1, "operation": op_id(5), "digest": op5["digest"], "result": {"path": "/etc"}}), T0 + 902).0, 400);
+    }
+
+    /// #159 A1/A2 chain: TaskQ's `enrollment_record` fixture becomes the per-project editor groups of an active
+    /// connection, with the current and effective revisions the write is reviewed against and applied by; an older
+    /// record never replaces the view, and a revoked connection shows no editor. Risk: an editor for a foreign or
+    /// revoked target, or a stale record winning. Writes `DASHQ_LIMITS_EVIDENCE` for tests/limits-browser.cjs.
+    #[test]
+    fn taskq_resources_record_becomes_project_limit_groups() {
+        let f: Value = serde_json::from_str(include_str!("../fixture/taskq-resources/resource-policy-v1.json")).unwrap();
+        let inst = f["enrollment_record"]["payload"]["targets"][0]["target"]["installation_id"].as_str().unwrap().to_string();
+        let (_d, e) = setup("limit-groups");
+        let board = json!({"name": "taskq-board/1", "value": "github:github.com/taskqorg/dashq"});
+        let (_, d) = machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": "taskq", "installation": inst, "runtime": "native", "host_label": "mac-1", "schemas": ["taskq-board/1", RESOURCES], "scope": board}), T0);
+        assert!(decide(&e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", T0).1.contains("Approved"));
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), T0).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), T0).0, 200);
+        let record = |id: &str, observed: i64, payload: Value| json!({"schema": RESOURCES, "event_id": id, "observed_at": observed, "payload": payload});
+        let mut payload = f["enrollment_record"]["payload"].clone();
+        payload["observed_at"] = json!(T0 - 5);
+        let mut old = payload.clone();
+        old["targets"][0]["current_revision"] = json!("0".repeat(64));
+        assert_eq!(states(&ingest(&e, &cred, vec![record("r-1", T0, payload.clone()), record("r-0", T0 - 60, old)], T0).1), vec!["accepted", "accepted"]);
+        let doc = projection(&e, Some(Scope::All), None, T0 as u64).unwrap();
+        let l = &doc["rows"][0]["project_limits"];
+        assert_eq!(l["targets"][0]["current_revision"], "1".repeat(64), "an older record never replaces the view");
+        assert_eq!(l["groups"], json!([{"key": format!("{inst}:ws-1:project-1"), "observed_at": T0 - 5, "labels": {"host": "mac-1", "project": "project-1"}, "targets": [payload["targets"][0]]}]));
+        let html = crate::page::render(&json!({"generated_at": T0, "installations": doc, "resources": {"rows": []}}), &json!({}));
+        assert!(html.contains(" · unknown · revision <code title=\"1111111111111111111111111111111111111111111111111111111111111111\">111111111111</code> · effective revision unknown</p>"), "{html}");
+        assert!(html.contains("class=\"node-policy\" data-taskq-groups=\"[{&quot;key&quot;:&quot;"), "{html}");
+        if let Ok(out) = std::env::var("DASHQ_LIMITS_EVIDENCE") {
+            std::fs::write(out, &html).unwrap();
+        }
+        // revoked: the readback stays as history, the editor goes
+        e.as_ref().unwrap().store().revoke(&inst, T0 + 1).unwrap();
+        let doc = projection(&e, Some(Scope::All), None, T0 as u64 + 2).unwrap();
+        assert_eq!(doc["rows"][0]["project_limits"]["groups"], json!([]));
+        let html = crate::page::render(&json!({"generated_at": T0 + 2, "installations": doc, "resources": {"rows": []}}), &json!({}));
+        assert!(!html.contains("node-policy"));
     }
 }

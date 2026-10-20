@@ -1,5 +1,5 @@
 // Chain D14/#46: server fixture -> shared summary -> Work mode -> refresh/review -> no remote write.
-// The editable adapter below is a fixture only. Production always uses the read-only adapter.
+// The editable adapter below is a fixture only. Production writes only taskq.project-limits/1 (tests/limits-browser.cjs).
 const {chromium} = require('playwright');
 const fs = require('node:fs'), assert = require('node:assert/strict');
 const fx = require('../fixture/taskq/resource-controls.json');
