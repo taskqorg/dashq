@@ -25,7 +25,7 @@ Display saved/pending/applied/rejected/unknown per target. Applied requires fres
 
 ## Route (#47)
 
-DashQ's half of TaskQ's `taskq.resources/1` wire, built ahead of the target-host adapter by owner decision. That adapter has shipped ([taskq#931](https://github.com/taskqorg/taskq/issues/931)); remote writes stay disabled until live qualification on an authorized target ([#48](https://github.com/taskqorg/dashq/issues/48)) passes. Contract source: [fixture/taskq-resources/resource-policy-v1.json](../../fixture/taskq-resources/resource-policy-v1.json), the unchanged taskq v4.6.25 release asset `taskq-4.6.25-resource-policy-fixtures.json` (SHA-256 `edfccf01d3aa7d05f13edaed3e685892e5cba0803a09c3e9a3bbcd068cd4b2e4`), replayed by `cargo test --locked policy`.
+DashQ's half of TaskQ's `taskq.resources/1` wire, built ahead of the target-host adapter by owner decision. That adapter has shipped ([taskq#931](https://github.com/taskqorg/taskq/issues/931)); remote writes stay disabled until live qualification on an authorized target ([#158](https://github.com/taskqorg/dashq/issues/158), replacing closed #48) passes. Contract source: [fixture/taskq-resources/resource-policy-v1.json](../../fixture/taskq-resources/resource-policy-v1.json), the unchanged taskq v4.6.25 release asset `taskq-4.6.25-resource-policy-fixtures.json` (SHA-256 `edfccf01d3aa7d05f13edaed3e685892e5cba0803a09c3e9a3bbcd068cd4b2e4`), replayed by `cargo test --locked policy`.
 
 - Off unless config has `resources: true`; otherwise every route answers 503 and nothing is stored or delivered.
 - Grants: `dashq resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID]..`, run by the host administrator, binds a workspace member to the installation's live enrollment generation and prints `grant_id` and the derived `actor_id`; `dashq resources revoke GRANT_ID` ends it at once. A grant is usable only while unrevoked, unexpired, its subject still a member and that generation still live. Answer capability, membership alone and device credentials grant nothing here.
@@ -49,6 +49,18 @@ The one remote write a host-policy TaskQ install accepts: [Project overlay](http
 - Shared resources build on the answer-card asset mechanism, not the answer HTTP route. TaskQ native adoption and DashQ rendering run the same fixtures.
 - Release observation and ordinary answers independently. Enable resource writes only after installed target/guard/grant tests and exact-version evidence: duplicate/lost response, wrong node/workspace, stale policy, offline expiry, revoked grant, restart, partial results and restored baseline.
 - Existing render fidelity applies: 16/20 px, both themes, narrow widths, keyboard/touch, charts and drafts preserved. Auto is not a spending or provider-quota guarantee.
+
+### Mac qualification (#158)
+
+One owner-approved write on 2026-10-20: Mac installation generation 2, project `p-16ecd279144d21861bcfe7f3` (dashq), runtime codex, one 1-hour project-limits grant, DashQ 0.10.0 on FRA. [Evidence](https://github.com/taskqorg/dashq/issues/158#issuecomment-6297843987).
+
+- Passed live: browser submit over HTTPS through the guard, exact review ("Codex no override → 4"), host save, native `taskq service resources --json` readback (current = effective `fa547fd9…`), FRA DashQ restart keeping the value, restore to no override (readback `b0c5d7c4…`, 2 operations applied), grant revoked on both sides and `resources` off again.
+- Baseline was no override, not the planned 5; the restore matches the baseline values with a new revision.
+- Assets: FRA ran DashQ release `v0.10.0` (`dashq-0.10.0-linux-x86_64` SHA-256 `86aee47eeef20ae71c2e53905bd94c1f856c757548aaf273a4474181d80bf482` per the release `SHA256SUMS`; the FRA binary itself was not hashed). The Mac ran TaskQ `4.6.26-dev.1792484332` during both writes (binary SHA-256 `7520766e8d4e6b4fab7df0e4bf3664ad4b04bb6512a624f1b9d6bf5d737b4e06`, coreq log: installed 08:19:53Z, replaced by `4.6.26-dev.1792519980` at 18:14:09Z). That is a development build, not a published TaskQ release (latest: `v4.6.25`), so A1's released-TaskQ pin is not met by this write.
+- Owner-accepted fixture-only gaps (answer 1, 2026-10-21): Auto/cap, wrong target, stale/conflicting revision, revoke while pending, lost reply, partial and offline outcomes and Mac service restart are covered only by replayed fixtures (`cargo test --locked policy`, `node tests/resources.cjs`), not live.
+- Mac browser comparison (2026-10-21, macOS, Playwright 1.56.1 Chromium 1194, fixture pages from this revision): `tests/resources-browser.cjs` passed all eight 1024/360 px × 16/20 px × light/dark cases (charts and Boards kept, exact review, reachable Confirm/Cancel, draft and focus across refresh, stale hold) and `tests/limits-browser.cjs` passed. Screenshots were inspected, not committed. The live production page was not rendered at 16/20 px: that needs the owner's guard session.
+- Friction found: the editor is writable only while the projection is ≤ 60 s old against a 300 s resend, and auto-refresh closes the open policy section; a grant needs `project-limits` and `project=p-…`, and the CLI accepts a project name silently; setup does not say `resources: true` is required.
+- Remote writes stay off by default until these gaps close.
 
 ## UI delivery and evidence (#46)
 
