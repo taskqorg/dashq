@@ -546,6 +546,13 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
                 index.push(i);
             }
             (Some(TELEMETRY), Some(_)) => out[i] = Some("payload"),
+            (Some(RESOURCES), Some(observed)) => match resources(&r["payload"], g) {
+                Ok(()) => {
+                    events.push(Event { id: ids[i], schema: RESOURCES, observed, kind: Kind::Resources, payload: &payloads[i] });
+                    index.push(i);
+                }
+                Err(why) => out[i] = Some(why),
+            },
             (Some(schema), Some(observed)) if snapshot_metadata(schema, &r["payload"]) => {
                 let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
                 events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
@@ -610,6 +617,52 @@ fn telemetry(p: &Value) -> bool {
     let Ok(plain) = String::from_utf8(plain) else { return false };
     let lines: Vec<&str> = plain.lines().collect();
     lines.len() as u64 == rows && lines.iter().all(|l| serde_json::from_str::<Value>(l).is_ok_and(|v| v.is_object() && metadata(&v, 0)))
+}
+
+/// TaskQ's allowlisted resource projection (taskq shared-resource-controls.md, Project overlay: Enrollment record).
+pub const RESOURCES: &str = "taskq-resources/1";
+/// The record is resent only with the board (every 300 s) while unchanged, so its status time ages that long between
+/// sends. ponytail: two send intervals; take a producer-stated limit once taskq publishes one.
+const RESOURCES_STALE_SECS: u64 = 600;
+
+/// A `taskq-resources/1` payload: a `taskq.resources/1` projection whose every target belongs to the sending
+/// installation and generation (else `scope`), metadata only (else `payload`).
+fn resources(p: &Value, g: &store::Grant) -> Result<(), &'static str> {
+    let targets = p["targets"].as_array().filter(|_| p["schema"] == "taskq.resources/1" && (p["observed_at"].is_null() || p["observed_at"].is_u64()) && metadata(p, 0)).ok_or("payload")?;
+    if !targets.iter().all(|t| t["target"]["project_id"].is_string() && t["target"]["runtime_id"].is_string()) {
+        return Err("payload");
+    }
+    if !targets.iter().all(|t| t["target"]["installation_id"] == g.installation.as_str() && t["target"]["generation"] == g.generation) {
+        return Err("scope");
+    }
+    Ok(())
+}
+
+/// `/data` installation `project_limits` (#160) from the newest stored record of the current generation: per target
+/// the saved overlay (`limit`, null: no override) and what the host ran (`effective`, null: unknown, never zero),
+/// aged by the projection's status time.
+fn project_limits(r: &store::Row, now: u64) -> Value {
+    if !serde_json::from_str::<Vec<String>>(&r.scopes).unwrap_or_default().iter().any(|s| s == RESOURCES) {
+        return json!({"state": "off", "reason": "resources not in grant"});
+    }
+    let Some(p) = r.resources.as_ref().filter(|(g, _)| *g == r.generation).and_then(|(_, p)| serde_json::from_str::<Value>(p).ok()) else {
+        return json!({"state": "unknown", "observed_at": null, "age_s": null, "targets": [], "reason": "no resources record yet"});
+    };
+    let src = match p["observed_at"].as_u64() {
+        None => json!({"state": "unknown", "age_s": null, "reason": "no status from this host"}),
+        Some(t) if t > now => json!({"state": "unknown", "age_s": null, "reason": "clock uncertain: observed in the future"}),
+        Some(t) => crate::data::source(&json!({"value": true, "at": t}), now, RESOURCES_STALE_SECS, None),
+    };
+    let targets: Vec<Value> = p["targets"].as_array().into_iter().flatten().map(|t| {
+        let schemas: Vec<&Value> = t["supported"].as_array().into_iter().flatten().map(|s| &s["policy_schema"]).collect();
+        let blockers: Vec<Value> = t["blockers"].as_array().into_iter().flatten().map(|b| json!({"code": b["code"], "knowledge": b["knowledge"]})).collect();
+        json!({"project_id": t["target"]["project_id"], "runtime_id": t["target"]["runtime_id"], "policy_schemas": schemas,
+            "current_revision": t["current_revision"], "limit": t["current_policy"]["runtime_limit"],
+            "effective_revision": t["effective_revision"], "effective": t["effective_policy"]["runtime_limit"],
+            "blockers": blockers, "completeness": t["completeness"]})
+    }).collect();
+    let reason = src["reason"].as_str().filter(|s| !s.is_empty());
+    json!({"state": src["state"], "observed_at": p["observed_at"], "age_s": src["age_s"], "targets": targets, "reason": reason})
 }
 
 /// Standard padded base64; `None` on any other byte.
@@ -751,6 +804,7 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
                     "reason": if missing { json!("status not reported by taskq") } else { Value::Null }})
             };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry,
+                "project_limits": if r.product == "taskq" { project_limits(&r, now) } else { Value::Null },
                 "generation": r.generation, "connection": r.connection,
                 "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
                 "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
@@ -1907,6 +1961,61 @@ lines", "recommended": true}]}])),
         assert_eq!((ver("tq-v2")["provenance"].as_str(), ver("tq-v2")["reason"].as_str()), (Some("unsupported"), Some("unsupported snapshot schema taskq-board/1")));
         let html = crate::page::render(&doc, &json!({}));
         assert!(html.contains("Board github:github.com/taskqorg/taskq · doing 2 · ask 1 · 2 tasks observed"), "board summary");
+    }
+
+    /// #160 A1/A2: TaskQ sends its board and the release fixture `enrollment_record` (taskq v4.6.25
+    /// resource-policy-fixtures, pinned in fixture/taskq-resources) in one batch. Both are accepted, the board stays
+    /// the snapshot so the connection reads Connected and versions stay supported, and the projection shows as project
+    /// limits aged by its status time. Risk: a resources record replacing the board snapshot (`unsupported snapshot
+    /// schema`, pending readback), or a target of another installation or generation being stored.
+    #[test]
+    fn taskq_resources_record_shows_project_limits_beside_the_board() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("resources");
+        let fixture: Value = serde_json::from_str(include_str!("../fixture/taskq-resources/resource-policy-v1.json")).unwrap();
+        let mut res = fixture["enrollment_record"].clone();
+        let inst = res["payload"]["targets"][0]["target"]["installation_id"].as_str().unwrap().to_string();
+        // move the fixture to now, keeping the status readback 61 s older than the send
+        let shift = now - res["observed_at"].as_i64().unwrap();
+        res["observed_at"] = json!(now);
+        res["payload"]["observed_at"] = json!(res["payload"]["observed_at"].as_i64().unwrap() + shift);
+        let scope = json!({"name": "taskq-board/1", "value": "github:github.com/taskqorg/dashq"});
+        let d = machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": "taskq", "installation": inst, "runtime": "native", "host_label": "mac", "schemas": ["taskq-board/1", RESOURCES], "scope": scope}), now).1;
+        assert!(decide(&e, "github|1", d["user_code"].as_str().unwrap(), "approve", "ws-1", now).1.contains("Approved"));
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        let board = json!({"schema": "taskq-board/1", "event_id": "b-1", "observed_at": now - 1, "payload": {"schema": 1, "board": {"kind": "github", "host": "github.com", "repo": "taskqorg/dashq"}, "complete": true, "totals": {"doing": 1}, "tasks": []}});
+        let variant = |id: &str, f: &dyn Fn(&mut Value)| {
+            let mut r = res.clone();
+            r["event_id"] = json!(id);
+            f(&mut r);
+            r
+        };
+        let records = vec![
+            board,
+            res.clone(),
+            variant("other-inst", &|r| r["payload"]["targets"][0]["target"]["installation_id"] = json!("b".repeat(64))),
+            variant("other-gen", &|r| r["payload"]["targets"][0]["target"]["generation"] = json!(2)),
+            variant("raw", &|r| r["payload"]["targets"][0]["sample"] = json!({"path": "/etc"})),
+            variant("schema", &|r| r["payload"]["schema"] = json!("taskq.resources/2")),
+        ];
+        let (s, v) = ingest(&e, &cred, records, now);
+        assert_eq!((s, states(&v)), (200, vec!["accepted", "accepted", "rejected:scope", "rejected:scope", "rejected:payload", "rejected:payload"].into_iter().map(String::from).collect::<Vec<_>>()), "{v}");
+        let app = app(e, None);
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let row = doc["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap().clone();
+        assert_eq!((&row["projected"], &row["snapshot"]["schema"]), (&json!(true), &json!("taskq-board/1")));
+        let l = &row["project_limits"];
+        assert_eq!((&l["state"], &l["age_s"], &l["reason"]), (&json!("ok"), &json!(61), &Value::Null), "{l}");
+        assert_eq!(l["targets"], json!([{"project_id": "project-1", "runtime_id": "codex", "policy_schemas": ["taskq.project-limits/1"], "current_revision": "1".repeat(64), "limit": 1,
+            "effective_revision": null, "effective": null, "blockers": [{"code": "sample", "knowledge": "unknown"}], "completeness": "unknown"}]));
+        let ver = doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap().clone();
+        assert_eq!((ver["provenance"].as_str(), ver["reason"].as_str()), (Some("enrollment"), None));
+        let html = crate::page::render(&doc, &json!({}));
+        assert!(html.contains("✓ Connected") && !html.contains("unsupported snapshot schema"), "{html}");
+        assert!(html.contains("Project limits: observed 61s ago"), "{html}");
+        assert!(html.contains("project-1 · codex: limit 1 · effective <span class=\"unknown\" title=\"unknown: sample unknown\">—</span> · unknown"), "{html}");
     }
 
     /// A ServerQ projection fixture (serverq.md § 3) moved so its report time is `at`; every time keeps its offset.
