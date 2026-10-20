@@ -2,7 +2,8 @@
 // zero or Ready, a legacy guard reads as Auto, an untouched field travels, a retry mints a new operation.
 // Run: node tests/resource-controls.test.cjs. Consumers (tray, DashQ) replay the same fixture file.
 const fs = require('node:fs'), crypto = require('node:crypto'), assert = require('node:assert/strict');
-const rc = require('../assets/taskq/resource-controls.js');
+// the release bundle defines the browser global `TaskqResources`, no CommonJS export
+const rc = new Function(fs.readFileSync('assets/taskq/resource-controls.js', 'utf8') + ';return TaskqResources;')();
 const fx = JSON.parse(fs.readFileSync('fixture/taskq/resource-controls.json', 'utf8'));
 for (const c of fx.cases) {
   const checks = c.events.filter(e => e.type === 'check');

@@ -30,7 +30,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -656,10 +656,11 @@ fn main() {
         }
         ["resources", "grant", workspace, subject, installation, hours, rest @ ..] => {
             let hours: i64 = hours.parse().ok().filter(|h| (1..=24 * 365).contains(h)).unwrap_or_else(|| t.die(USAGE));
-            let (mut host, mut projects, mut runtimes) = (false, vec![], vec![]);
+            let (mut host, mut limits, mut projects, mut runtimes) = (false, false, vec![], vec![]);
             for x in rest {
                 match x.split_once('=') {
                     None if *x == "host" => host = true,
+                    None if *x == "project-limits" => limits = true,
                     Some(("project", p)) => projects.push(p.to_string()),
                     Some(("runtime", r)) => runtimes.push(r.to_string()),
                     _ => t.die(USAGE),
@@ -668,7 +669,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
             let expires = source::now() as i64 + hours * 3600;
-            let (id, actor) = policy::issue(e.store(), workspace, subject, installation, host, &projects, &runtimes, expires).unwrap_or_else(|e| t.die(&e));
+            let (id, actor) = policy::issue(e.store(), workspace, subject, installation, host, limits, &projects, &runtimes, expires).unwrap_or_else(|e| t.die(&e));
             println!("resources grant: {id} for {subject} as {actor} on {installation}");
         }
         ["resources", "revoke", id] => {

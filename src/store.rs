@@ -442,6 +442,10 @@ impl Store {
                 }
             }
         }
+        // additive: resource grants from before #159 carry no project-limits scope
+        if c.query_row("SELECT COUNT(*) FROM pragma_table_info('resource_grants') WHERE name = 'project_limits'", [], |r| r.get::<_, i64>(0))? == 0 {
+            c.execute_batch("ALTER TABLE resource_grants ADD COLUMN project_limits INTEGER NOT NULL DEFAULT 0")?;
+        }
         Ok(Store { conn: Mutex::new(c), waiting: AtomicUsize::new(0), limits })
     }
 
@@ -902,8 +906,9 @@ impl Store {
                             // ponytail: one global byte cap, oldest blocks leave first; per-installation shares if one host crowds out the rest
                             tx.execute("DELETE FROM telemetry WHERE id IN (SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry) WHERE total > ?1)", [l.telemetry_bytes as i64])?;
                         } else if e.kind == Kind::Resources {
-                            // the newest projection replaces the last one whole: a project taskq stops listing leaves
-                            tx.execute("INSERT INTO resources VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (installation, workspace) DO UPDATE SET generation = excluded.generation, event_id = excluded.event_id, observed = excluded.observed, payload = excluded.payload WHERE excluded.observed >= resources.observed",
+                            // the newest projection replaces the last one whole: a project taskq stops listing leaves;
+                            // a new generation's first record always replaces the old generation's
+                            tx.execute("INSERT INTO resources VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (installation, workspace) DO UPDATE SET generation = excluded.generation, event_id = excluded.event_id, observed = excluded.observed, payload = excluded.payload WHERE excluded.observed >= resources.observed OR excluded.generation > resources.generation",
                                 params![g.installation, g.workspace, g.generation, e.id, e.observed, e.payload])?;
                         } else if e.kind == Kind::Export {
                             outbox += e.payload.len() as u64;

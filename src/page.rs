@@ -439,7 +439,12 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
                 let limit = if t["limit"].is_null() { "no override".into() } else { text(&t["limit"]) };
                 let why = t["blockers"].as_array().into_iter().flatten().map(|b| format!("{} {}", text(&b["code"]), text(&b["knowledge"]))).collect::<Vec<_>>().join(", ");
                 let effective = num(&t["effective"], &json!({"reason": if why.is_empty() { "not reported".into() } else { why } }));
-                let _ = writeln!(w, "<p>{} · {}: limit {limit} · effective {effective} · {}</p>", text(&t["project_id"]), text(&t["runtime_id"]), text(&t["completeness"]));
+                // #159: the revisions a write is reviewed against and applied by
+                let rev = |v: &Value| v.as_str().map_or_else(|| "unknown".into(), |s| format!("<code title=\"{}\">{}</code>", esc(s), esc(&s.chars().take(12).collect::<String>())));
+                let _ = writeln!(w, "<p>{} · {}: limit {limit} · effective {effective} · {} · revision {} · effective revision {}</p>", text(&t["project_id"]), text(&t["runtime_id"]), text(&t["completeness"]), rev(&t["current_revision"]), rev(&t["effective_revision"]));
+            }
+            if let Some(groups) = l["groups"].as_array().filter(|g| !g.is_empty()) {
+                let _ = writeln!(w, "<div class=\"node-policy\" data-taskq-groups=\"{}\"></div>", esc(&serde_json::to_string(groups).unwrap_or_default()));
             }
         }
         let t = &r["telemetry"];

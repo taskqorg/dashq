@@ -27,6 +27,8 @@ const RETAIN: i64 = 86400;
 const KEEP: i64 = 4096;
 const FRESH: i64 = 60;
 pub const RUNTIMES: [&str; 3] = ["claude", "codex", "codex-app"];
+/// The one remote write a host-policy TaskQ install takes (TaskQ shared-resource-controls.md § Project overlay).
+pub const PROJECT_LIMITS: &str = "taskq.project-limits/1";
 const REASONS: [&str; 9] = ["unauthorized", "revoked", "scope", "unsupported", "invalid", "conflict", "replay_mismatch", "busy", "clock_unknown"];
 
 /// Per-process guard: last exchange per installation.
@@ -235,6 +237,12 @@ fn check_submit(v: &Value) -> Result<(), &'static str> {
         return Err("invalid");
     }
     let schema = v["policy_schema"].as_str().unwrap_or("");
+    if schema == PROJECT_LIMITS {
+        // runtime scope only, exactly one nullable count: the overlay entry or its removal
+        let t = &v["target"];
+        let one = keys(&v["changes"], &["runtime_limit"]) && (v["changes"]["runtime_limit"].is_null() || u32_(&v["changes"]["runtime_limit"]));
+        return if one && !t["project_id"].is_null() && !t["runtime_id"].is_null() { Ok(()) } else { Err("invalid") };
+    }
     if !["taskq.capacity/1", "taskq.admission/1"].contains(&schema) {
         return Err("unsupported");
     }
@@ -251,6 +259,8 @@ struct Grant {
     projects: Vec<String>,
     runtimes: Vec<String>,
     host: bool,
+    /// Made with `project-limits`: the only grant a `taskq.project-limits/1` submit accepts.
+    project_limits: bool,
     expires: i64,
     revoked: bool,
     member: bool,
@@ -262,11 +272,13 @@ impl Grant {
         !self.revoked && self.expires > now && self.member && self.live
     }
 
-    /// Host-wide needs `host_policy`; a project its membership; a runtime both memberships.
-    fn covers(&self, t: &Value) -> bool {
+    /// Host-wide needs `host_policy`; a project its membership; a runtime both memberships. A project-limits
+    /// submit (`schema`) also needs the `project-limits` grant, which `host_policy` never replaces.
+    fn covers(&self, t: &Value, schema: Option<&str>) -> bool {
         let has = |l: &[String], v: &Value| v.as_str().is_some_and(|x| l.iter().any(|y| y == x));
         t["installation_id"] == self.installation.as_str()
             && t["generation"] == self.generation
+            && (schema != Some(PROJECT_LIMITS) || self.project_limits)
             && match (t["project_id"].is_null(), t["runtime_id"].is_null()) {
                 (true, _) => self.host,
                 (false, true) => has(&self.projects, &t["project_id"]),
@@ -278,7 +290,7 @@ impl Grant {
 fn grant(tx: &Transaction, id: &str) -> Result<Option<Grant>, store::Error> {
     Ok(tx
         .query_row(
-            "SELECT g.actor_id, g.subject, g.installation, g.generation, g.projects, g.runtimes, g.host_policy, g.expires_at, g.revoked,
+            "SELECT g.actor_id, g.subject, g.installation, g.generation, g.projects, g.runtimes, g.host_policy, g.expires_at, g.revoked, g.project_limits,
                EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = g.subject),
                EXISTS (SELECT 1 FROM grants e WHERE e.installation = g.installation AND e.generation = g.generation AND e.workspace = g.workspace
                  AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = e.installation AND r.generation = e.generation))
@@ -296,8 +308,9 @@ fn grant(tx: &Transaction, id: &str) -> Result<Option<Grant>, store::Error> {
                     host: r.get(6)?,
                     expires: r.get(7)?,
                     revoked: r.get(8)?,
-                    member: r.get(9)?,
-                    live: r.get(10)?,
+                    project_limits: r.get(9)?,
+                    member: r.get(10)?,
+                    live: r.get(11)?,
                 })
             },
         )
@@ -311,7 +324,7 @@ fn authorize(tx: &Transaction, subject: &str, v: &Value, now: i64) -> Result<Res
         Some(g) if g.subject == subject && v["actor_id"] == g.actor.as_str() => {
             if g.revoked || g.expires <= now || !g.live {
                 Err("revoked")
-            } else if !g.member || !g.covers(&v["target"]) {
+            } else if !g.member || !g.covers(&v["target"], v["policy_schema"].as_str()) {
                 Err("scope")
             } else {
                 Ok(g)
@@ -427,7 +440,7 @@ fn grants(c: &Ctx, r: &Req, now: i64) -> Resp {
         for id in ids {
             if let Some(g) = grant(tx, &id)?.filter(|g| g.active(now)) {
                 out.push(json!({"grant_id": id, "actor_id": g.actor, "installation_id": g.installation, "generation": g.generation,
-                    "project_ids": g.projects, "runtime_ids": g.runtimes, "host_policy": g.host, "expires_at": g.expires, "revoked": false}));
+                    "project_ids": g.projects, "runtime_ids": g.runtimes, "host_policy": g.host, "project_limits": g.project_limits, "expires_at": g.expires, "revoked": false}));
             }
         }
         Ok(reply("200 OK", json!({"schema": SCHEMA, "csrf": csrf, "grants": out})))
@@ -641,8 +654,10 @@ fn exchange(c: &Ctx, r: &Req, now: i64) -> Resp {
 }
 
 /// `dashq resources grant`: the host administrator issues a scoped write grant to a workspace member for one
-/// enrolled installation's live generation. Returns `(grant_id, actor_id)`.
-pub fn issue(s: &Store, workspace: &str, subject: &str, installation: &str, host: bool, projects: &[String], runtimes: &[String], expires: i64) -> Result<(String, String), String> {
+/// enrolled installation's live generation; `project_limits` adds the `taskq.project-limits/1` write on its projects
+/// and runtimes. Returns `(grant_id, actor_id)`.
+#[allow(clippy::too_many_arguments)]
+pub fn issue(s: &Store, workspace: &str, subject: &str, installation: &str, host: bool, project_limits: bool, projects: &[String], runtimes: &[String], expires: i64) -> Result<(String, String), String> {
     let ok_ids = projects.iter().all(|p| rid(&json!(p))) && runtimes.iter().all(|r| RUNTIMES.contains(&r.as_str()));
     if !enroll::id(workspace, 64) || !enroll::valid_subject(subject) || !ok_ids || (!host && projects.is_empty()) {
         return Err("resources grant: bad workspace, subject, project or runtime".into());
@@ -664,8 +679,9 @@ pub fn issue(s: &Store, workspace: &str, subject: &str, installation: &str, host
             .flatten();
         let Some(generation) = generation.filter(|_| member) else { return Ok(None) };
         tx.execute(
-            "INSERT INTO resource_grants VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
-            params![id, actor, subject, workspace, installation, generation, json!(projects).to_string(), json!(runtimes).to_string(), host, expires],
+            "INSERT INTO resource_grants (grant_id, actor_id, subject, workspace, installation, generation, projects, runtimes, host_policy, expires_at, revoked, project_limits)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, ?11)",
+            params![id, actor, subject, workspace, installation, generation, json!(projects).to_string(), json!(runtimes).to_string(), host, expires, project_limits],
         )?;
         Ok(Some(()))
     })
@@ -714,7 +730,8 @@ mod tests {
             let fg = &f["grant"];
             s.write(|tx| {
                 tx.execute(
-                    "INSERT INTO resource_grants VALUES (?1, ?2, 'github|1', 'ws-1', ?3, 1, ?4, ?5, 0, ?6, 0)",
+                    "INSERT INTO resource_grants (grant_id, actor_id, subject, workspace, installation, generation, projects, runtimes, host_policy, expires_at, revoked)
+                     VALUES (?1, ?2, 'github|1', 'ws-1', ?3, 1, ?4, ?5, 0, ?6, 0)",
                     params![fg["grant_id"].as_str(), fg["actor_id"].as_str(), INST, fg["project_ids"].to_string(), fg["runtime_ids"].to_string(), fg["expires_at"].as_i64()],
                 )?;
                 Ok(())
@@ -917,6 +934,86 @@ mod tests {
         t.e.as_ref().unwrap().store().revoke(INST, 50).unwrap();
         assert_eq!(t.post("github|1", &ops, &with("op_id", json!("op-5")), 100).1["reason"], "revoked");
         assert_eq!(t.exchange(json!([]), 100).0, 401);
+    }
+
+    // chain (#159 A1-A3): `taskq.project-limits/1` needs the project-limits grant and project+runtime membership,
+    // travels unchanged to the host and is applied only by its fresh matching readback; a stale revision, a
+    // revoked or expired grant and a wrong target write nothing and keep their reason. Risk: a host_policy or
+    // older grant writing overlay limits, or a configured value reading as applied.
+    #[test]
+    fn project_limits_need_their_grant_and_the_host_readback() {
+        let f: Value = serde_json::from_str(FIXTURE).unwrap();
+        let ops = format!("{PREFIX}operations");
+        let limits = |on: bool, t: &T| {
+            let c = rusqlite::Connection::open(t.d.join("dashq.db")).unwrap();
+            c.execute("UPDATE resource_grants SET project_limits = ?1 WHERE grant_id = 'grant-1'", [on]).unwrap();
+        };
+        let submit = |id: &str, runtime: Value, changes: Value| {
+            let mut s = f["submit"].clone();
+            s["op_id"] = json!(id);
+            s["policy_schema"] = json!(PROJECT_LIMITS);
+            s["target"]["runtime_id"] = runtime;
+            s["changes"] = changes;
+            s
+        };
+        // TaskQ's shared refusal cases for this profile, in order
+        let t = T::new("limits");
+        for (i, case) in f["regressions"]["project_limits"].as_array().unwrap().iter().enumerate() {
+            limits(case["grant"] == true, &t);
+            let (st, v) = t.post("github|1", &ops, &submit(&format!("pl-{i}"), case["runtime_id"].clone(), case["changes"].clone()), 100);
+            assert_eq!(outcome(&v), case["expect"].as_str().unwrap(), "{case} ({st})");
+        }
+        // host_policy is neither needed nor sufficient
+        let c = rusqlite::Connection::open(t.d.join("dashq.db")).unwrap();
+        c.execute("UPDATE resource_grants SET project_limits = 0, host_policy = 1 WHERE grant_id = 'grant-1'", []).unwrap();
+        assert_eq!(t.post("github|1", &ops, &submit("pl-host", json!("codex"), json!({"runtime_limit": 1})), 100).1["reason"], "scope");
+        let (_, g) = t.call("GET", &format!("{PREFIX}grants"), &[(enroll::SUBJECT, "github|1")], "", 100);
+        assert_eq!(g["grants"][0]["project_limits"], false, "the listing names the scope");
+
+        // delivered unchanged, saved, then applied only from a fresh readback equal to the saved revision
+        let t = T::new("limits-apply");
+        limits(true, &t);
+        let s = submit("pl-1", json!("codex"), json!({"runtime_limit": 0}));
+        assert_eq!(t.post("github|1", &ops, &s, 100).0, 202);
+        let (_, x) = t.exchange(json!([]), 100);
+        assert_eq!(x["operations"], json!([s]), "the host receives exactly the reviewed submit");
+        let rc = |state: &str, reason: Value, saved: Value, eff: Value, at: Value| json!({"schema": SCHEMA, "op_id": "pl-1", "target": s["target"], "state": state, "reason": reason, "saved_revision": saved, "effective_revision": eff, "observed_at": at});
+        t.exchange(json!([rc("saved", Value::Null, json!("r2"), json!("r1"), json!(104))]), 105);
+        assert_eq!(t.stored("pl-1")["state"], "saved", "a saved overlay is not applied");
+        t.exchange(json!([rc("applied", Value::Null, json!("r2"), json!("r2"), json!(20))]), 110);
+        assert_eq!(t.stored("pl-1")["state"], "unknown", "a stale readback never reads applied");
+        t.exchange(json!([rc("applied", Value::Null, json!("r2"), json!("r2"), json!(115))]), 115);
+        let (_, v) = t.call("GET", &format!("{ops}/pl-1"), &[(enroll::SUBJECT, "github|1")], "", 116);
+        assert_eq!((v["state"].as_str(), v["saved_revision"].as_str(), v["effective_revision"].as_str()), (Some("applied"), Some("r2"), Some("r2")));
+
+        // a stale expected revision is the host's conflict: rejected with its reason, no saved revision
+        let s2 = submit("pl-2", json!("codex"), json!({"runtime_limit": 1}));
+        assert_eq!(t.post("github|1", &ops, &s2, 120).0, 202);
+        t.exchange(json!([]), 120);
+        let mut conflict = rc("rejected", json!("conflict"), Value::Null, json!("r2"), json!(120));
+        conflict["op_id"] = json!("pl-2");
+        t.exchange(json!([conflict]), 125);
+        let (_, v) = t.call("GET", &format!("{ops}/pl-2"), &[(enroll::SUBJECT, "github|1")], "", 126);
+        assert_eq!((v["state"].as_str(), v["reason"].as_str(), &v["saved_revision"]), (Some("rejected"), Some("conflict"), &Value::Null));
+
+        // wrong target: another installation, generation or runtime is refused before acceptance
+        let mut other = submit("pl-3", json!("codex"), json!({"runtime_limit": 1}));
+        other["target"]["installation_id"] = json!("b".repeat(64));
+        assert_eq!(t.post("github|1", &ops, &other, 130).1["reason"], "scope");
+        // expired before delivery: never sent, ends expired
+        assert_eq!(t.post("github|1", &ops, &submit("pl-4", json!("codex"), json!({"runtime_limit": 1})), 130).0, 202);
+        let (_, x) = t.exchange(json!([]), 400);
+        assert!(x["operations"].as_array().unwrap().is_empty());
+        assert_eq!(t.stored("pl-4")["state"], "expired");
+        // revoked: refused, and an undelivered submit never reaches the host
+        let mut late = submit("pl-5", json!("codex"), json!({"runtime_limit": 1}));
+        (late["issued_at"], late["expires_at"]) = (json!(400), json!(700));
+        assert_eq!(t.post("github|1", &ops, &late, 405).0, 202);
+        revoke(t.e.as_ref().unwrap().store(), "grant-1").unwrap();
+        assert_eq!(t.post("github|1", &ops, &submit("pl-6", json!("codex"), json!({"runtime_limit": 1})), 406).1["reason"], "revoked");
+        let (_, x) = t.exchange(json!([]), 410);
+        assert!(x["operations"].as_array().unwrap().is_empty());
+        assert_eq!((t.stored("pl-5")["state"].as_str(), t.stored("pl-5")["reason"].as_str()), (Some("rejected"), Some("revoked")));
     }
 
     // chain: A2 bounds and delivery, per-actor pending cap, exchange scope and spacing, and the host receipt
