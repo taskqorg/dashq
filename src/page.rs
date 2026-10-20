@@ -428,6 +428,16 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             };
             let _ = writeln!(w, "<p>Board {}:{}/{} · {totals} · {} tasks observed</p>", text(&b["kind"]), text(&b["host"]), text(&b["repo"]), p["tasks"].as_array().map_or(0, Vec::len));
         }
+        let t = &r["telemetry"];
+        if r["product"] == "taskq" && !revoked && t["state"] != "off" {
+            let line = if t["state"] == "ok" {
+                let why = json!({"reason": t["reason"].as_str().unwrap_or("not reported")});
+                format!("last sync {} · backlog {} rows ({} bytes) · gap {} rows", at(&t["last_synced"], now), num(&t["backlog_rows"], &why), num(&t["backlog_bytes"], &why), num(&t["gap_rows"], &why))
+            } else {
+                format!("Unknown · {}", text(&t["reason"]))
+            };
+            let _ = writeln!(w, "<p class=\"detail\">Telemetry: {line}</p>");
+        }
         let x = &r["export"];
         let export = match x["state"].as_str() {
             Some("gap") => format!("gap · {}", text(&x["reason"])),
@@ -1221,5 +1231,24 @@ mod tests {
         integrations(&mut w, &Value::Null, true);
         integrations(&mut w, &json!({"rows": [{"product": "serverq"}, {"product": "agentq", "connection": "revoked"}]}), true);
         assert!(w.is_empty());
+    }
+
+    /// #161 A4: a TaskQ row shows last sync, backlog and gap from taskq's counters; missing ones read unknown with
+    /// the reason, and a grant without telemetry shows no telemetry line.
+    #[test]
+    fn taskq_telemetry_sync_line() {
+        let now = 1_800_000_100;
+        let row = |t: Value| json!({"source": {"state": "ok"}, "rows": [{"installation": "tq", "workspace": "w", "product": "taskq", "connection": "active", "telemetry": t}]});
+        let html = |t: Value| {
+            let mut w = String::new();
+            installations(&mut w, &row(t), &Value::Null, now);
+            w
+        };
+        let ok = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": 5, "backlog_bytes": 900, "gap_rows": 2, "reason": null}));
+        assert!(ok.contains("Telemetry: last sync ") && ok.contains("(60s ago) · backlog 5 rows (900 bytes) · gap 2 rows"), "{ok}");
+        let partial = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "status not reported by taskq"}));
+        assert!(partial.contains("backlog <span class=\"unknown\" title=\"unknown: status not reported by taskq\">—</span> rows"), "{partial}");
+        assert!(html(json!({"state": "unknown", "reason": "no telemetry block yet"})).contains("Telemetry: Unknown · no telemetry block yet"));
+        assert!(!html(json!({"state": "off", "reason": "telemetry not in grant"})).contains("Telemetry:"));
     }
 }

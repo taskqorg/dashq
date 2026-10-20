@@ -58,6 +58,8 @@ struct Config {
     agentq_configure: bool,
     /// `taskq_logs` `{host: absolute taskq.log path}`: attempt stage records for Agent work (D21); empty: not configured.
     taskq_logs: Vec<(String, String)>,
+    /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks (D11 #161).
+    limits: store::Limits,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -148,8 +150,20 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
             .and_then(|o| o.iter().map(|(h, p)| p.as_str().filter(|p| data::safe_id(h) && std::path::Path::new(p).is_absolute()).map(|p| (h.clone(), p.to_string()))).collect())
             .ok_or("config: bad key taskq_logs")?,
     };
+    let n = |k: &str, max: u64| v.pointer(&format!("/telemetry/{k}")).map(|x| x.as_u64().filter(|x| (1..=max).contains(x)).ok_or(format!("config: bad key telemetry.{k}"))).transpose();
+    if v.get("telemetry").is_some_and(|x| !x.is_object()) {
+        return Err("config: bad key telemetry".into());
+    }
+    let mut limits = store::LIMITS;
+    if let Some(d) = n("retention_days", 90)? {
+        limits.telemetry_secs = d as i64 * 86400;
+    }
+    if let Some(m) = n("max_mib", 1024)? {
+        limits.telemetry_bytes = m << 20;
+    }
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     Ok(Config {
+        limits,
         links,
         langfuse,
         forward,
@@ -417,7 +431,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     }
     let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
     profile::open(&dir);
-    let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
+    let enroll = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
@@ -627,7 +641,7 @@ fn main() {
             // the host administrator's local report sees every installation (D11), like a loopback page request
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
-            let enroll = enroll::Enroll::open(&dir, &cfg.public_host);
+            let enroll = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
             println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
@@ -823,7 +837,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![] }
+        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -879,6 +893,18 @@ mod tests {
         write(&bad);
         let e = load_config(&p).err().unwrap();
         assert_eq!(e, "config: bad key langfuse.secret_key");
+        // #161 A3: telemetry bounds come from config, within limits, and name the bad key
+        assert_eq!((c.limits.telemetry_secs, c.limits.telemetry_bytes), (7 * 86400, 256 << 20));
+        let mut t = good.clone();
+        t["telemetry"] = json!({"retention_days": 30, "max_mib": 64});
+        write(&t);
+        let l = load_config(&p).unwrap().limits;
+        assert_eq!((l.telemetry_secs, l.telemetry_bytes), (30 * 86400, 64 << 20));
+        for (bad, key) in [(json!({"retention_days": 0}), "telemetry.retention_days"), (json!({"max_mib": 4096}), "telemetry.max_mib"), (json!(5), "telemetry")] {
+            t["telemetry"] = bad;
+            write(&t);
+            assert_eq!(load_config(&p).err().unwrap(), format!("config: bad key {key}"));
+        }
         // forwarding is off unless the flag is a literal true
         assert!(!c.forward);
         let mut f = good.clone();
