@@ -72,3 +72,7 @@ Five requested review captures (at most ten): Hosts 1280 light/dark, Hosts 360 d
 Run `node docs/design/host-first-check.cjs` with Playwright on NODE_PATH and Chromium installed (or DASHQ_CHROME); add --capture to regenerate images. It checks routes/Back/reload, shared rendering, no writes, overflow and fixture meaning; manifest records hashes, environment and geometry. Documentation checks cover shrinkage/preservation/links/no Rust diff. No production gate changes.
 
 A1–A5: specification, preservation mapping and five fixture screens **approved by the owner** in the linked answer under TaskQ § 7. Producer gaps stay unknown. Multiple actual refreshes, draft recovery, live online/login/assigned-queue sources, full shared controls, native tray and authorized actions are **not tested here**. Retain D11–D19 qualification; design approval does not establish implementation or production readiness.
+
+## Runtime implementation
+
+[#170 review package](host-first-runtime.md) compares the real renderer with these approved fixtures. The five runtime pictures need owner review; this design approval does not approve their implementation or production deployment.

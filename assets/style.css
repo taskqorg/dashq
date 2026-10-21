@@ -1,5 +1,4 @@
 body { font: 1rem/1.45 system-ui, sans-serif; margin: 0 auto; max-width: 1400px; padding: 0 16px 32px; color: #1d2329; background: #fff; }
-.first > section:only-child { grid-column: 1 / -1; }
 header { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid #d5d9de; }
 h1 { font-size: 1.25rem; margin: 12px 0; }
 h2 { font-size: 1.1rem; margin: 24px 0 8px; }
@@ -21,8 +20,7 @@ a { color: #0a58ca; }
 .unknown { color: #6b7580; }
 details { margin-top: 12px; }
 tr:target td { background: #eef4ff; }
-/* Combined first screen (first-screen.md): servers and Boards side by side; em widths reflow earlier at large text */
-.first { --line: #dce0e5; --mark: #4f7fa8; --track: #e6e9ed; --tint: #fff1b8; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+:root { --line: #dce0e5; --mark: #4f7fa8; --track: #e6e9ed; --tint: #fff1b8; }
 .node { display: grid; grid-template-columns: minmax(7em, 1.1fr) repeat(3, minmax(0, 1fr)); gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .node small { color: #55606b; }
 .m .k, .disk .k { display: block; color: #55606b; font-size: .875em; }
@@ -40,7 +38,6 @@ tr:target td { background: #eef4ff; }
 /* no `to`: the tint fades into the element's own background (TaskQ counter capsules have one) */
 @keyframes tint { from { background: var(--tint); } }
 @media (prefers-reduced-motion: reduce) { .tint { animation: none; } }
-@media (max-width: 60em) { .first { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 36em) { .node { grid-template-columns: repeat(2, minmax(0, 1fr)); } .who, .disks { grid-column: 1 / -1; } }
 /* Agent integrations (agentq-settings.md G1, G4): rem sizes follow the reader's text size */
 .aq { --aq-line: #dce0e5; --aq-hover: #e9edf1; --aq-good: #246f59; --aq-ask: #955525; --aq-muted: #59636e; font-size: 1rem; line-height: 1.4; }
@@ -80,7 +77,7 @@ tr:target td { background: #eef4ff; }
 @media (pointer: coarse) { .aq-row > summary, .aq details summary { min-height: 44px; } }
 @media (prefers-color-scheme: dark) {
   .aq { --aq-line: #46505b; --aq-hover: #37424c; --aq-good: #8dd2b8; --aq-ask: #edbc96; --aq-muted: #b9c3cd; }
-  .first { --line: #2c3238; --mark: #8ab4dc; --track: #262c33; --tint: #4a3f12; }
+  :root { --line: #2c3238; --mark: #8ab4dc; --track: #262c33; --tint: #4a3f12; }
   .node small, .m .k, .disk .k, .d, .trend.none { color: #9aa4ae; }
   body { color: #e3e6ea; background: #15181c; }
   header, th, td { border-color: #2c3238; }
@@ -215,24 +212,48 @@ tr:target td { background: #eef4ff; }
 .finding { overflow-wrap: anywhere; padding: 8px 0; }
 .finding summary { cursor: pointer; }
 
-/* D22: same projection and controls, stable view URLs. */
-#views { display:flex; flex-wrap:wrap; gap:8px 16px; margin:12px 0; }
+/* D8/D22: hosts first; all existing detail and authority stay on demand. */
+#views { display:flex; flex-wrap:wrap; gap:8px 24px; margin:12px 0; }
 #views [aria-current=page] { font-weight:bold; text-decoration-thickness:3px; }
-body[data-view]:not([data-view="/"]) :where(#main > section,#main > details,#main > .first) { display:none; }
-body[data-view="/projects"] #boards { display:block; }
-body[data-view="/projects"] #main > .first { display:block; }
-body[data-view="/projects"] .first > section { display:none; }
-body[data-view="/projects"] .first > #boards { display:block; }
-body[data-view="/hosts"] #servers,
-body[data-view="/hosts"] #hosts,
-body[data-view="/hosts"] #resources { display:block; }
-body[data-view="/hosts"] #main > .first { display:block; }
-body[data-view="/hosts"] .first > section { display:none; }
-body[data-view="/hosts"] .first > #servers { display:block; }
-body[data-view="/agents"] #agents,
-body[data-view="/agents"] #agentwork,
-body[data-view="/agents"] #aqresults { display:block; }
-body[data-view="/services"] #qversions { display:block; }
-body[data-view="/checks"] #checks { display:block; }
-body[data-view="/integrations"] #installations,
-body[data-view="/integrations"] #integrations { display:block; }
+#more { margin:0; }
+#more a { display:inline-block; margin:8px 16px 8px 0; }
+body[data-view] :where(#main > section,#main > details) { display:none; }
+body[data-view="/"] #host-grid,body[data-view="/"] #attention,body[data-view="/"] #source-status,
+body[data-view] #startup,body[data-view] #more { display:block; }
+body[data-view="/projects"] #boards,
+body[data-view="/hosts"] #host-grid,body[data-view="/hosts"] #servers,body[data-view="/hosts"] #resources,body[data-view="/hosts"] #observations,
+body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #aqresults,
+body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
+body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
+.grid-head,.host { display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.6fr) minmax(0,1.15fr) minmax(0,1.25fr) minmax(0,1fr);gap:14px; }
+.grid-head { font-size:.875rem;color:#55606b;margin:12px 0 6px; }
+.host { border-top:1px solid var(--line);padding:16px 0; }
+.host .cell { min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums; }
+.host .identity .detail { display:block;font-size:.875rem;margin-top:5px; }
+.host .service { display:grid;grid-template-columns:3.9em 3.8em minmax(0,1fr);gap:4px;font-size:.875rem;margin-bottom:5px; }
+.host .login { font-size:.875rem;margin-bottom:5px; }
+.host .login .unknown { display:block; }
+.host .label { display:none;color:#55606b;font-size:.875rem;margin-bottom:4px; }
+.host .count-link,.host .disk small { display:block;margin-bottom:4px; }
+.legend { font-size:.875rem;color:#55606b; }
+.action-row { display:flex;align-items:baseline;flex-wrap:wrap;gap:12px;border-bottom:1px solid var(--line);padding:9px 0; }
+.action-row a { margin-left:auto; }
+#installations:not(:has(#show-inactive:checked)) [data-inactive=true] { display:none; }
+@media(max-width:70em) { .grid-head { display:none; }.host { grid-template-columns:repeat(3,minmax(0,1fr));gap:16px; }.host .identity { grid-column:1/-1; }.host .label { display:block; } }
+@media(max-width:42em) { .host { grid-template-columns:repeat(2,minmax(0,1fr)); }.host .products,.host .disks { grid-column:1/-1; } }
+
+@media (prefers-color-scheme:dark) { .grid-head,.host .label,.legend { color:#9aa4ae; } }
+
+header { flex-wrap:wrap;align-items:center; }
+#views { flex:1; }
+#more { position:relative; }
+#more>div { position:absolute;right:0;top:100%;width:18em;max-width:calc(100vw - 32px);padding:8px 16px;background:light-dark(#fff,#15181c);border:1px solid var(--line);z-index:2; }
+#more a { display:block; }
+
+/* Approved #169 host grouping and palette; TaskQ component interiors stay vendor-owned. */
+:root { color-scheme:light dark;--bg:light-dark(#f5f6f8,#171c22);--paper:light-dark(#fff,#222a32);--ink:light-dark(#263039,#e9eef3);--muted:light-dark(#586472,#b2becb);--line:light-dark(#d6dce3,#42505d);--link:light-dark(#245c92,#9acbf8);--warn:light-dark(#86500f,#edc080); }
+body { color:var(--ink);background:var(--bg);max-width:1280px; }
+a { color:var(--link);text-underline-offset:3px; }
+.host { padding:16px;border:1px solid var(--line);border-radius:7px;background:var(--paper);margin-bottom:10px; }
+.host .kind,.host-warning { display:block;font-size:.875rem; }
+.host-warning { color:var(--warn);margin-top:6px; }

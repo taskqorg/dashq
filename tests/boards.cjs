@@ -42,6 +42,15 @@ const done = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'd
 assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good'], ['closed', 'quiet']], 'zero hidden, Closed quiet');
 console.log('PASS counters: order, zero hidden, unknown, Closed quiet, partial aggregate');
 
+// #170/D8: only canonical, current attempt evidence scopes a host; Ready is never its assigned queue.
+const scoped = boardProjects([{project:'p',url:'https://example.invalid',source:{state:'ok'},counts:{closed:7},
+  tasks:[{n:1,state:'doing'},{n:2,state:'ready'},{n:3,state:'doing'}],attempts:[
+    {task:1,host_id:'machine/native',current:true},{task:2,host_id:'machine/native',current:false},
+    {task:3,host_id:'machine/wsl',current:true}]}], 'MACHINE/native')[0];
+assert.deepEqual(scoped.tasks.map(t=>t.n),[1]);
+assert.equal(scoped.closed,null); assert.equal(scoped.complete,false,'host assignment coverage remains unknown');
+console.log('PASS host scope: canonical identity, fresh attempts, no shared-queue multiplication');
+
 // B4: released long-title/count fixtures reach the same renderer as dashboard rows; catch dropped identity or counts.
 const shared = require('../assets/taskq/project-blocks.json');
 for (const count of shared.counts) {

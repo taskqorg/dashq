@@ -2,12 +2,13 @@
 'use strict';
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
-const viewSections = {'/': [], '/projects': ['boards'], '/hosts': ['servers', 'hosts', 'resources'],
+const viewSections = {'/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agents', 'agentwork', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
+let pendingAnchor = location.hash;
 function rememberView() {
   viewPositions.set(viewURL, {y: scrollY, focus: document.activeElement?.id});
 }
@@ -15,7 +16,7 @@ function applyView() {
   if (!(location.pathname in viewSections)) return;
   document.body.dataset.view = location.pathname;
   document.querySelectorAll('[data-view-link]').forEach(a => {
-    const u = new URL(a.href); u.search = location.search; a.href = u.pathname + u.search;
+    const u = new URL(a.href); if (a.hasAttribute('data-view-inherit') || !u.search) u.search = location.search; a.href = u.pathname + u.search + u.hash;
     if (u.pathname === location.pathname) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
   document.querySelectorAll('.bar a').forEach(a => {
@@ -32,10 +33,12 @@ function navigateView(url, pop = false) {
   const previous = new URL(viewURL);
   if (!pop) history.pushState(null, '', url);
   viewURL = location.href;
+  pendingAnchor = location.hash;
   applyView();
   const position = viewPositions.get(viewURL);
   if (position?.focus) document.getElementById(position.focus)?.focus({preventScroll: true});
   window.scrollTo(0, position?.y || 0);
+  if (previous.search === location.search && pendingAnchor) { document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   if (previous.search !== location.search) refresh();
 }
 addEventListener('popstate', () => navigateView(location.href, true));
@@ -60,7 +63,8 @@ async function refresh() {
     if (!data.ok && data.status !== 503) throw new Error('HTTP ' + data.status);
     const page = await fetch('/' + query, { cache: 'no-store' });
     if (!page.ok) throw new Error('HTTP ' + page.status);
-    const main = new DOMParser().parseFromString(await page.text(), 'text/html').getElementById('main');
+    const next = new DOMParser().parseFromString(await page.text(), 'text/html');
+    const main = next.getElementById('main');
     if (!main) throw new Error('invalid page');
     if (query !== location.search) { busy = false; queueMicrotask(refresh); return; }
     // D10: new values keep open disclosures, focus and reading position
@@ -89,6 +93,8 @@ async function refresh() {
       newBoards.replaceWith(oldBoards);
     }
     document.getElementById('main').replaceWith(main);
+    const attention = document.getElementById('attention-link');
+    if (attention && next.getElementById('attention-link')) attention.textContent = next.getElementById('attention-link').textContent;
     renderBoards();
     main.querySelectorAll('details').forEach(d => { if (open.has(key(d))) d.open = open.get(key(d)); });
     if (selected) selectConnection(selected);
@@ -109,6 +115,7 @@ async function refresh() {
     currentBanner.hidden = data.ok;
     currentBanner.textContent = data.ok ? '' : 'All source reads failed. Current state unknown; retained evidence is not confirmed.';
     window.scrollTo(0, y);
+    if (pendingAnchor) { document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   } catch (e) {
     const readingY = scrollY;
     DashqResources.bind();
@@ -120,6 +127,10 @@ async function refresh() {
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');
       e.title = 'Last-known evidence; current source state unknown';
+    });
+    document.querySelectorAll('.host [title]').forEach(e => {
+      e.dataset.observedTitle ||= e.title;
+      e.title = 'Unconfirmed after refresh failure. Retained: ' + e.dataset.observedTitle;
     });
     const root = document.getElementById('boards');
     if (root) {
@@ -308,6 +319,8 @@ function selectVersion(id) {
 }
 function revealConnection() {
   const id = location.hash.slice(1);
+  const row = document.getElementById('select-' + id);
+  if (row?.dataset.inactive === 'true') document.getElementById('show-inactive').checked = true;
   selectConnection(id);
   document.getElementById('select-' + id)?.scrollIntoView();
 }

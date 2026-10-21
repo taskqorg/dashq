@@ -27,7 +27,7 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       });
       for (state of states) {
         unavailable = state === 'first-failure';
-        await page.goto('http://fixture/?case=' + state);
+        await page.goto('http://fixture/' + (['first-failure','taskq-only','empty-board','partial','all-failed'].includes(state) ? 'projects' : state === 'pending' ? 'integrations' : state === 'warmup' ? 'hosts' : '') + '?case=' + state);
         await page.waitForFunction(() => !busy);
         await page.addStyleTag({content: 'html{font-size:' + size + 'px}'});
         const at = state + ' ' + width + '/' + size + '/' + theme;
@@ -62,7 +62,7 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       }
       // A total transport failure preserves the same card, focus, disclosure and scroll while counts become unknown.
       state = 'recovery'; unavailable = false; recoveryTest = true;
-      await page.goto('http://fixture/'); await page.waitForFunction(() => !busy);
+      await page.goto('http://fixture/projects'); await page.waitForFunction(() => !busy);
       const card = '[id="board-taskqorg%2Ftaskq-q-12"]';
       await page.evaluate(() => { document.getElementById('board-taskqorg%2Ftaskq-q-12').marked = 1; document.getElementById('attention-gaps').open = true; });
       // Test-only in-memory capability, like the shared Work mode fixture; never a production fallback or transport.
@@ -84,18 +84,18 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       const ageBefore = await page.$eval('#servers [data-age-s]', e => Number(e.dataset.ageS));
       // D22 / F7: same DOM/card and drafts across tabs and browser history; shared entry retains filters.
       const projection = await page.locator('#boards').getAttribute('data-boards');
-      for (const view of ['projects', 'hosts', 'agents', 'services', 'checks', 'integrations']) {
+      for (const view of ['tasks', 'host detail', 'agents', 'services', 'checks', 'connections']) {
         await page.locator('[data-view-link]').filter({hasText: new RegExp('^' + view + '$', 'i')}).evaluate(e => e.click());
-        assert.equal(new URL(page.url()).pathname, '/' + view);
-        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view);
+        assert.equal(new URL(page.url()).pathname, '/' + ({tasks:'projects','host detail':'hosts',connections:'integrations'}[view] || view));
+        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + ({tasks:'projects','host detail':'hosts',connections:'integrations'}[view] || view));
         assert.equal(await page.locator('#boards').getAttribute('data-boards'), projection);
         assert.equal(await page.locator(card + ' textarea').inputValue(), 'Retained draft');
-        if (view === 'projects') assert(await page.locator('#boards').isVisible());
-        if (view === 'hosts') { assert(await page.locator('#servers').isVisible()); assert(!await page.locator('#boards').isVisible()); }
+        if (view === 'tasks') assert(await page.locator('#boards').isVisible());
+        if (view === 'host detail') { assert(await page.locator('#servers').isVisible()); assert(!await page.locator('#boards').isVisible()); }
       }
       await page.goBack(); assert.equal(new URL(page.url()).pathname, '/checks');
       await page.goForward(); assert.equal(new URL(page.url()).pathname, '/integrations');
-      await page.locator('[data-view-link]').filter({hasText: /^Overview$/}).evaluate(e => e.click());
+      await page.locator('[data-view-link]').filter({hasText: /^Tasks$/}).evaluate(e => e.click());
       assert.equal(await page.locator(card + ' textarea').inputValue(), 'Retained draft');
       // Root restores its saved reading state; navigation never resets a disclosure or component.
       assert(await page.locator('#attention-gaps').evaluate(e => e.open));
@@ -126,18 +126,20 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
         assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view);
         assert.equal(new URL(page.url()).searchParams.get('session'), 'safe');
         await page.addStyleTag({content: 'html{font-size:' + size + 'px}'});
-        await page.locator('#view-' + view).focus();
+        const viewName = {projects:'Tasks',hosts:'Host detail',integrations:'Connections',agents:'Agents',services:'Services',checks:'Checks'}[view];
+        await page.locator('#more').evaluate(e => e.open = true);
+        await page.locator('[data-view-link]').filter({hasText: new RegExp('^' + viewName + '$','i')}).first().evaluate(e => e.focus());
         for (let i = 0; i < 2; i++) { await page.clock.fastForward(60000); await page.waitForFunction(() => !busy); }
         assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view, 'refresh retains tab');
-        assert.equal(await page.evaluate(() => document.activeElement.id), 'view-' + view, 'refresh retains tab focus');
+        assert.equal(await page.evaluate(() => document.activeElement.textContent), viewName, 'refresh retains tab focus');
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'view overflow');
-        await page.locator('[data-view-link]').filter({hasText: /^Overview$/}).click();
+        await page.locator('[data-view-link]').filter({hasText: /^Tasks$/}).click();
         assert.equal(new URL(page.url()).searchParams.get('host'), 'fixture');
         if (process.env.DASHQ_NAV_SHOTS && view === 'projects') {
           fs.mkdirSync(process.env.DASHQ_NAV_SHOTS, {recursive: true});
           await page.evaluate(() => scrollTo(0, 0));
           await page.screenshot({path: path.join(process.env.DASHQ_NAV_SHOTS, 'overview-' + width + '-' + theme + '.png')});
-          await page.locator('[data-view-link]').filter({hasText: /^Projects$/}).click();
+          await page.locator('[data-view-link]').filter({hasText: /^Tasks$/}).click();
           await page.evaluate(() => scrollTo(0, 0));
           await page.screenshot({fullPage: true, path: path.join(process.env.DASHQ_NAV_SHOTS, 'projects-' + width + '-' + theme + '.png')});
         }

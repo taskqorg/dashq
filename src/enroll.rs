@@ -2155,7 +2155,7 @@ lines", "recommended": true}]}])),
         for s in ["DESKTOP/wsl · ServerQ 1.3.0 · <code>sq-wsl</code>", "DESKTOP/native · ServerQ 1.3.0 · <code>sq-native</code>", "<code>sq-lost</code>", "unsupported-os", "failed-units", "Last known ok", "not verified"] {
             assert!(section.contains(s), "{s}");
         }
-        assert!(html.contains("<section id=\"hosts\">") && !html.contains("no serverq report for this host"));
+        assert!(html.contains("<section id=\"host-grid\">") && !html.contains("no serverq report for this host"));
     }
 
     /// H1/H2 chain: ingest -> retained store -> scoped projection -> Attention/page, without any task write.

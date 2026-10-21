@@ -19,7 +19,7 @@ const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/
         if (path === '/data') reads++;
         return route.fulfill({contentType: path === '/app.js' ? 'text/javascript' : path === '/data' ? 'application/json' : 'text/html', body: path === '/app.js' ? js : path === '/data' ? '{}' : html.replace('</head>', '<script src="/app.js" defer></script></head>')});
       });
-      await page.goto('http://fixture/');
+      await page.goto('http://fixture/checks');
       await page.waitForFunction(() => !busy);
       await page.addStyleTag({content: `html{font-size:${size}px}`});
       assert.equal(await page.locator('.finding').count(), 3);
