@@ -20,7 +20,7 @@ const fx = require('../fixture/taskq/resource-controls.json');
           path === '/data' ? '{}' : html;
         return route.fulfill({contentType: path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path === '/data' ? 'application/json' : 'text/html', body});
       });
-      await page.goto('http://fixture/');
+      await page.goto('http://fixture/hosts');
       await page.waitForFunction(() => !busy);
       await page.addStyleTag({content: 'html{font-size:' + size + 'px}'});
       assert.equal(await page.locator('.node').count(), 4);
@@ -28,7 +28,7 @@ const fx = require('../fixture/taskq/resource-controls.json');
       assert(await page.locator('.node-policy').textContent().then(t => t.includes('installation ' + fx.work[0].groups[0].targets[0].target.installation_id)));
       if (process.env.DASHQ_RESOURCE_SHOTS && ((width === 1024 && size === 16 && theme === 'light') || (width === 360 && size === 20 && theme === 'dark'))) {
         if (width === 360) await page.locator('.node-policy summary').click();
-        await page.locator(width === 1024 ? '.first' : '.node-policy').screenshot({path: `${process.env.DASHQ_RESOURCE_SHOTS}/overview-${width}-${size}-${theme}.png`});
+        await page.locator(width === 1024 ? '#servers' : '.node-policy').screenshot({path: `${process.env.DASHQ_RESOURCE_SHOTS}/overview-${width}-${size}-${theme}.png`});
       }
       await page.getByRole('button', {name: '◎ Work mode…'}).click();
       await page.locator('[data-rsc-select]').first().check();

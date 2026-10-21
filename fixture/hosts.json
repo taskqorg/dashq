@@ -173,7 +173,8 @@
         "behind": false,
         "state": "ok",
         "age_s": 90,
-        "reason": null
+        "reason": null,
+        "observed_running": 1
       },
       "agentq": {
         "installation": "inst-win-new",
@@ -203,7 +204,8 @@
         "behind": null,
         "state": "unknown",
         "age_s": null,
-        "reason": "no heartbeat"
+        "reason": "no heartbeat",
+        "observed_running": null
       },
       "agentq": {
         "installation": "inst-wsl",
@@ -233,7 +235,8 @@
         "behind": false,
         "state": "ok",
         "age_s": 70,
-        "reason": null
+        "reason": null,
+        "observed_running": 0
       },
       "agentq": {
         "installation": "inst-fra",
@@ -265,7 +268,8 @@
         "behind": false,
         "state": "ok",
         "age_s": 30,
-        "reason": null
+        "reason": null,
+        "observed_running": 1
       },
       "agentq": {
         "installation": "inst-mac",
@@ -295,7 +299,8 @@
         "behind": true,
         "state": "stale",
         "age_s": 28000,
-        "reason": "heartbeat 7h old (ttl 5m)"
+        "reason": "heartbeat 7h old (ttl 5m)",
+        "observed_running": null
       },
       "agentq": {
         "installation": null,

@@ -4,8 +4,9 @@ let boardFilter = null;
 const boardId = name => 'board-' + encodeURIComponent(name);
 const questionId = (name, n) => boardId(name) + '-q-' + n;
 // DashQ board rows -> TaskQ project model; a failed or incomplete read is partial, so counters read `?`.
-const boardProjects = boards => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
-  complete: b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: b.counts.closed, tasks: b.tasks || []}));
+const boardProjects = (boards, host = null) => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
+  complete: !host && b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: host ? null : b.counts.closed,
+  tasks: (b.tasks || []).filter(t => !host || b.attempts?.some(a => a.current && a.task === t.n && a.host_id?.toLowerCase() === host.toLowerCase()))}));
 // answers.md Route (#41): the server decides per board and account. GET /answer?board= returns a CSRF token when
 // this account may answer there, else the reason (503 while the deployment has no `answer` config). Read once per page.
 const answerAccess = new Map();
@@ -41,7 +42,8 @@ function renderBoards() {
   const root = document.getElementById('boards');
   if (!root) return;
   const boards = JSON.parse(root.dataset.boards), blocks = root.querySelector('.board-blocks');
-  const projects = boardProjects(boards);
+  const host = new URLSearchParams(location.search).get('host');
+  const projects = boardProjects(boards, host);
   const open = new Map([...blocks.querySelectorAll('details[id]')].map(d => [d.id, d.open]));
   // overview.md: a counter whose value changed gets a brief local tint; a counter new to a shown board was 0 (hidden)
   const counted = new Map([...blocks.querySelectorAll('.tqp-counts button[id]')].map(b => [b.id, b.textContent.trim()]));
@@ -51,6 +53,13 @@ function renderBoards() {
   aggregate.innerHTML = TaskqProjectBlocks.aggregate(projects);
   fragments.append(aggregate);
   aggregate.id = 'boards-all';
+  if (host) {
+    const scope = document.createElement('p'), all = document.createElement('a');
+    scope.textContent = 'Host: ' + host + ' · observed current attempts only; assigned queue unknown. ';
+    const url = new URL(location.href); url.searchParams.delete('host'); url.hash = '';
+    all.href = '/projects' + url.search; all.dataset.viewLink = ''; all.textContent = 'All hosts & unassigned';
+    scope.append(all); aggregate.append(scope);
+  }
   const coverage = document.createElement('p');
   coverage.className = 'detail';
   coverage.textContent = 'Current coverage: ' + projects.filter(p => p.complete).length + ' of ' + projects.length + ' boards fresh and complete. Unavailable boards are excluded from current totals.';
@@ -72,7 +81,7 @@ function renderBoards() {
     }
     const tasks = document.createElement('details');
     tasks.id = wrap.id + '-tasks';
-    tasks.open = open.get(tasks.id) || (boardFilter && (!boardFilter.project || boardFilter.project === p.id));
+    tasks.open = open.has(tasks.id) ? open.get(tasks.id) : index === 0;
     const summary = document.createElement('summary');
     summary.textContent = 'Tasks' + (boardFilter && (!boardFilter.project || boardFilter.project === p.id) ? ' · ' + boardFilter.state : '');
     tasks.append(summary);
@@ -114,18 +123,18 @@ function renderBoards() {
     }
     if (!shown) {
       const empty = document.createElement('p');
-      empty.textContent = boardFilter?.state === 'closed' ? 'Closed total is unknown; open the board.' : p.complete ? 'No matching tasks observed.' : b.source.at == null ? 'No board observation received yet.' : 'No matching tasks in the retained observation; current state unknown.';
+      empty.textContent = host ? 'No matching current attempt evidence; host assignment and queue coverage are unknown.' : boardFilter?.state === 'closed' ? 'Closed total is unknown; open the board.' : p.complete ? 'No matching tasks observed.' : b.source.at == null ? 'No board observation received yet.' : 'No matching tasks in the retained observation; current state unknown.';
       tasks.append(empty);
     }
     wrap.append(tasks);
-    if (b.attempts?.length) {
+    if (b.attempts?.length && !host) {
       const live = document.createElement('p');
-      live.className = 'detail'; live.textContent = 'Live: ' + b.attempts.map(a => a.host + ' #' + a.task).join(' · ');
+      live.className = 'detail'; live.textContent = 'Observed attempts (heartbeat freshness applies): ' + b.attempts.map(a => a.host + ' #' + a.task).join(' · ');
       wrap.append(live);
     }
     fragments.append(wrap);
   }
-  for (const id of boardCards.keys()) if (!kept.has(id)) boardCards.delete(id);
+  for (const id of boardCards.keys()) if (!host && !kept.has(id)) boardCards.delete(id);
   blocks.replaceChildren(fragments);
   // The page refresh restores focus and drafts by ID. A control ID names its board/task/card and its action/state,
   // never its DOM position, so rows added or removed by a refresh cannot move focus to another control.
@@ -148,6 +157,7 @@ if (typeof module === 'object') module.exports = {boardProjects};
 else document.addEventListener('click', e => {
   const question = e.target.closest('[data-board-question]');
   if (question) {
+    if (question.hasAttribute('data-view-link')) return;
     const el = document.getElementById(questionId(question.dataset.boardQuestion, question.dataset.task));
     if (el) { e.preventDefault(); el.scrollIntoView({block: 'center'}); el.querySelector('a')?.focus({preventScroll: true}); }
     return;
@@ -156,6 +166,10 @@ else document.addEventListener('click', e => {
   TaskqProjectBlocks.handle(e, {
     open: url => location.assign(url),
     project: id => { boardFilter = null; renderBoards(); const d = document.getElementById(boardId(id) + '-tasks'); d.open = true; d.querySelector('summary').focus(); },
-    tasks: (project, state) => { boardFilter = {project, state}; renderBoards(); document.querySelector('#boards details[open] summary')?.focus(); }
+    tasks: (project, state) => {
+      boardFilter = {project, state}; renderBoards();
+      document.querySelectorAll('#boards details[id$="-tasks"]').forEach(d => { if (!project || d.id === boardId(project) + '-tasks') d.open = true; });
+      document.querySelector('#boards details[open] summary')?.focus();
+    }
   });
 });

@@ -1,0 +1,214 @@
+{
+  "kind": "runtime-fixture-evidence",
+  "rules": [
+    "D8/D10/D22",
+    "R12/R13",
+    "specq F1–F7"
+  ],
+  "reference": "docs/design/evidence/host-first/manifest.json",
+  "before": "host_first_actions_and_unknowns FAIL: hosts must precede Attention",
+  "after": "PASS: real renderer hosts precede human actions; history and shared controls retain their chains",
+  "matrix": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "light",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "light",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "light",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "dark",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "dark",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 20,
+      "theme": "dark",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "light",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "light",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "light",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "dark",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "dark",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 16,
+      "theme": "dark",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "view": "/projects",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "view": "/",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "view": "/hosts",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "view": "/projects",
+      "result": "PASS"
+    }
+  ],
+  "screens": [
+    "hosts-1280-light.png",
+    "tasks.png",
+    "hosts-1280-dark.png",
+    "host-detail.png",
+    "hosts-360-dark.png"
+  ],
+  "hashes": {
+    "src/page.rs": "923767dd2021f7fa28e5ca8d59a21b80629af753bb48ff7a2a66b87d25e95273",
+    "src/data.rs": "65a9e155173a4b075f357e6ef3745318f5a1038de02f2ac4733e1935b6b26435",
+    "tests/host-first-browser.cjs": "42e807df2566325a3bd10cfa1ec56327f24a97e83cfe2279d5232056f79cafa0",
+    "docs/design/host-first-fixture.json": "29f0c5c7e90262351ff049f225263298d7ed1bf3a8ef783afaa89c2f23957a09",
+    "assets/taskq/resource-controls.js": "14134d91063767a58510f3cf34f3988b5e13594e0231738b5d73aa60fbc8068f",
+    "assets/resources.js": "4f779b0acd47ba2d5cf85a8123ae9d008b8c4f989a7a6d116f591c3468b728df",
+    "assets/taskq/project-blocks.js": "e63affe681aad856ee785fae6bff4dbc90541c84c4aca280b7b68e6f570c5238",
+    "assets/taskq/answer-card.js": "35662bb6d71975e54345097b51aa871db7c8b81c6a137faa1c1c2d72b24b8b92",
+    "assets/boards.js": "74da9c8680c79276334ab968ce596597b245899c96c8824ff06f1a16527cddf4",
+    "assets/app.js": "fa0b451ff81f9419c24d1443a3fc9df9cee3173efe21148c93f22ccc5cddad93",
+    "assets/style.css": "49858dbb1a70fe35f21fc7dc8aa453e5581a8b4957391578306242bd086b4be1",
+    "assets/taskq/resource-controls.css": "9f81ec867aaf0cf95c4abbd5c37889632e1a6034b0e33331b52c41f92b836907",
+    "assets/resources.css": "de33099548d72ca2f6a10b1c139c9162c38e8b4865d581a9bec3ad97e8b725b6",
+    "assets/taskq/project-blocks.css": "1a2471d13a850a66eb3f8ea9f5745ad2fa3bad1ce67305173d17ba1ae2f0ca64",
+    "assets/taskq/answer-card.css": "b33ea8d5ba6ec70931ecc2cac745bf1808181b4939019bf478f09cdd7791a796",
+    "rendered-page.html": "73e67ad3fa4a26fb74b946144573124eebd3e72d2ace098341de758c9abd127c"
+  },
+  "notTested": [
+    "production deployment",
+    "live host/login/assigned-queue probes",
+    "unreleased full TaskQ workspace API",
+    "owner acceptance"
+  ],
+  "browser": "141.0.7390.37",
+  "platform": "win32"
+}

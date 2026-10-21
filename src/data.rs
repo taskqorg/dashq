@@ -220,8 +220,12 @@ impl Machines {
     fn of(&self, r: &Value) -> Option<String> {
         let name = aq(r, "host.name").as_str().filter(|h| safe(h, 64, b"_.-"))?;
         let rt = aq(r, "agentq.runtime");
+        Some(self.runtime(name, rt.as_str().unwrap_or("")))
+    }
+
+    fn runtime(&self, name: &str, rt: &str) -> String {
         let wsl = rt == "wsl" || (rt == "linux" && self.windows.contains(&name.to_ascii_lowercase()));
-        Some(self.id(name, if wsl { "wsl" } else { "native" }))
+        self.id(name, if wsl { "wsl" } else { "native" })
     }
 }
 
@@ -473,13 +477,16 @@ pub fn build(inp: &Value) -> Value {
                 if let Some((n, id)) = l.strip_prefix('#').and_then(|l| l.split_once(' '))
                     && let Ok(n) = n.parse::<u64>()
                 {
-                    attempts.push(json!({"host": name, "task": n, "attempt": id.trim()}));
+                    attempts.push(json!({"host": name, "host_id": row, "task": n, "attempt": id.trim()}));
                 }
             }
             // Age at collection uses only the board clock.
             let at = hb["updated_at"].as_str().and_then(iso_secs);
             let age = date.zip(at).map(|(d, u)| d.saturating_sub(u));
             let cached_age = age.zip(snap["at"].as_u64()).map(|(a, read_at)| a.saturating_add(now.saturating_sub(read_at)));
+            for a in &mut attempts[first..] {
+                a["current"] = json!(src["state"] == "ok" && cached_age.is_some_and(|a| a <= ttl));
+            }
             if src["state"] != "ok" {
                 unconfirmed.entry(row.to_ascii_lowercase()).or_insert_with(|| format!("{repo}: {}", src["reason"].as_str().unwrap_or("board read not confirmed")));
             } else if cached_age.is_some_and(|a| a <= ttl) {
@@ -693,6 +700,10 @@ pub fn build(inp: &Value) -> Value {
     let enrolled_checks = serverq_enrolled(inp, now, &machines, &mut hosts, &mut current, &mut gaps, &mut history);
 
     for h in hosts.values_mut() {
+        let id = h["id"].as_str().unwrap_or("").to_ascii_lowercase();
+        h["taskq"]["observed_running"] = if unconfirmed.contains_key(&id) { Value::Null } else {
+            working.get(&id).map_or(Value::Null, |tasks| json!(tasks.iter().collect::<HashSet<_>>().len()))
+        };
         h["taskq"]["latest"] = latest("taskqorg/taskq");
         h["taskq"]["behind"] = behind(&h["taskq"]["latest"], &h["taskq"]["version"]);
         let a = &mut h["agentq"];
@@ -702,7 +713,14 @@ pub fn build(inp: &Value) -> Value {
     }
 
     // Resources (D4.4): enrolled history first, Langfuse samples otherwise; a stale or missing sample is a gap.
-    let mut resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, fhost);
+    let mut resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, None);
+    for r in resources["rows"].as_array_mut().into_iter().flatten() {
+        r["host"] = fleet.iter().find(|f| f["installation"] == r["installation"]).map_or_else(|| {
+            let name = r["host"].as_str().unwrap_or("").split('/').next().unwrap_or("");
+            json!(machines.runtime(name, r["runtime"].as_str().unwrap_or("")))
+        }, |f| f["host"].clone());
+    }
+    resources["rows"].as_array_mut().unwrap().retain(|r| fhost.is_none_or(|h| r["host"].as_str().is_some_and(|id| id.eq_ignore_ascii_case(h))));
     if lf_src["state"] == "unconfirmed" {
         for r in resources["rows"].as_array_mut().into_iter().flatten().filter(|r| r["provenance"] == "langfuse") {
             r["source"]["state"] = json!("unconfirmed");
@@ -867,6 +885,21 @@ pub fn all_failed(doc: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// D8/H1: WSL resources use the same installation identity as the canonical host, including filtered entry.
+    #[test]
+    fn review_resource_runtime_identity() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../fixture/hosts.json")).unwrap();
+        let mut inp = fixture["input"].clone();
+        let now = inp["now"].as_u64().unwrap();
+        inp["langfuse"]["value"]["agentq.resource"] = serde_json::json!([{"id":"r-wsl","startTime":crate::source::iso(now-10),"metadata":{
+            "attributes.agentq.installation":"inst-wsl","attributes.host.name":"desktop","attributes.agentq.runtime":"linux","attributes.agentq.resource.cpu_percent":33}}]);
+        for filter in [serde_json::json!({}),serde_json::json!({"host":"DESKTOP/wsl"})] {
+            inp["filters"] = filter;
+            let d = super::build(&inp);
+            assert_eq!(d["resources"]["rows"][0]["host"],"DESKTOP/wsl");
+            assert_eq!(d["resources"]["rows"].as_array().unwrap().len(),1);
+        }
+    }
     use super::*;
 
     /// H2: producer verification time must survive the enrolled read-to-page path.

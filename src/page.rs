@@ -62,10 +62,10 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 7] = [("/", "Overview"), ("/projects", "Projects"), ("/hosts", "Hosts"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Integrations")];
+pub const VIEWS: [(&str, &str); 7] = [("/", "Hosts"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
-    render(doc, links).replacen("<body>", &format!("<body data-view=\"{}\">", esc(path)), 1)
+    render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
 }
 
 /// `links`: `{traces, dashboards}` Langfuse project URLs.
@@ -73,18 +73,18 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let now = doc["generated_at"].as_u64().unwrap_or(0);
     let base = links["traces"].as_str().unwrap_or("");
     let filters: String = ["host", "agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v| format!("&{k}={}", enc(v)))).collect();
+    let query = format!("?period={}{}", doc["period"].as_u64().unwrap_or(1800), filters);
+    let mut action_html = String::new();
+    let action_count = actions(&mut action_html, doc, now, &query);
     let mut h = String::new();
     let w = &mut h;
-    let _ = write!(
-        w,
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body>\n<header>\n<h1>dashq</h1>\n{}\n</header>\n<main id=\"main\">\n",
-        if links["traces"].as_str().is_some_and(|s| !s.is_empty()) {
-            format!("<nav><a href=\"{}\">Langfuse traces</a> · <a href=\"{}\">Langfuse dashboards</a></nav>", text(&links["traces"]), text(&links["dashboards"]))
-        } else { String::new() }
-    );
-    let query = format!("?period={}{}", doc["period"].as_u64().unwrap_or(1800), filters);
-    let nav = VIEWS.iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-link href=\"{path}{}\">{name}</a>", name.to_ascii_lowercase(), esc(&query))).collect::<Vec<_>>().join(" ");
-    let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav}</nav><p id=\"view-unavailable\" class=\"note\" hidden>No observations available for this view. <a href=\"/{}\">Return to overview</a>.</p>", esc(&query));
+    let _ = write!(w, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body data-view=\"/\">\n<header>\n<h1>dashq</h1>\n");
+    let nav = VIEWS[..2].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", if *path == "/" { "home" } else { "projects" }, esc(&query))).collect::<Vec<_>>().join(" ");
+    let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav} <a id=\"attention-link\" data-view-inherit data-view-link href=\"/{}#attention\">Attention · {action_count}</a></nav>", esc(&query));
+    let more = VIEWS[2..].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", path.trim_start_matches('/'), esc(&query))).collect::<Vec<_>>().join(" ");
+    let _ = writeln!(w, "<details id=\"more\"><summary>More</summary><div>{more} <a href=\"/connect\">Connect a service</a>");
+    if !base.is_empty() { let _ = writeln!(w, "<a href=\"{}\">Langfuse traces</a> <a href=\"{}\">Langfuse dashboards</a>", text(&links["traces"]), text(&links["dashboards"])); }
+    let _ = writeln!(w, "</div></details></header><main id=\"main\"><p id=\"view-unavailable\" class=\"note\" hidden>No observations available for this view. <a href=\"/{}\">Return to overview</a>.</p>", esc(&query));
     let period = doc["period"].as_u64().unwrap_or(1800);
     let periods: Vec<String> = PERIODS
         .iter()
@@ -117,10 +117,6 @@ pub fn render(doc: &Value, links: &Value) -> String {
             format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", dur(a))))
         })
         .collect();
-    if !not_ok.is_empty() {
-        let _ = writeln!(w, "<ul class=\"summary\">{}</ul>", not_ok.join(""));
-    }
-
     let configured = |name: &str| doc["sources"][name].is_object() && doc["sources"][name]["reason"] != "not configured";
     let has_rows = |v: &Value| v.as_array().is_some_and(|a| !a.is_empty());
     let unconfigured: Vec<&str> = [("langfuse", "Langfuse"), ("github", "GitHub boards"), ("serverq", "ServerQ report")]
@@ -134,9 +130,13 @@ pub fn render(doc: &Value, links: &Value) -> String {
         return h;
     }
 
+    host_grid(w, doc, now);
+    w.push_str(&action_html);
+    let _ = writeln!(w, "<details id=\"source-status\"><summary>Source status \u{00b7} {} non-ok</summary><ul class=\"summary\">{}</ul></details>", not_ok.len(), not_ok.join(""));
+
     // 1. Attention
     let att = &doc["attention"];
-    let _ = writeln!(w, "<section id=\"attention\">\n<h2>Attention</h2>");
+    let _ = writeln!(w, "<section id=\"observations\">\n<h2>Observations &amp; history</h2>");
     for (key, title) in [("current", "Current problems"), ("gaps", "Observation gaps"), ("incidents", "Incident history (24 h, deduplicated)")] {
         let items = att[key].as_array().cloned().unwrap_or_default();
         // incident history is history, not a current problem: on demand (D10 last)
@@ -176,14 +176,10 @@ pub fn render(doc: &Value, links: &Value) -> String {
         }
         let _ = writeln!(w, "</ul>{end}");
     }
-    for b in doc["boards"].as_array().into_iter().flatten() {
-        for q in b["questions"].as_array().into_iter().flatten() {
-            let _ = writeln!(w, "<p><a data-board-question=\"{}\" data-task=\"{}\" href=\"#boards\">{} · #{} {}</a></p>", text(&b["project"]), text(&q["number"]), text(&b["project"]), text(&q["number"]), text(&q["title"]));
-        }
-    }
     let _ = writeln!(w, "</section>");
 
-    first(w, doc, now);
+    if configured("langfuse") || has_rows(&doc["resources"]["rows"]) { servers(w, &doc["resources"], now); }
+    if let Some(rows) = doc["boards"].as_array().filter(|a| !a.is_empty()) { boards(w, rows); }
     installations(w, &doc["installations"], &doc["resources"], now);
     integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
     if configured("langfuse") || has_rows(&doc["resources"]["rows"]) {
@@ -191,41 +187,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     }
     if configured("langfuse") { crate::optimization::render(w, doc); }
 
-    // 2. Hosts
     let enrolled_checks = has_rows(&doc["checks"]["installations"]);
-    if has_rows(&doc["hosts"]) && (configured("langfuse") || configured("serverq") || enrolled_checks) {
-        let _ = writeln!(w, "<section id=\"hosts\">\n<h2>Hosts</h2>");
-        let hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
-        if hosts.is_empty() {
-            let _ = writeln!(w, "<p class=\"note\">No host seen in any source.</p>");
-        } else {
-            let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Freshness</th><th>taskq</th><th>agentq</th><th>agentq latest</th><th>serverq</th></tr>");
-            for x in hosts {
-                let (t, a, q) = (&x["taskq"], &x["agentq"], &x["serverq"]);
-                let state = |o: &Value, label: String| -> String {
-                    let st = o["state"].as_str().unwrap_or("unknown");
-                    let mut out = badge(st, &label);
-                    if let Some(r) = o["reason"].as_str() {
-                        let _ = write!(out, " <span class=\"detail\">{}</span>", esc(r));
-                    }
-                    out
-                };
-                let unk = |v: &Value| if v.is_null() { "<span class=\"unknown\" title=\"unknown: not reported\">—</span>".to_string() } else { text(v) };
-                let ver = |v: &Value, behind: &Value| format!("{}{}", unk(v), if behind == true { " <span class=\"s warn\">behind</span>" } else { "" });
-                let age = |o: &Value, none: &str| o["age_s"].as_u64().map_or(none.into(), |a| format!("{} old", dur(a)));
-                let fresh = state(&x["freshness"], age(&x["freshness"], "unknown"));
-                let host = format!("{}{}", text(&x["id"]), x["reason"].as_str().map(|r| format!(" <span class=\"detail\">{}</span>", esc(r))).unwrap_or_default());
-                let agentq = format!("{}{}", ver(&a["running"], &a["behind"]), a["installation"].as_str().map(|i| format!(" <span class=\"detail\">{}</span>", esc(i))).unwrap_or_default());
-                let taskq = format!("{} {}", ver(&t["version"], &t["behind"]), state(t, t["age_s"].as_u64().map_or("unknown".into(), |a| format!("{} old", dur(a)))));
-                // green only for a fresh report whose checks are all ok
-                let q_state = if q["state"] == "ok" { json!({"state": match q["status"].as_str() { Some("ok") => "ok", Some("warn") => "warn", _ => "unknown" }}) } else { q.clone() };
-                let serverq = state(&q_state, format!("{}{}", q["status"].as_str().unwrap_or("unknown"), q["age_s"].as_u64().map(|a| format!(", {} old", dur(a))).unwrap_or_default()));
-                let _ = writeln!(w, "<tr><td>{host}</td><td>{fresh}</td><td>{taskq}</td><td>{agentq}</td><td>{}</td><td>{serverq}</td></tr>", unk(&a["latest"]));
-            }
-            let _ = writeln!(w, "</table>");
-        }
-        let _ = writeln!(w, "</section>");
-    }
 
     versions(w, &doc["versions"], now);
 
@@ -373,7 +335,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let _ = writeln!(w, "<p class=\"detail\">{}</p></section>", if inst["source"]["state"] == "ok" { "No installation connected yet." } else { "Installation list unavailable." });
         return;
     }
-    let _ = writeln!(w, "<div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
+    let _ = writeln!(w, "<label><input id=\"show-inactive\" type=\"checkbox\"> Show stale and revoked connections</label><div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
     let mut panels = String::new();
     for (index, r) in rows.iter().enumerate() {
         let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
@@ -394,13 +356,14 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, dur(age), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
             None => format!("Unknown · {}", o["reason"].as_str().map(esc).unwrap_or_else(|| "no observation".into())),
         };
-        let selected = index == 0;
+        let inactive = revoked || o["state"] == "stale";
+        let selected = !inactive && !rows[..index].iter().any(|r| r["connection"] != "revoked" && r["observation"]["state"] != "stale");
         let product = match r["product"].as_str() { Some("agentq") => "AgentQ", Some("serverq") => "ServerQ", Some("taskq") => "TaskQ", _ => "Unknown product" };
         let duplicate = rows.iter().filter(|other| other["host_label"] == r["host_label"] && other["runtime"] == r["runtime"] && other["product"] == r["product"]).count() > 1;
         let identity = if duplicate { format!("<small>{}</small>", esc(inst_id)) } else { String::new() };
-        let _ = writeln!(w, "<button type=\"button\" class=\"connect-select\" id=\"select-{id}\" aria-controls=\"{id}\" aria-expanded=\"{selected}\" aria-pressed=\"{selected}\"><span><strong>{product}</strong><small>{} · {}</small>{identity}</span><span class=\"{class}\">{connection}</span><span class=\"connect-data\">{data}</span></button>", text(&r["host_label"]), text(&r["runtime"]));
+        let _ = writeln!(w, "<button type=\"button\" class=\"connect-select\" data-inactive=\"{inactive}\" id=\"select-{id}\" aria-controls=\"{id}\" aria-expanded=\"{selected}\" aria-pressed=\"{selected}\"><span><strong>{product}</strong><small>{} · {}</small>{identity}</span><span class=\"{class}\">{connection}</span><span class=\"connect-data\">{data}</span></button>", text(&r["host_label"]), text(&r["runtime"]));
         let w = &mut panels;
-        let _ = writeln!(w, "<div class=\"connect-body\" id=\"{id}\" {}><strong>{product} · {} ({})</strong>", if selected { "" } else { "hidden" }, text(&r["host_label"]), text(&r["runtime"]));
+        let _ = writeln!(w, "<div class=\"connect-body\" data-inactive=\"{inactive}\" id=\"{id}\" {}><strong>{product} · {} ({})</strong>", if selected { "" } else { "hidden" }, text(&r["host_label"]), text(&r["runtime"]));
         let received = if r["received_at"].as_u64().is_some_and(|t| t > now) { "Unknown · server clock uncertain".into() } else if r["received_at"].is_null() { "Unknown · no durable receipt yet".into() } else { at(&r["received_at"], now) };
         let _ = writeln!(w, "<p class=\"detail\">Host activity unknown. Last durable receipt: {}. {}</p>", received, if revoked { "Local work continues independently." } else { "The host retries with its existing grant; silence does not prove it stopped or disconnected locally." });
         if let Some(reason) = o["reason"].as_str() {
@@ -816,20 +779,102 @@ fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &s
     format!("<svg class=\"trend\" viewBox=\"0 0 120 32\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"{label}, last 30 min, 0–100 %\">{}</svg>", lines.join(""))
 }
 
-/// The combined first screen (first-screen.md, D10): servers and Boards side by side, reflowing to one column.
-fn first(w: &mut String, doc: &Value, now: u64) {
-    let _ = writeln!(w, "<div class=\"first\">");
-    if doc["sources"]["langfuse"]["reason"] != "not configured" || doc["resources"]["rows"].as_array().is_some_and(|a| !a.is_empty()) {
-        servers(w, &doc["resources"], now);
+/// D8/H1–H7: the existing canonical host identity, never a friendly-label join or a new authority.
+fn host_grid(w: &mut String, doc: &Value, now: u64) {
+    let mut hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
+    for r in doc["resources"]["rows"].as_array().into_iter().flatten() {
+        if !hosts.iter().any(|h| h["id"].as_str().zip(r["host"].as_str()).is_some_and(|(a,b)| a.eq_ignore_ascii_case(b))) {
+            hosts.push(json!({"id": r["host"], "freshness": r["source"], "agentq": {"installation": r["installation"]}}));
+        }
     }
-    if let Some(rows) = doc["boards"].as_array().filter(|a| !a.is_empty()) { boards(w, rows); }
-    let _ = writeln!(w, "</div>");
+    let extra: String = ["agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v| format!("&{k}={}", enc(v)))).collect();
+    let query = |path: &str, id: &str| format!("{path}?period={}&host={}{extra}", doc["period"].as_u64().unwrap_or(1800), enc(id));
+    let unknown = |why: &str| format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">?</span>", esc(why), esc(why));
+    let _ = writeln!(w, "<section id=\"host-grid\"><h2>Hosts</h2><div class=\"grid-head\" aria-hidden=\"true\"><span>Host · observation</span><span>Services · update state</span><span>Client sign-in</span><span>CPU</span><span>RAM</span><span>Disk</span><span>Tasks</span></div>");
+    if hosts.is_empty() { let _ = writeln!(w, "<p>No host observations received. <a data-view-link href=\"/projects\">Open Tasks</a>.</p>"); }
+    for h in hosts {
+        let id = h["id"].as_str().unwrap_or("");
+        let key = enc(id);
+        let r = doc["resources"]["rows"].as_array().into_iter().flatten()
+            .filter(|r| r["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id)))
+            .max_by_key(|r| (r["installation"] == h["agentq"]["installation"], r["source"]["at"].as_u64()));
+        let empty = Value::Null;
+        let res = r.unwrap_or(&empty);
+        let (c, src) = (&res["current"], &res["source"]);
+        let f = &h["freshness"];
+        let age = f["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", dur(a)));
+        let observed_age = f["age_s"].as_u64().map_or(age.clone(), |a| format!("<span data-age-s=\"{a}\">{age}</span>"));
+        let why = format!("{}; {}", f["reason"].as_str().unwrap_or("AgentQ heartbeat"), h["reason"].as_str().unwrap_or("canonical host identity"));
+        let (name, kind) = id.split_once('/').unwrap_or((id, "kind unknown"));
+        let _ = writeln!(w, "<article class=\"host\" id=\"host-{key}\"><div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">Online {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), unknown("no qualified online probe"), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
+        for i in doc["attention"]["current"].as_array().into_iter().flatten().filter(|i| i["source"] == "serverq" && i["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))) {
+            let _ = writeln!(w, "<small class=\"host-warning\">{} <a data-view-link href=\"/checks?period={}#checks\">Diagnostics</a></small>", text(&i["what"]), doc["period"].as_u64().unwrap_or(1800));
+        }
+        let _ = writeln!(w, "</div><div class=\"cell products\"><span class=\"label\">Services · update state</span>");
+        for (product, label, v, source) in [("taskq", "TaskQ", &h["taskq"]["version"], &h["taskq"]), ("agentq", "AgentQ", &h["agentq"]["running"], f), ("serverq", "ServerQ", &Value::Null, &h["serverq"])] {
+            let installation = h[product]["installation"].as_str();
+            let vr = doc["versions"]["rows"].as_array().into_iter().flatten().filter(|r| r["product"] == product && r["connection"] != "revoked" &&
+                !r["reason"].as_str().is_some_and(|s| s.starts_with("superseded by ")) &&
+                (v.is_null() || r["running"]["version"] == *v) &&
+                installation.map_or_else(|| r["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id)), |i| r["installation"] == i))
+                .max_by_key(|r| r["observation"]["at"].as_u64());
+            let version = if v.is_null() { vr.map(|r| &r["running"]["version"]).unwrap_or(v) } else { v };
+            let obs = vr.map(|r| &r["observation"]).unwrap_or(source);
+            let update = vr.and_then(|r| r["update"]["state"].as_str()).unwrap_or("unknown");
+            let why = format!("{}; observed {}; {}", obs["state"].as_str().unwrap_or("unknown"), at(&obs["at"], now), obs["reason"].as_str().unwrap_or("running version is not health verification"));
+            let shown = if version.is_null() { unknown("running version not reported") } else { text(version) };
+            let _ = writeln!(w, "<div class=\"service\" tabindex=\"0\" title=\"{}\"><span>{label}</span><span>{shown}</span><span class=\"detail\">{}</span></div>", esc(&why), esc(match update { "current" => "version current", "available" => "update available", "error" => "update error", _ => "update unknown" }));
+        }
+        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Client sign-in</span><div class=\"login\">Claude {}</div><div class=\"login\">Codex {}</div></div>", unknown("no login probe; activity does not prove sign-in"), unknown("no login probe; activity does not prove sign-in"));
+        let observation = format!("{}; observed {}; {}", src["state"].as_str().unwrap_or("unknown"), at(&src["at"], now), src["reason"].as_str().unwrap_or("resource sample"));
+        let cpu = c["cpu"]["percent"].as_f64();
+        let shown = cpu.map_or_else(|| unknown(c["cpu"]["reason"].as_str().unwrap_or("no resource sample")), |p| format!("{p:.1}%"));
+        let _ = writeln!(w, "<div class=\"cell\" tabindex=\"0\" title=\"{}\"><span class=\"label\">CPU</span>{}</div>", esc(&observation), value(&format!("host-cpu-{key}"), &shown, cpu, None));
+        let m = &c["memory"];
+        let p = pct(&m["used_bytes"], &m["total_bytes"]);
+        let shown = if p.is_some() { format!("{} / {} GB", gb(&m["used_bytes"]), gb(&m["total_bytes"])) } else { unknown(m["reason"].as_str().unwrap_or("no memory sample")) };
+        let _ = writeln!(w, "<div class=\"cell\" tabindex=\"0\" title=\"{}\"><span class=\"label\">RAM</span>{}{}</div><div class=\"cell disks\" tabindex=\"0\" title=\"{}\"><span class=\"label\">Disk · used / total</span>", esc(&observation), value(&format!("host-ram-{key}"), &shown, p, None), bar(p), esc(&observation));
+        for d in c["disks"].as_array().into_iter().flatten() {
+            let p = pct(&d["used_bytes"], &d["total_bytes"]);
+            let shown = if p.is_some() { format!("{} / {} GB", gb(&d["used_bytes"]), gb(&d["total_bytes"])) } else { unknown(d["reason"].as_str().unwrap_or("no filesystem sample")) };
+            let _ = writeln!(w, "<div class=\"disk\"><small>{}</small>{}{}</div>", text(&d["id"]), value(&format!("host-disk-{key}-{}", enc(d["id"].as_str().unwrap_or(""))), &shown, p, None), bar(p));
+        }
+        if c["disks"].as_array().is_none_or(Vec::is_empty) || !c["disk_reason"].is_null() { let _ = write!(w, "{}", unknown(c["disk_reason"].as_str().unwrap_or("no filesystem sample"))); }
+        let running = h["taskq"]["observed_running"].as_u64().map_or_else(|| format!("{} running", unknown("no fresh attempt evidence")), |n| format!("{n} observed running"));
+        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Tasks</span><a data-view-link class=\"count-link\" href=\"{}\">{running}</a><a data-view-link class=\"count-link\" href=\"{}\">{} queued</a></div></article>", esc(&query("/projects", id)), esc(&query("/projects", id)), unknown("host-assigned queue not reported; shared work is in Tasks"));
+    }
+    let _ = writeln!(w, "<p class=\"legend\">? Unknown or unavailable · stale values are last known. Online, sign-in and assigned queue need producer probes. Running counts are observed attempts, not complete host totals.</p></section>");
 }
 
-/// The shared host grid: identity and sample age, policy entry, CPU, RAM and every filesystem of one installation.
+/// D8.2: a person and a named action; observations/history remain in host detail.
+fn actions(w: &mut String, doc: &Value, now: u64, query: &str) -> usize {
+    let _ = writeln!(w, "<section id=\"attention\"><h2>Attention</h2><div class=\"action-list\">");
+    let mut count = 0;
+    for b in doc["boards"].as_array().into_iter().flatten() {
+        for q in b["questions"].as_array().into_iter().flatten() {
+            count += 1;
+            let target = format!("/projects?period={}#board-{}-q-{}", doc["period"].as_u64().unwrap_or(1800), enc(b["project"].as_str().unwrap_or("")), text(&q["number"]));
+            let _ = writeln!(w, "<p class=\"action-row\"><span>{} · #{} {}</span><a data-view-link data-board-question=\"{}\" data-task=\"{}\" href=\"{}\">Answer</a></p>", text(&b["project"]), text(&q["number"]), text(&q["title"]), text(&b["project"]), text(&q["number"]), esc(&target));
+        }
+    }
+    for i in doc["attention"]["current"].as_array().into_iter().flatten() {
+        let (target, action) = match i["source"].as_str() {
+            Some("taskq") if i["url"].is_string() => (i["url"].as_str().unwrap().to_string(), "Review failure"),
+            Some("serverq") => (format!("/checks{query}#checks"), "Diagnostics"),
+            _ => continue,
+        };
+        count += 1;
+        let _ = writeln!(w, "<p class=\"action-row\"><span>{} · {} · {}</span><a {} href=\"{}\">{action}</a></p>", text(&i["host"]), text(&i["what"]), at(&i["since"], now), if target.starts_with('/') { "data-view-link" } else { "" }, esc(&target));
+    }
+    if count == 0 { let _ = writeln!(w, "<p>No actions requested.</p>"); }
+    let _ = writeln!(w, "</div></section>");
+    count
+}
+
+/// Host detail: real samples, gaps, policy components and independent source evidence.
 fn servers(w: &mut String, res: &Value, now: u64) {
     let rows = res["rows"].as_array().cloned().unwrap_or_default();
-    let _ = writeln!(w, "<section id=\"servers\">\n<h2>Servers</h2>");
+    let _ = writeln!(w, "<section id=\"servers\">\n<h2>Resource history</h2>");
     if rows.is_empty() {
         let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
         return;
@@ -887,7 +932,7 @@ fn servers(w: &mut String, res: &Value, now: u64) {
 
 /// D13: the TaskQ-owned browser components render these rows; static output keeps source/issue links.
 fn boards(w: &mut String, boards: &[Value]) {
-    let _ = writeln!(w, "<section id=\"boards\" data-boards=\"{}\"><h2>Boards</h2><div class=\"board-blocks\"></div><div class=\"board-fallback\">", esc(&serde_json::to_string(boards).unwrap()));
+    let _ = writeln!(w, "<section id=\"boards\" data-boards=\"{}\"><h2>Tasks</h2><div class=\"board-blocks\"></div><div class=\"board-fallback\">", esc(&serde_json::to_string(boards).unwrap()));
     for b in boards {
         let _ = writeln!(w, "<p><a href=\"{}\">{}</a> · Shared TaskQ blocks require JavaScript.</p>{}", text(&b["url"]), text(&b["project"]), unknown_line(&b["source"]));
         for q in b["questions"].as_array().into_iter().flatten() {
@@ -954,6 +999,83 @@ fn resources(w: &mut String, res: &Value, now: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #170 A1/A2, D8: hosts precede actions; telemetry gaps never imply health or a human request.
+    #[test]
+    fn host_first_actions_and_unknowns() {
+        let doc = crate::fixture_doc();
+        let html = render(&doc, &json!({}));
+        assert!(html.find("id=\"host-grid\"").is_some_and(|p| p < html.find("id=\"attention\"").unwrap()), "hosts must precede Attention");
+        assert!(html.contains("Client sign-in") && html.contains("no login probe"));
+        assert!(html.contains("href=\"/projects?period=1800\""));
+        assert!(!html.contains("class=\"first\""), "obsolete composition is deleted");
+        let actions = &html[html.find("id=\"attention\"").unwrap()..html.find("id=\"source-status\"").unwrap()];
+        assert!(!actions.contains("hooks configured") && !actions.contains("model call errors"));
+        assert!(actions.contains("Diagnostics") && actions.contains("Review failure"));
+        if let Some(out) = std::env::var_os("DASHQ_HOST_FIRST_EVIDENCE") {
+            let dir = std::path::Path::new(&out);
+            std::fs::create_dir_all(dir).unwrap();
+            let example = host_first_review_doc();
+            std::fs::write(dir.join("page.html"), render(&example, &json!({}))).unwrap();
+            std::fs::write(dir.join("data.json"), example.to_string()).unwrap();
+        }
+    }
+
+    /// H6/H7/D18: a superseded installation cannot supply the owner's update state or observation time.
+    #[test]
+    fn review_version_owner_evidence() {
+        let mut d = crate::fixture_doc();
+        d["versions"]["rows"] = json!([
+            {"product":"agentq","host":"fra/native","installation":"old","running":{"version":"0.4.0"},"observation":{"reason":"wrong installation evidence"},"update":{"state":"available"}},
+            {"product":"agentq","host":"fra/native","installation":"inst-fra","running":{"version":"0.5.0"},"observation":{"reason":"owner evidence"},"update":{"state":"current"}}]);
+        let mut html = String::new();
+        host_grid(&mut html, &d, d["generated_at"].as_u64().unwrap());
+        assert!(!html.contains("wrong installation evidence"));
+        assert!(html.contains("owner evidence") && html.contains("version current"));
+        d["versions"]["rows"][1]["running"]["version"] = json!("0.6.0");
+        let mut mixed = String::new(); host_grid(&mut mixed, &d, 0);
+        assert!(!mixed.contains("owner evidence"),"another version receipt cannot qualify the displayed running version");
+        let variant = d["resources"]["rows"][0].clone();
+        d["resources"]["rows"].as_array_mut().unwrap().push(variant);
+        d["resources"]["rows"][2]["host"] = json!("FRA/native");
+        let mut html = String::new(); host_grid(&mut html, &d, 0);
+        assert_eq!(html.matches("class=\"host\"").count(),3,"case variants cannot add a host");
+    }
+
+    /// F1/F6: the approved #169 scenario through the real renderer; unsupported probes stay unknown.
+    fn host_first_review_doc() -> Value {
+        let f: Value = serde_json::from_str(include_str!("../docs/design/host-first-fixture.json")).unwrap();
+        let now = crate::source::iso_secs(f["at"].as_str().unwrap()).unwrap();
+        let mut d = crate::fixture_doc();
+        d["generated_at"] = json!(now);
+        d["hosts"] = json!([]); d["resources"]["rows"] = json!([]); d["versions"]["rows"] = json!([]);
+        let fresh = json!({"state":"ok","at":now-8,"age_s":8,"reason":null});
+        for h in f["hosts"].as_array().unwrap() {
+            let source = |name: &str| {
+                let at = h["evidence"][name]["observed_at"].as_str().and_then(crate::source::iso_secs);
+                json!({"state":if at.is_some_and(|t|now-t<900){"ok"}else{"stale"},"at":at,"age_s":at.map(|t|now-t),"reason":"invented approved design fixture"})
+            };
+            let mut host = json!({"id":h["id"],"freshness":source("AgentQ"),"taskq":{"version":h["products"][0][1],"observed_running":h["running"]},"agentq":{"running":h["products"][1][1]}});
+            host["taskq"]["at"] = source("TaskQ")["at"].clone();
+            d["hosts"].as_array_mut().unwrap().push(host);
+            for p in h["products"].as_array().unwrap() {
+                d["versions"]["rows"].as_array_mut().unwrap().push(json!({"product":p[0].as_str().unwrap().to_ascii_lowercase(),"host":h["id"],"running":{"version":p[1]},"observation":source(p[0].as_str().unwrap()),"update":{"state":match p[2].as_str(){Some("current")=>"current",Some("update available")=>"available",_=>"unknown"}}}));
+            }
+            let bytes = |n: &Value| n.as_u64().map(|n|n*1024*1024*1024);
+            let sample = json!({"at":now-8,"cpu":{"percent":h["cpu"]},"memory":{"used_bytes":bytes(&h["ram"][0]),"total_bytes":bytes(&h["ram"][1])},"disks":h["disks"].as_array().unwrap().iter().map(|disk|json!({"id":disk["id"],"used_bytes":bytes(&disk["used"]),"total_bytes":bytes(&disk["total"])})).collect::<Vec<_>>()});
+            let points: Vec<Value> = if h["name"] == "fra" { f["history"]["cpu"].as_array().unwrap().iter().enumerate().map(|(i,cpu)| {
+                let mut s = sample.clone(); s["at"] = json!(now-1800+i as u64*300); s["cpu"]["percent"] = cpu.clone();
+                s["memory"]["used_bytes"] = json!(bytes(&h["ram"][1]).unwrap()*f["history"]["ram"][i].as_u64().unwrap()/100); s
+            }).collect() } else { vec![sample.clone()] };
+            d["resources"]["rows"].as_array_mut().unwrap().push(json!({"host":h["id"],"installation":h["name"],"runtime":h["kind"],"provenance":"invented-design-fixture","source":if h["cpu"].is_null(){source("AgentQ")}else{fresh.clone()},"current":sample,"history":{"points":points,"samples":points.len()}}));
+        }
+        d["resources"]["to"] = json!(now);
+        let p = &f["project"];
+        let q = p["tasks"].as_array().unwrap().iter().find(|t|t["state"]=="ask").unwrap();
+        d["boards"] = json!([{"project":p["id"],"url":p["board"]["url"],"source":fresh,"tasks":p["tasks"],"counts":{"closed":null},"questions":[{"number":q["n"],"title":q["title"]}],"attempts":p["tasks"].as_array().unwrap().iter().filter(|t|t["state"]=="doing"||t["state"]=="review").map(|t|json!({"task":t["n"],"host":t["host"],"host_id":f["hosts"].as_array().unwrap().iter().find(|h|h["name"]==t["host"]).unwrap()["id"],"current":true})).collect::<Vec<_>>()}]);
+        d["attention"]["current"] = json!([{"source":"serverq","host":"fra/native","what":"failed-services: warn","since":now-120},{"source":"serverq","host":"fra/native","what":"system: low disk (producer finding)","since":now-60}]);
+        d
+    }
 
     /// D19 U1/U2: no configured product -> one real connection entry; a failed board is not first launch.
     #[test]
@@ -1191,17 +1313,17 @@ mod tests {
     /// connected samples on 0–100 %; unknown stays `—` with its reason; zero counters hidden, unknown `?`, Closed
     /// unknown; no demo control, simulated value or threshold mark.
     #[test]
-    fn first_screen_renders_servers_beside_boards() {
+    fn host_detail_retains_resource_and_board_protection() {
         let doc = first_screen_doc();
         let html = render(&doc, &json!({}));
         if let Some(out) = std::env::var_os("DASHQ_FIRST_EVIDENCE") {
             let css = include_str!("../assets/style.css");
             std::fs::write(out, html.replace("<link rel=\"stylesheet\" href=\"/style.css\">", &format!("<style>{css}</style>")).replace("<script src=\"/app.js\" defer></script>\n", "")).unwrap();
         }
-        let first = &html[html.find("<div class=\"first\">").unwrap()..html.find("<section id=\"resources\">").unwrap()];
-        // Attention above both columns, servers before Boards, deeper views after
-        assert!(html.find("id=\"attention\"").unwrap() < html.find("class=\"first\"").unwrap() && first.find("id=\"servers\"").unwrap() < first.find("id=\"boards\"").unwrap());
-        for id in ["agents", "hosts", "checks", "resources"] {
+        let first = &html[html.find("<section id=\"servers\">").unwrap()..html.find("<section id=\"resources\">").unwrap()];
+        // Host grid first; resource detail and shared boards keep their risk checks.
+        assert!(html.find("id=\"host-grid\"").unwrap() < html.find("id=\"attention\"").unwrap() && first.find("id=\"servers\"").unwrap() < first.find("id=\"boards\"").unwrap());
+        for id in ["agents", "checks", "resources"] {
             assert!(html.contains(&format!("<section id=\"{id}\">")), "{id}");
         }
         assert_eq!(first.matches("<article class=\"node\"").count(), 4);

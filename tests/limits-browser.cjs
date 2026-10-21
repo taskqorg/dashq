@@ -28,7 +28,7 @@ async function open(browser, {grants, submit, lookup}) {
     if (path.startsWith('/api/taskq/resources/v1/operations/')) return json(...lookup());
     return route.fulfill({contentType: 'text/html', body: html});
   });
-  await page.goto('http://fixture/');
+  await page.goto('http://fixture/integrations');
   await page.waitForFunction(() => !busy);
   const inst = await page.locator('.node-policy').evaluate(el => JSON.parse(el.dataset.taskqGroups)[0].targets[0].target.installation_id);
   // a second registered runtime the grant below does not cover

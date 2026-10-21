@@ -18,7 +18,7 @@ jobs:
       - run: node tests/resources.cjs
       - name: cargo checks
         run: |
-          DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" cargo test --locked
+          DASHQ_HOST_FIRST_EVIDENCE="$RUNNER_TEMP/host-first" DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" cargo test --locked
           cargo run -- selftest
       - name: shared resource browser chain
         run: |
@@ -30,3 +30,4 @@ jobs:
           DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" node tests/startup-browser.cjs
           DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" node tests/findings-browser.cjs
           DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" node tests/limits-browser.cjs
+          DASHQ_HOST_FIRST_EVIDENCE="$RUNNER_TEMP/host-first" node tests/host-first-browser.cjs
