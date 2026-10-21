@@ -1,6 +1,6 @@
 # Project boards
 
-Candidate #169 places boards in on-demand Tasks under [host-first composition](first-screen.md); owner visual approval pending, running page unchanged. TaskQ owns interiors; historical dashboard previews do not override them.
+Approved #169 design places boards in on-demand Tasks under [host-first composition and owner acceptance](first-screen.md); running page unchanged. TaskQ owns interiors; historical dashboard previews do not override them.
 
 Accepted block under [D10](../../dashq.md#d10-dashboard-redesign-target); apply [specq W13–W15](https://github.com/taskqorg/specq/blob/main/design/dashboards.md#project-board-summaries). [Editable reference](boards-reference.html) contains explicitly synthetic tasks and counts.
 

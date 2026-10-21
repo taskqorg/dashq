@@ -1,6 +1,6 @@
 # Host-first dashboard
 
-Owner requirement: #169 A1–A5, replacing the previous Attention/servers/Boards composition under [D8–D10](../../dashq.md#d8-page). **Candidate, awaiting owner visual approval.** No Rust implementation, deployment or new action authority is part of this change.
+Approved design: #169 A1–A5, replacing the previous Attention/servers/Boards composition under [D8–D10](../../dashq.md#d8-page). The owner [approved option 1](https://github.com/taskqorg/dashq/issues/169#issuecomment-6318252313): deliver the documentation PR and retain the listed implementation/qualification gaps. The reviewed specification and five screens are at commit `74ff807fcb0a0129624f0cc84312c318afa94f84`; this acceptance record changes no visuals. No Rust implementation, deployment or new action authority is part of this change.
 
 ## First screen
 
@@ -51,11 +51,11 @@ Current section inventory checked against src/page.rs, resource.rs, clients.rs, 
 
 ## Published reference
 
-Candidate editable [prototype](host-first-preview.html), [fixtures](host-first-fixture.json), [capture/check recipe](host-first-check.cjs) and [manifest](evidence/host-first/manifest.json). All hosts, versions, capacities, login/queue probes and findings are invented. Navigation covers Hosts, one detail and Tasks; auxiliary destinations explain the preview gap. No writes, live API or simulated success receipt.
+Approved editable [prototype](host-first-preview.html), [fixtures](host-first-fixture.json), [capture/check recipe](host-first-check.cjs) and [manifest](evidence/host-first/manifest.json). All hosts, versions, capacities, login/queue probes and findings are invented. Navigation covers Hosts, one detail and Tasks; auxiliary destinations explain the preview gap. No writes, live API or simulated success receipt.
 
 TaskQ project/answer assets are consumed unchanged from [release provenance](../../assets/taskq/provenance.json), with [design-source hashes](../../assets/taskq/project-blocks.sources.json). Parent-to-child map: TaskqProjectBlocks.summary/task/handle → Tasks; TaskqAnswerCard.render → selected read-only question. Only outer placement/width differ. [Resource assets](../../assets/taskq/sources.json) remain pinned; no editor is redrawn. [Boards](boards.md#release-and-adapter-gaps) names missing full-workspace/control/source contracts. These captures do not prove B4 native/browser conformance.
 
-Previous [fragment](first-screen-reference.html), [preview](first-screen-preview.html) and [manifest](first-screen-reference.sources.json) remain historical, not composition authority for this candidate. Chart semantics/provenance remain usable in detail; approximations are not a source for task controls.
+Previous [fragment](first-screen-reference.html), [preview](first-screen-preview.html) and [manifest](first-screen-reference.sources.json) remain historical, not composition authority for this design. Chart semantics/provenance remain usable in detail; approximations are not a source for task controls.
 
 ## Review and acceptance
 
@@ -71,4 +71,4 @@ Five requested review captures (at most ten): Hosts 1280 light/dark, Hosts 360 d
 
 Run `node docs/design/host-first-check.cjs` with Playwright on NODE_PATH and Chromium installed (or DASHQ_CHROME); add --capture to regenerate images. It checks routes/Back/reload, shared rendering, no writes, overflow and fixture meaning; manifest records hashes, environment and geometry. Documentation checks cover shrinkage/preservation/links/no Rust diff. No production gate changes.
 
-A1–A4: candidate requirements and mapping supplied; producer gaps stay unknown. A5: captures for review; **owner approval pending**. Multiple actual refreshes, draft recovery, live online/login/assigned-queue sources, full shared controls, native tray and authorized actions are **not tested here**. Retain D11–D19 qualification. Design acceptance requires an owner answer under TaskQ § 7 before result/close; record it before changing this status.
+A1–A5: specification, preservation mapping and five fixture screens **approved by the owner** in the linked answer under TaskQ § 7. Producer gaps stay unknown. Multiple actual refreshes, draft recovery, live online/login/assigned-queue sources, full shared controls, native tray and authorized actions are **not tested here**. Retain D11–D19 qualification; design approval does not establish implementation or production readiness.

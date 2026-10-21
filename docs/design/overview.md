@@ -1,6 +1,6 @@
 # Host resources
 
-Candidate #169 under [D8–D10](../../dashq.md#d8-page), awaiting owner visual approval. [First screen](first-screen.md) owns placement; [specq W1–W15](https://github.com/taskqorg/specq/blob/fea6e540efa6971c5739453b198183cbb3fb010d/design/dashboards.md) owns shared behavior. No Rust or producer contract changes.
+Approved #169 design under [D8–D10](../../dashq.md#d8-page); [first screen](first-screen.md) records owner acceptance and owns placement. [specq W1–W15](https://github.com/taskqorg/specq/blob/fea6e540efa6971c5739453b198183cbb3fb010d/design/dashboards.md) owns shared behavior. No Rust or producer contract changes.
 
 ## Overview and detail
 
@@ -12,6 +12,6 @@ Host detail: CPU/RAM 30 min trends on a shared 0–100% scale, disk history, fil
 
 Keep automatic 60 s refresh, immediate new values, about 1.3 s local neutral tint; no transitions under reduced motion. Delta uses percentage points. Numeric rise alone proves neither failure nor recovery. Preserve rows, focus, disclosures, selection, drafts, scroll; failed refresh retains values, ages and reason.
 
-Older [resource fragment](overview-reference.html), SHA-256 fae9772c872d5dfc3128886b598328b298f7d0f8b5873509f3a2465c1a0d41ae, remains historical chart/update evidence. Placement, sample button, capacities and 85/90% limits are illustrative. [Host-first prototype](host-first-preview.html) is the candidate composition; no synthetic data enters a live view.
+Older [resource fragment](overview-reference.html), SHA-256 fae9772c872d5dfc3128886b598328b298f7d0f8b5873509f3a2465c1a0d41ae, remains historical chart/update evidence. Placement, sample button, capacities and 85/90% limits are illustrative. [Host-first prototype](host-first-preview.html) is the approved composition; no synthetic data enters a live view.
 
 Acceptance: HF1/HF4, long names, several disks, unknown total/history, 16/20 px, 360/1280, both themes/reduced motion. Multiple actual refreshes, threshold transitions and live producer samples still need runtime evidence; a static drawing cannot qualify them.

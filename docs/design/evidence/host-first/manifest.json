@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "kind": "proposal-fixture-evidence",
+  "kind": "accepted-design-fixture-evidence",
   "base": "e7d0fe8f7c001a2f641604859a22a0617da8b9e9",
   "hashEncoding": "Source: UTF-8 LF (checkout CRLF normalized); PNG: raw bytes",
   "rules": [
@@ -14,7 +14,12 @@
     "firstSection": "attention",
     "requestedA1": "FAIL (fixture/page.html; not a new live capture)"
   },
-  "ownerApproval": "pending",
+  "ownerApproval": {
+    "state": "approved",
+    "answer": "https://github.com/taskqorg/dashq/issues/169#issuecomment-6318252313",
+    "reviewedCommit": "74ff807fcb0a0129624f0cc84312c318afa94f84",
+    "scope": "Specification and five fixture screens; implementation and qualification gaps retained"
+  },
   "screens": [
     {
       "file": "hosts-1280-light.png",
@@ -358,15 +363,15 @@
     }
   ],
   "hashes": {
-    "dashq.md": "74d357c43de8c8776f58483f7c97a62183b5d4d19904de580926d69521289689",
-    "docs/design/first-screen.md": "b6dfe47753c230e410900441bbe1c600c77748aeb14ea8373444093208de782b",
-    "docs/design/overview.md": "9d0940ef3c3f0b774e2d09197f47de354dec731e268ebf7e1bb55743e61c317d",
-    "docs/design/boards.md": "807eabd28d0eebce975579178b75bc8de5cd0b43704e95a3344e4d9f9d9439f0",
-    "docs/design/connections.md": "79f59c3c35d33d94e86f44e27dbcbcd2041455a8876250524f37359d92c6af4f",
+    "dashq.md": "4c85b4eb28af523ca591b25032123559c23805adfad10165ba4262142c5336bf",
+    "docs/design/first-screen.md": "9d0a93a25bae9d71f8091d1e782dd82e7407dbd383e01ad2db65403b0b0c0740",
+    "docs/design/overview.md": "44fb0d7d531b0c187bcc24a320d2d0f595f5894979d90f39bfd12b726029df98",
+    "docs/design/boards.md": "c3d442e94564fb477aa3d709c184a820a07c326dc276e2431d0fc5b579c114cb",
+    "docs/design/connections.md": "31eedb0132ad965285840fd3df331c032ea528897b279a674ada61ef683d5b67",
     "docs/design/optimization-results.md": "5a0f7c5653bec9037c3753360f29ae3dbf33274e6180312162f9c8cebd96d8d9",
     "docs/design/host-first-preview.html": "bc9b6918e99799b4de5872a6b028cc5d3d385250efbacaf84eeb7973104f892d",
     "docs/design/host-first-fixture.json": "29f0c5c7e90262351ff049f225263298d7ed1bf3a8ef783afaa89c2f23957a09",
-    "docs/design/host-first-check.cjs": "7f6d7114ee8698dedf7372e3b7cc835df37e79dcabae01b828ad091674c6ed83",
+    "docs/design/host-first-check.cjs": "b1bae8ac7dd81f306d06834357e6a3d4110e58026a6d51b90df991e09c50900a",
     "fixture/page.html": "91e3dda63d5f39ec6b82f3f4a75e3f494df9b2f7eef37a1e1c6565a46d30d9be",
     "assets/taskq/project-blocks.js": "e63affe681aad856ee785fae6bff4dbc90541c84c4aca280b7b68e6f570c5238",
     "assets/taskq/project-blocks.css": "1a2471d13a850a66eb3f8ea9f5745ad2fa3bad1ce67305173d17ba1ae2f0ca64",
@@ -400,7 +405,7 @@
   ],
   "documentation": {
     "lines": 167,
-    "bytes": 50957,
+    "bytes": 50907,
     "baseline": {
       "lines": 200,
       "bytes": 58653

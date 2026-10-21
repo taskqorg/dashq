@@ -9,12 +9,12 @@ const htmlPath = 'docs/design/host-first-preview.html';
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'host-first-fixture.json')));
 const hash = p => crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p))).digest('hex');
 const canonicalHash = p => crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n')).digest('hex');
-const manifest = {schema:1,kind:'proposal-fixture-evidence',base:'e7d0fe8f7c001a2f641604859a22a0617da8b9e9',hashEncoding:'Source: UTF-8 LF (checkout CRLF normalized); PNG: raw bytes',
+const manifest = {schema:1,kind:'accepted-design-fixture-evidence',base:'e7d0fe8f7c001a2f641604859a22a0617da8b9e9',hashEncoding:'Source: UTF-8 LF (checkout CRLF normalized); PNG: raw bytes',
   rules:['TaskQ R12/R13, § 7','DashQ D6/D8–D22','specq W1–W15/F1–F7'],
   defect:'Baseline fixture places Attention, connections and integrations before hosts; owner A1 requires hosts first.',
   retainedProtection:'Unknown data never becomes healthy or zero; shared TaskQ assets/authority stay unchanged.',
   baseline:{firstSection:'attention',requestedA1:'FAIL (fixture/page.html; not a new live capture)'},
-  ownerApproval:'pending',screens:[],matrix:[],hashes:{},notTested:['live online/login/host-queue producers','full tray workspace/control release','production automatic refresh and draft recovery','native tray conformance','authorized writes','deployment']};
+  ownerApproval:{state:'approved',answer:'https://github.com/taskqorg/dashq/issues/169#issuecomment-6318252313',reviewedCommit:'74ff807fcb0a0129624f0cc84312c318afa94f84',scope:'Specification and five fixture screens; implementation and qualification gaps retained'},screens:[],matrix:[],hashes:{},notTested:['live online/login/host-queue producers','full tray workspace/control release','production automatic refresh and draft recovery','native tray conformance','authorized writes','deployment']};
 manifest.reviewFixes=[
   {defect:'Host summary was global and project navigation dropped host',before:'Read-only review: fra rows Doing 1/Review 1/Ready 1 but counters Doing 2/Ready 2/Ask 1',after:'Scoped counter and project-navigation assertions PASS'},
   {defect:'Product/login observations had no separate fixture times',before:'Read-only review: host age reused, product times omitted',after:'Independent producer/probe/release times in fixtures and accessible cells PASS'},
