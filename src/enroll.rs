@@ -2026,14 +2026,17 @@ lines", "recommended": true}]}])),
         let row = doc["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap().clone();
         assert_eq!((&row["projected"], &row["snapshot"]["schema"]), (&json!(true), &json!("taskq-board/1")));
         let l = &row["project_limits"];
-        assert_eq!((&l["state"], &l["age_s"], &l["reason"]), (&json!("ok"), &json!(61), &Value::Null), "{l}");
+        // age from the document's own clock: the route reads the wall clock again, maybe one second after `now`
+        let age = doc["generated_at"].as_i64().unwrap() - res["payload"]["observed_at"].as_i64().unwrap();
+        assert!((61..=62).contains(&age), "{age}");
+        assert_eq!((&l["state"], &l["age_s"], &l["reason"]), (&json!("ok"), &json!(age), &Value::Null), "{l}");
         assert_eq!(l["targets"], json!([{"project_id": "project-1", "runtime_id": "codex", "policy_schemas": ["taskq.project-limits/1"], "current_revision": "1".repeat(64), "limit": 1,
             "effective_revision": null, "effective": null, "blockers": [{"code": "sample", "knowledge": "unknown"}], "completeness": "unknown"}]));
         let ver = doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap().clone();
         assert_eq!((ver["provenance"].as_str(), ver["reason"].as_str()), (Some("enrollment"), None));
         let html = crate::page::render(&doc, &json!({}));
         assert!(html.contains("✓ Connected") && !html.contains("unsupported snapshot schema"), "{html}");
-        assert!(html.contains("Project limits: observed 61s ago"), "{html}");
+        assert!(html.contains(&format!("Project limits: observed {age}s ago")), "{html}");
         assert!(html.contains("project-1 · codex: limit 1 · effective <span class=\"unknown\" title=\"unknown: sample unknown\">—</span> · unknown"), "{html}");
     }
 
