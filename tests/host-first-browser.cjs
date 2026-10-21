@@ -28,6 +28,7 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       await page.goto('http://fixture/');
       await page.waitForFunction(()=>!busy);
       await page.addStyleTag({content:`html{font-size:${size}px}`});
+      assert.equal(await page.locator('body').evaluate(e=>getComputedStyle(e).fontSize),size+'px','keep requested text size');
       assert(await page.locator('#host-grid').isVisible());
       assert(!await page.locator('#boards').isVisible());
       assert(!await page.locator('#servers').isVisible());
@@ -42,7 +43,8 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       await page.evaluate(()=>navigateView(new URL('/',location.origin)));
       await page.waitForFunction(()=>!busy);
       const grid = await page.locator('#host-grid').boundingBox(), attention = await page.locator('#attention').boundingBox();
-      assert(grid.y < 220 && grid.y < attention.y,'hosts start first');
+      assert.equal(await page.locator('#main > section:visible').first().getAttribute('id'),'host-grid','hosts are the first visible section');
+      assert(grid.y < page.viewportSize().height && grid.y < attention.y,'hosts start in the first viewport before Attention: '+JSON.stringify({width,size,theme,grid,attention}));
       for (const view of ['/', '/hosts', '/projects']) {
         await page.evaluate(url=>navigateView(new URL(url,location.origin)), view);
         await page.waitForFunction(()=>!busy);
