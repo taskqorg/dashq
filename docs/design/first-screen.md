@@ -75,4 +75,4 @@ A1–A5: specification, preservation mapping and five fixture screens **approved
 
 ## Runtime implementation
 
-[#170 review package](host-first-runtime.md) compares the real renderer with these approved fixtures. The five runtime pictures need owner review; this design approval does not approve their implementation or production deployment.
+[#170 review package](host-first-runtime.md) compares the real renderer with these approved fixtures. The owner [approved the five runtime screens](https://github.com/taskqorg/dashq/issues/170#issuecomment-6319532742) at `eaabcc879ff51505d5ce29027e00c7558a80e034`; the PM owns the two named TaskQ handoffs. A1 live qualification and CI acceptance remain open; no production deployment is approved by this screen acceptance.

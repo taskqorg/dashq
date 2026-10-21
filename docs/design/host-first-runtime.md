@@ -1,6 +1,6 @@
 # Host-first runtime review (#170)
 
-The runtime implements the [approved #169 composition](first-screen.md) under D8–D10/D22 and R13. This is an implementation review package, not owner acceptance or a deployment receipt.
+The runtime implements the [approved #169 composition](first-screen.md) under D8–D10/D22 and R13. The owner [approved the five runtime screens](https://github.com/taskqorg/dashq/issues/170#issuecomment-6319532742) at `eaabcc879ff51505d5ce29027e00c7558a80e034` under TaskQ § 7, assigning the two named TaskQ handoffs to the PM and keeping A1 live qualification and CI acceptance open. This is not a deployment receipt.
 
 ## Behavior and preservation
 
@@ -22,7 +22,7 @@ Five runtime captures, compared with the same invented host/task/resource scenar
 | [Host detail](evidence/host-first-runtime/host-detail.png) | Real fixture sample history and existing evidence; no history from a single reading. |
 | [Tasks](evidence/host-first-runtime/tasks.png) | Pinned shared rows, counters and answer card; full tray controls remain unavailable. |
 
-[Manifest](evidence/host-first-runtime/manifest.json) identifies renderer/asset hashes, Chromium, platform, matrix cells and untested claims. Captures are Windows/Chromium fixture evidence, not Linux production or native-tray qualification. The owner must accept this runtime set before close (A5, TaskQ § 7).
+[Manifest](evidence/host-first-runtime/manifest.json) identifies renderer/asset hashes, Chromium, platform, matrix cells and capture-time untested claims. The manifest predates the owner answer; its images and measured source hashes remain unchanged. Captures are Windows/Chromium fixture evidence, not Linux production or native-tray qualification. The linked owner answer records runtime visual acceptance (A5, TaskQ § 7).
 
 ## Checks and gaps
 
@@ -45,6 +45,6 @@ TaskQ-owned gaps have these concrete handoff task names:
 1. **Publish shared browser task workspace and controls for DashQ** — versioned tray-compatible detail/menu API, capabilities, expected revisions, operation IDs, receipts, fixtures and release hashes. Start, Stop, Later, Close and Retry cannot be imitated here; ordinary answers and released resource controls keep their existing gates.
 2. **Publish scoped host online, client-login and assigned-queue observations for DashQ** — explicit producer identity/scope, observation/probe time, validity and completeness; no inference from activity, silence or global board counts.
 
-These are **unfiled handoffs**, not completed or linked TaskQ tasks. Filing the first through the worker failed with `TASKQ_ROOT ... is not the project of the current directory`; the worker did not bypass the project guard. An owner/PM must file/read back the held TaskQ tasks and supply their links. A3 therefore remains incomplete. #169 already approved retaining the capability gaps; no replacement control contract is adopted here.
+These are **unfiled handoffs**, not completed or linked TaskQ tasks. Filing the first through the worker failed with `TASKQ_ROOT ... is not the project of the current directory`; the worker did not bypass the project guard. The owner assigned filing/readback and supplying their links to the PM. A3's handoff filing therefore remains open. #169 already approved retaining the capability gaps; no replacement control contract is adopted here.
 
-Production deployment, representative live-source readback at `dash.ufobe.com`, Linux runtime qualification and owner acceptance of the five runtime pictures remain unverified (A1/A5). No release or deployment was performed.
+Production deployment, representative live-source readback at `dash.ufobe.com`, Linux runtime qualification and CI acceptance remain unverified (A1/R12). A5 runtime screen approval is recorded above. No release or deployment was performed.
