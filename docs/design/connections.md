@@ -4,6 +4,8 @@ Accepted visual scenario under [D11](../../dashq.md#d11-independent-product-conn
 
 ## L1. One list, independent states
 
+Approved #169 placement ([owner acceptance](first-screen.md)): More → Connections (/integrations) and host detail, not above hosts. Default: current active/pending records. Explicit stale/superseded/revoked filters show counts/history. A direct installation/approval anchor reveals its row even when filtered. Expected hosts, resource warnings and non-ok ages stay visible in the overview. No deletion, credential revival or identity change.
+
 Each product installation has a stable row with product, owner label, native/WSL runtime, connection state and observation age. Keep transport, producer freshness and downstream export separate. A recent receipt never refreshes an old observation. Disconnected/revoked rows keep history in detail, not active-failure counts. Unknown host activity must not be called stopped.
 
 Select a row for identity, version, authorized scope, current evidence and lifecycle actions. Equal host labels never merge installations; product enrollment never inherits another product's authority. The same composition supports AgentQ, ServerQ-only and TaskQ-only installations. Show no dependency on Langfuse for ServerQ or TaskQ.

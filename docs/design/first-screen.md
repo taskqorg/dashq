@@ -1,78 +1,74 @@
-# Combined first screen
+# Host-first dashboard
 
-Accepted composition under [D10](../../dashq.md#d10-dashboard-redesign-target): Attention above servers and project boards side by side, with TaskQ resource controls reached from each node. Approval covers placement; the demo's approximated TaskQ styling and simplified controls are not a replacement design.
+Approved design: #169 A1–A5, replacing the previous Attention/servers/Boards composition under [D8–D10](../../dashq.md#d8-page). The owner [approved option 1](https://github.com/taskqorg/dashq/issues/169#issuecomment-6318252313): deliver the documentation PR and retain the listed implementation/qualification gaps. The reviewed specification and five screens are at commit `74ff807fcb0a0129624f0cc84312c318afa94f84`; this acceptance record changes no visuals. No Rust implementation, deployment or new action authority is part of this change.
+
+## First screen
+
+Header: Hosts, Tasks and More; Attention count links directly to the action list. Hosts is the initial view. More exposes existing supporting routes, Connect and Langfuse links. One full-width host grid comes first, followed by short Attention. No board totals, installation inventory, charts or diagnostic tables precede the hosts.
+
+Each row shares these columns at 1280 px: host/kind and online evidence/age; TaskQ, AgentQ and ServerQ running versions with update state; Claude/Codex sign-in and probe age; CPU; RAM used/total; every disk used/total; running and host-assigned queued tasks. Selecting the name opens host detail; selecting a count opens Tasks filtered to that host. Queue includes only explicitly assigned pending work; unassigned board work stays separately visible in Tasks. Running means current attempt evidence, not responsive execution. Preserve identities under [H1–H7](hosts.md); never join by friendly label.
+
+Online/offline needs an authoritative producer probe, scope, reason and validity window. Until supplied, show Unknown and newest observation age, including last seen for stale hosts; receipt time is not observation time. Each product/login retains its own time in accessible detail. Freshness of one product cannot make another healthy. Missing sources show `?` with accessible reasons and one visible legend. Revoked grants never supply current state.
+
+Attention lists human actions, not a telemetry inventory. Each row names affected host/task, current reason, age and one direct action. Examples: expired login → host sign-in instructions; failed unit → diagnostics; producer-confirmed low disk → exact finding; question → existing TaskQ card. Inspecting grants no repair command. Unknown/stale values stay beside affected host values and in Source status, with all reasons; only an evidenced intervention enters Attention. An empty list says No actions requested, never All healthy.
+
+At 360 px each host reflows into the same labelled groups, without smaller type or sideways scrolling. Default main type is 16 px, supports 20 px and system scaling; more hosts scroll normally. Never reorder on refresh. [Overview](overview.md) owns detail charts/updates.
+
+## Scenarios and coverage
+
+| ID | Initial state and intent | Observable result / exception |
+|---|---|---|
+| HF1 (A1) | Several hosts; find where work runs | Grid exposes products, logins, resources, running/assigned queue and per-field evidence. Missing probes stay unknown. |
+| HF2 (A2) | Login expired, failed unit, low disk or question | Direct action identifies host/task. No automatic sign-in, repair or task mutation. Silence/revocation alone adds no failure. |
+| HF3 (A3) | Open a count, then question | Tasks retains host scope, shared rows/card, one editor per revision. Unassigned/unknown assignment stays explicit; missing workspace release never permits a copy. |
+| HF4 (D6/D19) | Source failure, recovery, missing history | Retain values/ages/reasons and drafts; no healthy/zero substitution, invented trend, cleared incident or stale action capability. |
+| HF5 (D22) | Detail, Back, reload/shared URL | Path/filters identify the view; Back restores local position. Unknown route gives recovery. Prototype covers three routes only. |
+| HF6 (D11) | Find inactive installation or add service | More → Connections, explicit inactive filter, history intact. Existing approval/readback/revoke protections retained. |
+
+## Preservation ledger
+
+Current section inventory checked against src/page.rs, resource.rs, clients.rs, agent_work.rs, optimization.rs and findings. No current capability is deleted.
+
+| Current section / capability | Destination and retained behavior |
+|---|---|
+| First launch | No installations: one Connect entry, U1/L2; no invented hosts/empty product panels. |
+| Hosts / server resources | First screen: identity, ages, resources, versions, tasks. Host detail: real 30 min CPU/RAM trends, disk history, gaps/resets/warmup and evidence. |
+| Attention current problems | First screen only with person/action; coverage/routing/hook records remain host → Agent use until actionable intervention is identified. |
+| Observation gaps / source summary | Collapsed Source status with non-ok count; affected host values retain unknown/stale meaning and age. |
+| Incidents / findings | Host → Checks or /checks; deduplicated, separate from current problems, same episode identity/evidence. Linked tasks retained; creation D15-gated. |
+| Boards / questions / failures | Tasks (/projects), shared TaskQ blocks, Board links, all states/coverage, single answer editor and D13 authority. Unassigned queue stays here. |
+| Work mode / project limits | Host → TaskQ or project's policy entry; shared component, D14 grants/readback; no host commands. |
+| Connections / approval / revoke | More → Connections (/integrations), current by default; stale/superseded/revoked filters retain history. Direct inactive/approval anchors reveal the record. Expected hosts never disappear solely due to staleness. |
+| Agent integrations | Host detail or /integrations; aliases, overrides, conflicts, routing and existing plan/apply/readback gates (D16). |
+| Agents / Clients | Host → Agent use or /agents; activity, per-model sample counts, reported costs, routing/hooks/MCP and #116/#131 observations. Login is separate. |
+| Optimization | /agents; P1–P3 accounting, coverage, event-time buckets, separate unqualified whole-task experiments. |
+| Agent work | /agents; D21 attempt stages, host/runtime, timing, usage coverage and unknowns; configured logs only. |
+| Services / host updates | Grid summaries; /services or host detail for selected/available/running/health/lifecycle, libraries and source times. No lifecycle control. |
+| Server checks | Host detail or /checks; per-rule details, manual rules not verified, incidents, catalog-qualified evidence. |
+| Diagnostics / process counters / export / telemetry | Relevant host/installation detail, reset/coverage semantics, no raw commands/output/secrets. D20 profile retained; stored TaskQ telemetry analysis still unimplemented. |
+| Header filters / Langfuse links / JSON / report | More and detail retain D7 filters/links; API/report, periods, cadence, cache and caps unchanged. |
+| Previously retired ServiceQ | Node snapshots/services/failure receipts, legacy compression/RTK/Headroom counters, updater snapshot state and retry countdowns stay removed (agentq#50). ServerQ now direct D4.3; monitor TaskQ status never implemented; Langfuse dashboard provisioning excluded by D1. |
 
 ## Published reference
 
-Use [the accepted fragment](first-screen-reference.html) or [the standalone preview](first-screen-preview.html). [Source manifest](first-screen-reference.sources.json) pins TaskQ design commit `75757d5d843159726a2ea44ca1615f9cf7fd18fd`, component source paths and SHA-256 hashes. This is a design revision, not a claim that shared production assets are released.
+Approved editable [prototype](host-first-preview.html), [fixtures](host-first-fixture.json), [capture/check recipe](host-first-check.cjs) and [manifest](evidence/host-first/manifest.json). All hosts, versions, capacities, login/queue probes and findings are invented. Navigation covers Hosts, one detail and Tasks; auxiliary destinations explain the preview gap. No writes, live API or simulated success receipt.
 
-| Block | Exact parent at the pinned revision |
+TaskQ project/answer assets are consumed unchanged from [release provenance](../../assets/taskq/provenance.json), with [design-source hashes](../../assets/taskq/project-blocks.sources.json). Parent-to-child map: TaskqProjectBlocks.summary/task/handle → Tasks; TaskqAnswerCard.render → selected read-only question. Only outer placement/width differ. [Resource assets](../../assets/taskq/sources.json) remain pinned; no editor is redrawn. [Boards](boards.md#release-and-adapter-gaps) names missing full-workspace/control/source contracts. These captures do not prove B4 native/browser conformance.
+
+Previous [fragment](first-screen-reference.html), [preview](first-screen-preview.html) and [manifest](first-screen-reference.sources.json) remain historical, not composition authority for this design. Chart semantics/provenance remain usable in detail; approximations are not a source for task controls.
+
+## Review and acceptance
+
+Five requested review captures (at most ten): Hosts 1280 light/dark, Hosts 360 dark, host detail, Tasks. The owner request explicitly includes theme/width variants. Matrix checks cover 16/20 px, both themes, 360/1280 widths, long labels, unknowns and reduced motion without publishing duplicate pictures. Inspect at natural size; geometry is not live-source evidence.
+
+| Screen | Review question |
 |---|---|
-| Aggregate/project counters | `docs/design/menu-next-variants.html`: `counts`, parent counter CSS; K-A8 right alignment, including wrapped lines |
-| Work mode | Same source: `resourceEditor`, `work`, `scopeReview`; full review content, not the old two-field form |
-| Answer card | `docs/design/plans-and-decisions.html`: `question` and its CSS; source-numbered choices, Other answer and Checked & context |
-| Board identity and appearance | `docs/design/assets/github.svg`, `visual-style.md`; icon names supplied by parent functions |
+| [Hosts · 1280 light](evidence/host-first/hosts-1280-light.png) | Are host state, versions, sign-in, resources and counts readable together? |
+| [Hosts · 1280 dark](evidence/host-first/hosts-1280-dark.png) | Are warning and unknown meanings legible in dark theme? |
+| [Hosts · 360 dark](evidence/host-first/hosts-360-dark.png) | Does one host remain usable as labelled groups? |
+| [Host detail](evidence/host-first/host-detail.png) | Are trends, actions and evidence available without crowding the overview? |
+| [Tasks](evidence/host-first/tasks.png) | Are shared rows/answers and the full-workspace release gap explicit? |
 
-The five parent render functions are included unchanged. The manifest names the fixture/placement adapters. All counters align right; capsule gaps and source order stay unchanged. Supersedes prior combined chat demos and the old board/answer mocks as the visual integration reference. Earlier resource files remain only chart/data examples. Implementers must use the pinned reference and qualify later parent revisions explicitly.
+Run `node docs/design/host-first-check.cjs` with Playwright on NODE_PATH and Chromium installed (or DASHQ_CHROME); add --capture to regenerate images. It checks routes/Back/reload, shared rendering, no writes, overflow and fixture meaning; manifest records hashes, environment and geometry. Documentation checks cover shrinkage/preservation/links/no Rust diff. No production gate changes.
 
-The preview keeps simulated actions and parent-fixture limitations visible: fixed selected projects, example scope interpretation and receipts do not establish working production controls. Preserve B1-B4 and D13/D14 live-action gates. A missing capability is not permission to copy the simulation into production.
-
-Verification: browser rendering and right-edge checks at 1024 px/16 px light and 360 px/20 px dark, plus TaskQ parent counter navigation/zero/unknown checks. Natural-size images inspected. Native tray and real source/action integration are not qualified by this publication.
-
-## Layout
-
-```text
-Header and source freshness
-Attention: current problems and observation gaps
-Servers                             Boards
-  identity + TaskQ policy summary     TaskQ aggregate/project summaries
-  CPU trend | RAM bar/trend | disks   TaskQ task rows and inline answer
-  one row per installation/runtime    question and failure details
-  shared Work mode detail on demand
-Supporting views, history and diagnostics
-```
-
-- At the 1024 px reference width, use roughly three fifths for servers and two fifths for boards. Tune available width from the parent component's fit; do not force fixed columns through large text or long names.
-- Keep all four fixture nodes, six project identities, CPU/RAM trends and every filesystem visible in the overview. No duplicate permanent node list for limits. Policy summary stays with its stable installation/runtime identity and opens that target's shared editor.
-- Attention stays above both columns. Its task links reveal the existing card in Boards; no second answer form. Unknown sources remain explicit and never contribute invented zeros to totals.
-- Default: one representative question expanded for review; Work mode closed until requested. Preserve the user's actual disclosures on refresh. A full editor/review can expand into the available page width, with the target and return route intact; it need not fit inside the narrow server column.
-- Default main text is 16 px, with 20 px supported. A first-screen target is not a fixed height or a reason to shrink text, charts or controls. Reflow to one column when needed; allow normal page scrolling for large text, more nodes or expanded details. Measure the usable browser viewport including chrome, not a full-document screenshot.
-- Keep resource window/scale, units, source age, warnings and missing-data reasons legible. [Overview](overview.md) owns the chart/update requirements. Deeper board, agent, version, check, history and diagnostic routes remain available.
-
-## TaskQ children
-
-Use [TaskQ shared-blocks B1–B4](https://github.com/taskqorg/taskq/blob/main/docs/design/shared-blocks.md) for project summaries, counters, task/answer rows and node/Work mode controls. DashQ owns placement, available width and adapters; TaskQ owns block interiors and compact variants. Pin and verify the parent design revision plus released component/assets and fixtures.
-
-| Demo discrepancy | Required inherited result |
-|---|---|
-| Generic board-shaped icon used as Board | TaskQ provider Board asset and configured link; `panels-top-left` remains detach |
-| Work total, fixed five-state strip and zero slots | Canonical TaskQ state capsules/order, separate Doing/Review, hidden zero, explicit unknown, Later and quiet Closed |
-| Plain colored numbers and approximate theme values | Parent capsule treatment, exact theme/type/spacing tokens and assets |
-| Simplified question body and synthetic nonlinks | Parent linked task flow, original Done/Problem/evidence, exact choices and receipt states |
-| Independent Auto/Fixed + maximum form | Compact entry to the complete shared Work mode editor, explicit scopes, Mixed, overrides, review and readback |
-| Demo reply immediately subtracts a count | Receipt stays local; counters change only with the canonical source snapshot |
-| Missing freshness and reduced unit labels | Producer source age and units remain visible; admission measurements and resource history stay distinct |
-
-This supersedes conflicting placement/icon/counter instructions in the earlier board and answer mock references. Those fixtures remain historical examples of charts or interaction, not pixel authorities for TaskQ children. The source parent is selected by TaskQ's current package index; do not edit generated workspace output or redraw its icons.
-
-## Acceptance
-
-- F-A1: the normal four-node/six-board fixture at 1024 px/16 px includes both columns, one open answer, every resource chart/filesystem and usable node-policy entries; report actual viewport dimensions and any overflow.
-- F-A2: each embedded block records its TaskQ parent/variant/version; compare identical fixtures with the parent. No unapproved icon, token, order, target or state differences.
-- F-A3: 20 px, both themes, narrow width, long identities/titles and unknown sources retain readable data and reachable actions. Expanded Work mode/review and final controls remain reachable.
-- F-A4: automatic refresh retains row identity, scroll, disclosure, selection and typed drafts. Attention and source rows agree; answers/limits use their existing capability and readback gates.
-- F-A5: fixture data/actions are clearly marked. Live views contain no demo fallback, invented threshold or simulated receipt. Rendering evidence does not prove real writes or deployment.
-
-Implementation: #23 owns composition, #43 answers/board children, #46 node controls. #44 and #48 retain actual action qualification. Observation-only layout does not wait for write authorization; unsupported controls keep their explicit reason and source route.
-
-ServerQ detail and task handoff follow [H1–H4](finding-tasks.md); Attention, finding and Boards share one task editor. The first-screen layout is unchanged.
-
-Connection detail uses [L1–L4](connections.md); source freshness and enrollment state remain distinct in the overview.
-
-AgentQ integration detail follows [G1–G4](agentq-settings.md); configuration, host readback and client verification stay distinct. TaskQ Work mode remains the separate task/admission owner.
-
-Supporting AgentQ activity view: [optimization results P1–P3](optimization-results.md); it does not displace first-screen resources, Attention or Boards.
-
-Service versions and diagnostics are a supporting view under [D18 / V1–V4](service-versions.md), preserving the first-screen operational layout.
-
-First launch and unavailable-source composition follows [U1–U4](startup-outages.md). The [coverage review](prototype-coverage.md) identifies remaining prototype gaps without changing accepted component ownership.
+A1–A5: specification, preservation mapping and five fixture screens **approved by the owner** in the linked answer under TaskQ § 7. Producer gaps stay unknown. Multiple actual refreshes, draft recovery, live online/login/assigned-queue sources, full shared controls, native tray and authorized actions are **not tested here**. Retain D11–D19 qualification; design approval does not establish implementation or production readiness.

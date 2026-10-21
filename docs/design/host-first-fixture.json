@@ -1,0 +1,388 @@
+{
+  "kind": "invented-design-fixture",
+  "at": "2026-10-21T12:00:00Z",
+  "hosts": [
+    {
+      "id": "fra/native",
+      "name": "fra",
+      "kind": "Linux · native",
+      "online": "Online",
+      "age": "8 s",
+      "probe": "Invented host probe, valid 60 s; not a current DashQ source",
+      "products": [
+        [
+          "TaskQ",
+          "4.6.27",
+          "current"
+        ],
+        [
+          "AgentQ",
+          "0.11.2",
+          "current"
+        ],
+        [
+          "ServerQ",
+          "0.4.3",
+          "update available"
+        ]
+      ],
+      "logins": [
+        [
+          "Claude",
+          "Signed in"
+        ],
+        [
+          "Codex",
+          "Expired"
+        ]
+      ],
+      "cpu": 42,
+      "ram": [
+        16,
+        32
+      ],
+      "disks": [
+        {
+          "id": "system",
+          "used": 89,
+          "total": 100,
+          "warning": "Low disk: ServerQ finding"
+        }
+      ],
+      "running": 2,
+      "queued": 1,
+      "evidence": {
+        "TaskQ": {
+          "source": "Invented TaskQ heartbeat",
+          "observed_at": "2026-10-21T11:59:48Z",
+          "release_checked_at": "2026-10-21T11:56:00Z"
+        },
+        "AgentQ": {
+          "source": "Invented AgentQ snapshot",
+          "observed_at": "2026-10-21T11:59:20Z",
+          "release_checked_at": "2026-10-21T11:55:00Z"
+        },
+        "ServerQ": {
+          "source": "Invented ServerQ report",
+          "observed_at": "2026-10-21T11:59:00Z",
+          "release_checked_at": "2026-10-21T11:54:00Z"
+        },
+        "Claude": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:59:40Z",
+          "reason": "Probe valid for 60 seconds"
+        },
+        "Codex": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:59:52Z",
+          "reason": "Probe valid for 60 seconds"
+        }
+      }
+    },
+    {
+      "id": "win/native",
+      "name": "win",
+      "kind": "Windows · native",
+      "online": "Online",
+      "age": "14 s",
+      "probe": "Invented host probe, valid 60 s; not a current DashQ source",
+      "products": [
+        [
+          "TaskQ",
+          "4.6.27",
+          "current"
+        ],
+        [
+          "AgentQ",
+          "0.11.2",
+          "current"
+        ],
+        [
+          "ServerQ",
+          null,
+          "not configured"
+        ]
+      ],
+      "logins": [
+        [
+          "Claude",
+          "Signed in"
+        ],
+        [
+          "Codex",
+          "Signed in"
+        ]
+      ],
+      "cpu": 17,
+      "ram": [
+        24,
+        64
+      ],
+      "disks": [
+        {
+          "id": "system",
+          "used": 200,
+          "total": 512
+        },
+        {
+          "id": "data",
+          "used": 100,
+          "total": 1024
+        }
+      ],
+      "running": 1,
+      "queued": 0,
+      "evidence": {
+        "TaskQ": {
+          "source": "Invented TaskQ heartbeat",
+          "observed_at": "2026-10-21T11:59:48Z",
+          "release_checked_at": "2026-10-21T11:56:00Z"
+        },
+        "AgentQ": {
+          "source": "Invented AgentQ snapshot",
+          "observed_at": "2026-10-21T11:59:20Z",
+          "release_checked_at": "2026-10-21T11:55:00Z"
+        },
+        "ServerQ": {
+          "source": "Not configured",
+          "observed_at": null,
+          "release_checked_at": null
+        },
+        "Claude": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:59:40Z",
+          "reason": "Probe valid for 60 seconds"
+        },
+        "Codex": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:59:52Z",
+          "reason": "Probe valid for 60 seconds"
+        }
+      }
+    },
+    {
+      "id": "build-mac-with-a-long-label/native",
+      "name": "build-mac-with-a-long-label",
+      "kind": "macOS · native",
+      "online": "Unknown",
+      "age": "17 min · last seen",
+      "probe": "No current host probe; silence does not establish offline",
+      "products": [
+        [
+          "TaskQ",
+          "4.6.25",
+          "last known"
+        ],
+        [
+          "AgentQ",
+          "0.11.1",
+          "last known"
+        ],
+        [
+          "ServerQ",
+          null,
+          "not configured"
+        ]
+      ],
+      "logins": [
+        [
+          "Claude",
+          "Unknown"
+        ],
+        [
+          "Codex",
+          "Unknown"
+        ]
+      ],
+      "cpu": null,
+      "ram": null,
+      "disks": [
+        {
+          "id": "system-and-project-volume-with-a-long-name",
+          "used": null,
+          "total": null
+        }
+      ],
+      "running": null,
+      "queued": null,
+      "evidence": {
+        "TaskQ": {
+          "source": "Invented TaskQ heartbeat",
+          "observed_at": "2026-10-21T11:43:00Z",
+          "release_checked_at": "2026-10-21T11:56:00Z"
+        },
+        "AgentQ": {
+          "source": "Invented AgentQ snapshot",
+          "observed_at": "2026-10-21T11:43:00Z",
+          "release_checked_at": "2026-10-21T11:55:00Z"
+        },
+        "ServerQ": {
+          "source": "Not configured",
+          "observed_at": null,
+          "release_checked_at": null
+        },
+        "Claude": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:43:00Z",
+          "reason": "No current probe"
+        },
+        "Codex": {
+          "source": "Invented explicit client-login probe",
+          "observed_at": "2026-10-21T11:43:00Z",
+          "reason": "No current probe"
+        }
+      }
+    }
+  ],
+  "attention": [
+    {
+      "host": "fra",
+      "what": "Codex login expired",
+      "age": "8 s",
+      "action": "Sign-in instructions",
+      "target": "login"
+    },
+    {
+      "host": "fra",
+      "what": "AgentQ unit failed",
+      "age": "2 min",
+      "action": "View diagnostics",
+      "target": "unit"
+    },
+    {
+      "host": "fra",
+      "what": "system: low disk · 11 GiB free",
+      "age": "1 min",
+      "action": "View finding",
+      "target": "disk"
+    },
+    {
+      "host": "win",
+      "what": "dashq #304 needs an answer",
+      "age": "5 min",
+      "action": "Answer question",
+      "target": "tasks"
+    }
+  ],
+  "history": {
+    "from": "11:30",
+    "to": "12:00",
+    "window_s": 1800,
+    "scale": [
+      0,
+      100
+    ],
+    "cpu": [
+      21,
+      25,
+      20,
+      31,
+      29,
+      37,
+      42
+    ],
+    "ram": [
+      40,
+      41,
+      41,
+      45,
+      47,
+      49,
+      50
+    ]
+  },
+  "project": {
+    "id": "fixture-dashq",
+    "name": "dashq · fixture",
+    "board": {
+      "kind": "github",
+      "url": "https://example.invalid/fixture/dashq/issues"
+    },
+    "complete": true,
+    "closed": null,
+    "tasks": [
+      {
+        "n": 301,
+        "revision": 301,
+        "state": "doing",
+        "title": "Keep refresh stable while the operator reads a host detail",
+        "host": "fra",
+        "runtime": "codex",
+        "local_session": false,
+        "session_reason": "Fixture: no session permalink",
+        "url": "https://example.invalid/fixture/dashq/issues/301"
+      },
+      {
+        "n": 302,
+        "revision": 302,
+        "state": "review",
+        "title": "Review source freshness and retained last-known values",
+        "host": "fra",
+        "runtime": "claude",
+        "local_session": false,
+        "session_reason": "Fixture: no session permalink",
+        "url": "https://example.invalid/fixture/dashq/issues/302"
+      },
+      {
+        "n": 306,
+        "revision": 306,
+        "state": "doing",
+        "title": "Check shared task blocks at large text sizes",
+        "host": "win",
+        "runtime": "codex",
+        "local_session": false,
+        "session_reason": "Fixture: no session permalink",
+        "url": "https://example.invalid/fixture/dashq/issues/306"
+      },
+      {
+        "n": 303,
+        "revision": 303,
+        "state": "ready",
+        "title": "Host-assigned pending work (invented assignment, not a board-total inference)",
+        "host": "fra",
+        "runtime": "codex",
+        "url": "https://example.invalid/fixture/dashq/issues/303"
+      },
+      {
+        "n": 307,
+        "revision": 307,
+        "state": "ready",
+        "title": "Unassigned: retain project queue without multiplying it across hosts",
+        "url": "https://example.invalid/fixture/dashq/issues/307"
+      },
+      {
+        "n": 304,
+        "revision": 304,
+        "state": "ask",
+        "title": "Choose the next maintenance window",
+        "host": "win",
+        "url": "https://example.invalid/fixture/dashq/issues/304",
+        "question": {
+          "parsed": true,
+          "problem": "Which window should the host administrator review?",
+          "done": "Compared two invented windows; no host action has run.",
+          "text": "Invented question for layout review",
+          "choices": [
+            {
+              "id": 1,
+              "text": "Review tonight's window",
+              "recommended": true,
+              "consequential": false
+            },
+            {
+              "id": 2,
+              "text": "Review tomorrow's window",
+              "recommended": false,
+              "consequential": false
+            }
+          ],
+          "evidence": [],
+          "limits": {
+            "lines": 2,
+            "chars": 160
+          }
+        }
+      }
+    ]
+  }
+}
