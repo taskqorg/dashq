@@ -220,8 +220,12 @@ impl Machines {
     fn of(&self, r: &Value) -> Option<String> {
         let name = aq(r, "host.name").as_str().filter(|h| safe(h, 64, b"_.-"))?;
         let rt = aq(r, "agentq.runtime");
+        Some(self.runtime(name, rt.as_str().unwrap_or("")))
+    }
+
+    fn runtime(&self, name: &str, rt: &str) -> String {
         let wsl = rt == "wsl" || (rt == "linux" && self.windows.contains(&name.to_ascii_lowercase()));
-        Some(self.id(name, if wsl { "wsl" } else { "native" }))
+        self.id(name, if wsl { "wsl" } else { "native" })
     }
 }
 
@@ -709,7 +713,14 @@ pub fn build(inp: &Value) -> Value {
     }
 
     // Resources (D4.4): enrolled history first, Langfuse samples otherwise; a stale or missing sample is a gap.
-    let mut resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, fhost);
+    let mut resources = crate::resource::build(&rows("agentq.resource"), capped("agentq.resource"), &inp["enrolled_resources"], now, period, None);
+    for r in resources["rows"].as_array_mut().into_iter().flatten() {
+        r["host"] = fleet.iter().find(|f| f["installation"] == r["installation"]).map_or_else(|| {
+            let name = r["host"].as_str().unwrap_or("").split('/').next().unwrap_or("");
+            json!(machines.runtime(name, r["runtime"].as_str().unwrap_or("")))
+        }, |f| f["host"].clone());
+    }
+    resources["rows"].as_array_mut().unwrap().retain(|r| fhost.is_none_or(|h| r["host"].as_str().is_some_and(|id| id.eq_ignore_ascii_case(h))));
     if lf_src["state"] == "unconfirmed" {
         for r in resources["rows"].as_array_mut().into_iter().flatten().filter(|r| r["provenance"] == "langfuse") {
             r["source"]["state"] = json!("unconfirmed");
@@ -874,6 +885,21 @@ pub fn all_failed(doc: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// D8/H1: WSL resources use the same installation identity as the canonical host, including filtered entry.
+    #[test]
+    fn review_resource_runtime_identity() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!("../fixture/hosts.json")).unwrap();
+        let mut inp = fixture["input"].clone();
+        let now = inp["now"].as_u64().unwrap();
+        inp["langfuse"]["value"]["agentq.resource"] = serde_json::json!([{"id":"r-wsl","startTime":crate::source::iso(now-10),"metadata":{
+            "attributes.agentq.installation":"inst-wsl","attributes.host.name":"desktop","attributes.agentq.runtime":"linux","attributes.agentq.resource.cpu_percent":33}}]);
+        for filter in [serde_json::json!({}),serde_json::json!({"host":"DESKTOP/wsl"})] {
+            inp["filters"] = filter;
+            let d = super::build(&inp);
+            assert_eq!(d["resources"]["rows"][0]["host"],"DESKTOP/wsl");
+            assert_eq!(d["resources"]["rows"].as_array().unwrap().len(),1);
+        }
+    }
     use super::*;
 
     /// H2: producer verification time must survive the enrolled read-to-page path.

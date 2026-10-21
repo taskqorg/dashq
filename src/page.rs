@@ -80,7 +80,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let w = &mut h;
     let _ = write!(w, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body data-view=\"/\">\n<header>\n<h1>dashq</h1>\n");
     let nav = VIEWS[..2].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", if *path == "/" { "home" } else { "projects" }, esc(&query))).collect::<Vec<_>>().join(" ");
-    let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav} <a id=\"attention-link\" data-view-link href=\"/{}#attention\">Attention · {action_count}</a></nav>", esc(&query));
+    let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav} <a id=\"attention-link\" data-view-inherit data-view-link href=\"/{}#attention\">Attention · {action_count}</a></nav>", esc(&query));
     let more = VIEWS[2..].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", path.trim_start_matches('/'), esc(&query))).collect::<Vec<_>>().join(" ");
     let _ = writeln!(w, "<details id=\"more\"><summary>More</summary><div>{more} <a href=\"/connect\">Connect a service</a>");
     if !base.is_empty() { let _ = writeln!(w, "<a href=\"{}\">Langfuse traces</a> <a href=\"{}\">Langfuse dashboards</a>", text(&links["traces"]), text(&links["dashboards"])); }
@@ -783,11 +783,12 @@ fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &s
 fn host_grid(w: &mut String, doc: &Value, now: u64) {
     let mut hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
     for r in doc["resources"]["rows"].as_array().into_iter().flatten() {
-        if !hosts.iter().any(|h| h["id"] == r["host"]) {
+        if !hosts.iter().any(|h| h["id"].as_str().zip(r["host"].as_str()).is_some_and(|(a,b)| a.eq_ignore_ascii_case(b))) {
             hosts.push(json!({"id": r["host"], "freshness": r["source"], "agentq": {"installation": r["installation"]}}));
         }
     }
-    let query = |path: &str, id: &str| format!("{path}?period={}&host={}", doc["period"].as_u64().unwrap_or(1800), enc(id));
+    let extra: String = ["agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v| format!("&{k}={}", enc(v)))).collect();
+    let query = |path: &str, id: &str| format!("{path}?period={}&host={}{extra}", doc["period"].as_u64().unwrap_or(1800), enc(id));
     let unknown = |why: &str| format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">?</span>", esc(why), esc(why));
     let _ = writeln!(w, "<section id=\"host-grid\"><h2>Hosts</h2><div class=\"grid-head\" aria-hidden=\"true\"><span>Host · observation</span><span>Services · update state</span><span>Client sign-in</span><span>CPU</span><span>RAM</span><span>Disk</span><span>Tasks</span></div>");
     if hosts.is_empty() { let _ = writeln!(w, "<p>No host observations received. <a data-view-link href=\"/projects\">Open Tasks</a>.</p>"); }
@@ -812,8 +813,11 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         let _ = writeln!(w, "</div><div class=\"cell products\"><span class=\"label\">Services · update state</span>");
         for (product, label, v, source) in [("taskq", "TaskQ", &h["taskq"]["version"], &h["taskq"]), ("agentq", "AgentQ", &h["agentq"]["running"], f), ("serverq", "ServerQ", &Value::Null, &h["serverq"])] {
             let installation = h[product]["installation"].as_str();
-            let vr = doc["versions"]["rows"].as_array().into_iter().flatten().find(|r| r["product"] == product && r["connection"] != "revoked" &&
-                (installation.is_some_and(|i| r["installation"] == i) || r["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))));
+            let vr = doc["versions"]["rows"].as_array().into_iter().flatten().filter(|r| r["product"] == product && r["connection"] != "revoked" &&
+                !r["reason"].as_str().is_some_and(|s| s.starts_with("superseded by ")) &&
+                (v.is_null() || r["running"]["version"] == *v) &&
+                installation.map_or_else(|| r["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id)), |i| r["installation"] == i))
+                .max_by_key(|r| r["observation"]["at"].as_u64());
             let version = if v.is_null() { vr.map(|r| &r["running"]["version"]).unwrap_or(v) } else { v };
             let obs = vr.map(|r| &r["observation"]).unwrap_or(source);
             let update = vr.and_then(|r| r["update"]["state"].as_str()).unwrap_or("unknown");
@@ -1015,6 +1019,27 @@ mod tests {
             std::fs::write(dir.join("page.html"), render(&example, &json!({}))).unwrap();
             std::fs::write(dir.join("data.json"), example.to_string()).unwrap();
         }
+    }
+
+    /// H6/H7/D18: a superseded installation cannot supply the owner's update state or observation time.
+    #[test]
+    fn review_version_owner_evidence() {
+        let mut d = crate::fixture_doc();
+        d["versions"]["rows"] = json!([
+            {"product":"agentq","host":"fra/native","installation":"old","running":{"version":"0.4.0"},"observation":{"reason":"wrong installation evidence"},"update":{"state":"available"}},
+            {"product":"agentq","host":"fra/native","installation":"inst-fra","running":{"version":"0.5.0"},"observation":{"reason":"owner evidence"},"update":{"state":"current"}}]);
+        let mut html = String::new();
+        host_grid(&mut html, &d, d["generated_at"].as_u64().unwrap());
+        assert!(!html.contains("wrong installation evidence"));
+        assert!(html.contains("owner evidence") && html.contains("version current"));
+        d["versions"]["rows"][1]["running"]["version"] = json!("0.6.0");
+        let mut mixed = String::new(); host_grid(&mut mixed, &d, 0);
+        assert!(!mixed.contains("owner evidence"),"another version receipt cannot qualify the displayed running version");
+        let variant = d["resources"]["rows"][0].clone();
+        d["resources"]["rows"].as_array_mut().unwrap().push(variant);
+        d["resources"]["rows"][2]["host"] = json!("FRA/native");
+        let mut html = String::new(); host_grid(&mut html, &d, 0);
+        assert_eq!(html.matches("class=\"host\"").count(),3,"case variants cannot add a host");
     }
 
     /// F1/F6: the approved #169 scenario through the real renderer; unsupported probes stay unknown.

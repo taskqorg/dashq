@@ -30,6 +30,16 @@ Before: `cargo test --locked host_first_actions_and_unknowns` failed with `hosts
 
 `tests/host-first-browser.cjs` checks 24 width/text/theme/view cells and navigation/direct-answer/host-scope behavior. Existing startup, resource, findings and limits browser chains run against their new destinations; their draft, outage, authority and receipt protections remain. CI runs the new check using the existing browser setup; publication acceptance remains merge-result CI, or private exact-SHA fallback (R12/§ 7).
 
+Frozen review found three implementation defects, corrected within this task:
+
+| Defect before | Retained regression / after |
+|---|---|
+| Linux/WSL resources became `desktop/native` instead of `DESKTOP/wsl`; case variants could add rows. | `review_resource_runtime_identity` failed on that value, then passed for unfiltered and host-filtered entry. Data normalizes through H1's shared runtime/installation mapping before filtering; grid identity is case-insensitive. |
+| A superseded version row supplied the selected installation's update state/time. | `review_version_owner_evidence` failed on `wrong installation evidence`, then passed. Exact owner/version-compatible evidence wins; incompatible receipts cannot qualify the displayed version. |
+| Persistent Attention header returned to its initial period/host filter. | Frozen `6d95e5c` header reproduced `period=1800` after selecting 86400; the runtime browser check now retains period/host/agent/session. |
+
+The Tasks capture also exposed an initially collapsed first board. First entry now shows its shared rows; explicit disclosures survive refresh, and selecting counters opens the requested rows. Existing draft/outage checks remain.
+
 TaskQ-owned gaps have these concrete handoff task names:
 
 1. **Publish shared browser task workspace and controls for DashQ** — versioned tray-compatible detail/menu API, capabilities, expected revisions, operation IDs, receipts, fixtures and release hashes. Start, Stop, Later, Close and Retry cannot be imitated here; ordinary answers and released resource controls keep their existing gates.

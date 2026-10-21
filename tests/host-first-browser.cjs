@@ -35,11 +35,18 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       assert.equal(await page.locator('.first').count(),0);
       assert.equal(await page.locator('#host-grid polyline').count(),0,'trends belong to detail');
       assert((await page.locator('#host-grid').innerText()).includes('Unknown or unavailable'));
+      await page.evaluate(()=>navigateView(new URL('/?period=86400&host=fra%2Fnative&agent=codex&session=fixture',location.origin)));
+      await page.waitForFunction(()=>!busy);
+      const inherited = new URL(await page.locator('#attention-link').getAttribute('href'),page.url());
+      assert.equal(inherited.search,'?period=86400&host=fra%2Fnative&agent=codex&session=fixture','Attention keeps the current filter');
+      await page.evaluate(()=>navigateView(new URL('/',location.origin)));
+      await page.waitForFunction(()=>!busy);
       const grid = await page.locator('#host-grid').boundingBox(), attention = await page.locator('#attention').boundingBox();
       assert(grid.y < 220 && grid.y < attention.y,'hosts start first');
       for (const view of ['/', '/hosts', '/projects']) {
         await page.evaluate(url=>navigateView(new URL(url,location.origin)), view);
         await page.waitForFunction(()=>!busy);
+        if(view==='/projects')assert(await page.locator('#boards .tqp-task').first().isVisible(),'Tasks opens its first board rows');
         const geometry = await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,viewport:innerWidth,
           overflow:[...document.querySelectorAll('#host-grid .cell,#attention a,#boards .tqp-task')].filter(e=>e.getClientRects().length).filter(e=>{const r=e.getBoundingClientRect();return r.left<-.5||r.right>innerWidth+.5;}).map(e=>e.textContent.slice(0,50))}));
         assert(geometry.scrollWidth<=width,JSON.stringify({width,size,theme,view,...geometry}));

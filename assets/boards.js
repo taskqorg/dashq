@@ -81,7 +81,7 @@ function renderBoards() {
     }
     const tasks = document.createElement('details');
     tasks.id = wrap.id + '-tasks';
-    tasks.open = open.get(tasks.id) || (boardFilter && (!boardFilter.project || boardFilter.project === p.id));
+    tasks.open = open.has(tasks.id) ? open.get(tasks.id) : index === 0;
     const summary = document.createElement('summary');
     summary.textContent = 'Tasks' + (boardFilter && (!boardFilter.project || boardFilter.project === p.id) ? ' · ' + boardFilter.state : '');
     tasks.append(summary);
@@ -166,6 +166,10 @@ else document.addEventListener('click', e => {
   TaskqProjectBlocks.handle(e, {
     open: url => location.assign(url),
     project: id => { boardFilter = null; renderBoards(); const d = document.getElementById(boardId(id) + '-tasks'); d.open = true; d.querySelector('summary').focus(); },
-    tasks: (project, state) => { boardFilter = {project, state}; renderBoards(); document.querySelector('#boards details[open] summary')?.focus(); }
+    tasks: (project, state) => {
+      boardFilter = {project, state}; renderBoards();
+      document.querySelectorAll('#boards details[id$="-tasks"]').forEach(d => { if (!project || d.id === boardId(project) + '-tasks') d.open = true; });
+      document.querySelector('#boards details[open] summary')?.focus();
+    }
   });
 });
