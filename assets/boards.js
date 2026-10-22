@@ -116,7 +116,7 @@ function renderBoards() {
       if (row.session) {
         const s = row.session, progress = document.createElement('p');
         progress.className = 'detail';
-        progress.textContent = 'Progress on ' + s.host + ' (' + s.runtime + '): ' + s.stage + ' · ' + (s.age_s == null ? 'update age unknown' : 'updated ' + s.age_s + ' s ago') + (s.line ? ' · ' + s.line : '');
+        progress.textContent = 'Progress on ' + s.host + ' (' + s.runtime + '): ' + s.stage + ' · ' + (s.age_s == null ? 'update age unknown' : 'updated ' + s.age_s + ' s ago');
         el.append(progress);
       }
       const failed = b.failed?.find(f => f.number === row.n);
