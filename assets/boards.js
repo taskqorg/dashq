@@ -30,8 +30,82 @@ async function answerSend(board, op) {
   const v = await (await fetch('/answer', {method: 'POST', body: f, credentials: 'same-origin'})).json();
   return {state: v.outcome, reason: v.reason, next: v.next};
 }
+// #179: TaskQ owns offers/rendering/op identity; DashQ only gates and transports them.
+const taskControlAccess = new Map(), taskControlRows = new Map();
+function taskControlAccessLoad(board) {
+  if (taskControlAccess.has(board)) return;
+  taskControlAccess.set(board, {reason: 'Checking task control access…'});
+  fetch('/task/control?board=' + encodeURIComponent(board), {credentials: 'same-origin', signal: AbortSignal.timeout(10000)})
+    .then(r => r.json().then(v => r.ok && v.csrf ? {csrf: v.csrf} : {reason: v.reason || 'Task controls unavailable'}))
+    .catch(() => ({reason: 'Task control access unknown'}))
+    .then(a => { taskControlAccess.set(board, a); updateTaskControls(); });
+}
+function taskControlReason(c) {
+  const a = taskControlAccess.get(c.board);
+  if (!a?.csrf || a.denied) return a?.reason || 'Checking task control access…';
+  if (c.source.state !== 'ok' || c.source.incomplete) return 'Board observation ' + c.source.state + '; current controls unavailable';
+  if (!Number.isSafeInteger(c.row.revision) || c.row.revision < 0 || !Array.isArray(c.row.controls)) return 'Canonical controls or revision unavailable';
+  if (c.sending || c.receipt?.outcome === 'unknown') return 'Check delivery before another operation';
+  if (c.op && ['accepted', 'stale'].includes(c.receipt?.outcome) && c.row.revision === c.op.revision) return 'Waiting for a fresh board revision';
+  return '';
+}
+function updateTaskControls() {
+  for (const [id, c] of taskControlRows) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const reason = taskControlReason(c), a = taskControlAccess.get(c.board);
+    const field = el.querySelector('fieldset');
+    field.disabled = !!reason;
+    el.querySelector('[data-control-reason]').textContent = reason;
+    el.querySelector('[role="status"]').textContent = c.sending ? 'Sending…' : c.receipt ?
+      c.receipt.outcome + (c.receipt.reason ? ': ' + c.receipt.reason : '') + (c.receipt.next ? ' · ' + c.receipt.next : '') : '';
+    const retry = el.querySelector('[data-control-retry]');
+    retry.hidden = c.receipt?.outcome !== 'unknown';
+    retry.disabled = c.sending || !a?.csrf;
+  }
+}
+async function taskControlSend(c) {
+  if (c.sending) return;
+  const uncertain = c.receipt?.outcome === 'unknown';
+  c.sending = true; updateTaskControls();
+  try {
+    const form = new URLSearchParams({board: c.board, csrf: taskControlAccess.get(c.board).csrf,
+      task: c.op.task, revision: c.op.revision, op_id: c.op.id, action: c.op.action});
+    const response = await fetch('/task/control', {method: 'POST', body: form, credentials: 'same-origin', signal: AbortSignal.timeout(75000)});
+    const v = await response.json();
+    const matches = v.task === c.op.task && v.op_id === 'dashq.control.' + c.op.id;
+    if (!response.ok && v.op_id === null && v.outcome === 'rejected') {
+      taskControlAccess.set(c.board, {...taskControlAccess.get(c.board), denied: true, reason: v.reason || 'Task controls refused'});
+    } else if (matches) {
+      taskControlAccess.set(c.board, {csrf: taskControlAccess.get(c.board).csrf});
+    }
+    c.receipt = matches && ['accepted', 'stale', 'rejected', 'unknown'].includes(v.outcome) ? v
+      : !response.ok && v.outcome === 'rejected' && v.op_id === null ? {outcome: uncertain ? 'unknown' : 'rejected', reason: v.reason}
+      : {outcome: 'unknown', reason: 'No matching receipt; retry the same operation'};
+  } catch (_) { c.receipt = {outcome: 'unknown', reason: 'Delivery uncertain; retry the same operation'}; }
+  c.sending = false; updateTaskControls();
+}
+function renderTaskControls(el, board, row, source) {
+  const id = el.id + '-controls';
+  let c = taskControlRows.get(id);
+  if (!c) { c = {board}; taskControlRows.set(id, c); }
+  Object.assign(c, {row, source});
+  const host = document.createElement('div'); host.id = id; host.className = 'task-control-adapter';
+  const field = document.createElement('fieldset');
+  field.setAttribute('aria-label', 'Task controls #' + row.n);
+  field.setAttribute('aria-describedby', id + '-reason');
+  field.innerHTML = TaskqTaskControls.render({...row, controls: Array.isArray(row.controls) ? row.controls : []}, {key: id, url: row.url});
+  const reason = document.createElement('p'); reason.id = id + '-reason'; reason.dataset.controlReason = ''; reason.className = 'detail';
+  const status = document.createElement('p'); status.setAttribute('role', 'status');
+  const retry = document.createElement('button'); retry.type = 'button'; retry.dataset.controlRetry = id; retry.textContent = 'Check delivery';
+  host.append(field, reason, status, retry); el.append(host);
+  taskControlAccessLoad(board);
+}
+
 function controlKey(e) {
   const d = e.dataset;
+  if (d.control) return 'control-' + d.control;
+  if (d.controlRetry) return 'check-delivery';
   if (d.tqp) return d.tqp + (d.state ? '-' + d.state : '');
   if (d.qac) return d.qac + (d.choice ? '-' + d.choice : '');
   if (e.tagName === 'SUMMARY') return 'summary' + (e.parentElement.className ? '-' + e.parentElement.className : '');
@@ -72,6 +146,10 @@ function renderBoards() {
     freshness.className = 'detail';
     freshness.textContent = b.source.state + ' · ' + (b.source.age_s == null ? 'age unknown' : b.source.age_s + ' s old') + (b.source.reason ? ' · ' + b.source.reason : '');
     wrap.append(freshness);
+    // v4.6.30 no longer counts Closed; its authoritative coverage remains on the board.
+    const closed = document.createElement('a');
+    closed.href = b.url + '?q=is%3Aissue+is%3Aclosed'; closed.textContent = 'Closed on board ↗';
+    wrap.append(closed);
     if (!p.complete && b.source.at != null) {
       const last = document.createElement('details');
       last.id = wrap.id + '-last-known';
@@ -125,6 +203,7 @@ function renderBoards() {
         reason.textContent = failed.reason || 'No failure reason recorded.';
         el.append(reason);
       }
+      renderTaskControls(el, p.id, row, b.source);
       tasks.append(el);
       shown++;
     }
@@ -159,9 +238,23 @@ function renderBoards() {
     if (was !== undefined && was !== b.textContent.trim()) b.classList.add('tint');
   });
   root.querySelector('.board-fallback').hidden = true;
+  updateTaskControls();
 }
 if (typeof module === 'object') module.exports = {boardProjects};
 else document.addEventListener('click', e => {
+  const action = e.target.closest('[data-a="control"],[data-control-retry]');
+  if (action) {
+    const c = taskControlRows.get(action.dataset.key || action.dataset.controlRetry);
+    if (!c || c.sending) return;
+    if (action.dataset.controlRetry) {
+      if (c.receipt?.outcome === 'unknown' && taskControlAccess.get(c.board)?.csrf) taskControlSend(c);
+    } else if (!taskControlReason(c) && c.row.controls.includes(action.dataset.control)) {
+      const prefix = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join('');
+      c.op = TaskqTaskControls.op(c.row, action.dataset.control, prefix);
+      c.receipt = null; taskControlSend(c);
+    }
+    return;
+  }
   const question = e.target.closest('[data-board-question]');
   if (question) {
     if (question.hasAttribute('data-view-link')) return;

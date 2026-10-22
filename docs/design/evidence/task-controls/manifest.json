@@ -1,0 +1,58 @@
+{
+  "kind": "synthetic fixture evidence, not production qualification",
+  "task": 179,
+  "rules": [
+    "R12",
+    "R13",
+    "TaskQ section 7",
+    "DashQ D13",
+    "specq F1-F7"
+  ],
+  "taskq_release": "v4.6.30",
+  "taskq_commit": "09cb0d7db35d0de51bef83d9fa3ec803eafad42d",
+  "browser": "Chromium 141.0.7390.37",
+  "platform": "macOS arm64",
+  "matrix": [
+    {
+      "width": 1024,
+      "font_px": 16,
+      "theme": "light",
+      "state": "qualified actor; offered controls"
+    },
+    {
+      "width": 360,
+      "font_px": 20,
+      "theme": "dark",
+      "state": "unconfirmed source; unknown receipt; same-operation delivery check"
+    }
+  ],
+  "before": {
+    "task_controls_off_by_default": "FAIL: task control route absent",
+    "task_controls_failed_precheck_never_dispatches_on_retry": "FAIL: retry returned unknown after dispatching an unoffered control when the refusal receipt could not be saved"
+  },
+  "after": {
+    "cargo test --locked task_controls": "PASS: off gate, controller/row gates, refusal persistence failure, fixture dispatch/replay, unknown/stale readback",
+    "node tests/task-controls-browser.cjs": "PASS: off/revoked actor, listed offers, revision/op-id, lost reply, same-ID retry, refresh, invalid offers, narrow reflow",
+    "node tests/boards-browser.cjs": "PASS: project counters, Closed link, answer choices/text, stale draft, same-ID retry, focus/scroll/refresh"
+  },
+  "visual_review": "Inspected both final PNGs: controls and delivery notice visible, readable 16/20px text, long title wraps; no clipping or horizontal overflow.",
+  "not_tested": [
+    "real forge write/readback: owner-run held #195",
+    "production configuration/deployment",
+    "merge-result CI: checked by TaskQ close"
+  ],
+  "sha256": {
+    "src/answer.rs": "ab5a0bc51e1318985684392261da8ddcc25db308bd99c3e1e2385786d7fe0848",
+    "src/main.rs": "2c042339e11e753ca83362686a06e78c7fd198140546390cf51eee2c7ec7be41",
+    "src/store.rs": "d1dd86dece4982142f555d7d04d48637a7bc337acc9c1a9857e3644307fe0abd",
+    "src/enroll.rs": "93b808604c1b5b1a992cb21f753d773ee308af653dc059416dfcdc52ea707a90",
+    "src/data.rs": "3d412184b38ff5f6254bee397923696565668b371d72b6412727d35f2c7b37b6",
+    "src/profile.rs": "efec7369713cc76e8f3de1a7c82b7ed5e1acf2867cafeba8b09652ce5b066ce3",
+    "assets/boards.js": "cb2e38c2c8de7c31ca237df7135cebf9bf27b467a5021424acc7c7cc212f084a",
+    "assets/style.css": "5971d772d4e92974b48472b5b8399c5217b933b2dc8280322d25bac344cfeb71",
+    "assets/taskq/provenance.json": "7fcb5a262d4f222ebde33ccf6ebdb407ad9b9ba20782d16a5f8886117d49cdb9",
+    "tests/task-controls-browser.cjs": "28788e66bc2b76dda757981cc061a65a3ce59d72e622d364d63de7793b9b3826",
+    "docs/design/evidence/task-controls/1024-16-light.png": "c5b5b8cd9bab43d87d3b0715c0dc37d1be68e23f9ccc80e09639bacd1d2d573b",
+    "docs/design/evidence/task-controls/360-20-dark.png": "e4c10b634ff5da8b7e1a938af3d9b6e9ecad4d9f6cedb6793c9d0a84d82416b1"
+  }
+}

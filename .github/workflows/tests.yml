@@ -32,3 +32,4 @@ jobs:
           DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" node tests/limits-browser.cjs
           DASHQ_HOST_FIRST_EVIDENCE="$RUNNER_TEMP/host-first" node tests/host-first-browser.cjs
           DASHQ_HOST_OBSERVATIONS_EVIDENCE="$RUNNER_TEMP/host-observations" node tests/host-observations-browser.cjs
+          node tests/task-controls-browser.cjs

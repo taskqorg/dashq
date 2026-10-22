@@ -7,7 +7,7 @@ const fs = require('fs'), http = require('http'), assert = require('assert');
 const out = process.env.DASHQ_BOARDS_EVIDENCE || 'docs/design/evidence/boards';
 const read = f => fs.readFileSync(f, 'utf8');
 // Same concatenation as src/main.rs app_js()/style_css().
-const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(read).join('\n');
+const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/taskq/task-controls.js', 'assets/boards.js', 'assets/app.js'].map(read).join('\n');
 const css = ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(read).join('\n');
 // `snapshot` rewrites the served board rows, so a refresh can add or remove tasks.
 let snapshot = boards => boards;
@@ -40,7 +40,8 @@ const long = 'taskqorg/' + 'a-very-long-project-name-'.repeat(4);
 const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255; };
 (async () => {
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const url = 'http://127.0.0.1:' + server.address().port + '/';
+  const origin = 'http://127.0.0.1:' + server.address().port;
+  const url = origin + '/projects';
   fs.mkdirSync(out, {recursive: true});
   const browser = await chromium.launch({channel: 'chrome', headless: true});
   for (const [width, font, colorScheme] of [[1024, 16, 'light'], [1024, 20, 'dark'], [360, 16, 'dark'], [360, 20, 'light']]) {
@@ -49,10 +50,10 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.goto(url); await page.addStyleTag({content: `html{font-size:${font}px}`});
     await page.waitForSelector('#boards .tqp-counts');
     const at = `${width}/${font}/${colorScheme}`;
-    // counters: TaskQ order, zero hidden, unknown `?`, Closed quiet
+    // counters: TaskQ order, zero hidden, unknown `?`, Closed on board
     const labels = await page.$$eval('[id="board-taskqorg%2Ftaskq"] .tqp-counts button', bs => bs.map(b => b.getAttribute('aria-label').split(' · ')[1]));
-    assert.deepEqual(labels, ['Doing: 1', 'Review: 1', 'Ask: 1', 'Failed: 1', 'Ready: 1', 'Closed: unknown'], at);
-    assert.equal(await page.$eval('[id="board-taskqorg%2Ftaskq"] [data-state=closed]', b => b.className), 'quiet');
+    assert.deepEqual(labels, ['Doing: 1', 'Review: 1', 'Ask: 1', 'Failed: 1', 'Ready: 1'], at);
+    assert.equal(await page.locator('[id="board-taskqorg%2Ftaskq"] a:has-text("Closed on board")').count(), 1);
     assert.equal(await page.$$eval('[id="board-taskqorg%2Fagentq"] .tqp-counts button', bs => bs.filter(b => b.textContent.trim() === '?').length), 8, at + ' unread board unknown');
     // provider icon and counter text readable against the page (the #1041 dark-theme defect)
     const contrast = await page.$eval('[id="board-taskqorg%2Ftaskq"] [data-icon=github]', s => [getComputedStyle(s).fill, getComputedStyle(document.body).backgroundColor]);
@@ -64,10 +65,12 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     assert(card.includes('Answers are not enabled on this dashboard') && card.includes('SQLite'), at + ' card: ' + card);
     assert.equal(await page.locator('[id="board-taskqorg%2Ftaskq-q-12"] a[href="https://github.com/taskqorg/taskq/issues/12"]').count() > 0, true);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), at + ' horizontal overflow');
-    await page.locator('.first').screenshot({path: `${out}/${width}-${font}-${colorScheme}.png`});
-    // Attention opens the single Boards card
+    await page.locator('#boards').screenshot({path: `${out}/${width}-${font}-${colorScheme}.png`});
+    // D22: Attention reaches the single card through its shareable Tasks URL.
+    await page.evaluate(() => navigateView(new URL('/', location.origin)));
     await page.locator('a[data-board-question="taskqorg/taskq"][data-task="12"]').click();
-    assert(await page.evaluate(() => document.activeElement.closest('[id$="-q-12"]') !== null), at + ' Attention focus');
+    assert.equal(new URL(page.url()).pathname, '/projects', at + ' Attention destination');
+    assert(await page.locator('[id="board-taskqorg%2Ftaskq-q-12"]').isVisible(), at + ' single card visible');
     // counter navigation opens the filtered task disclosure
     await page.locator('[id="board-taskqorg%2Ftaskq"] [data-state=ask]').click();
     assert(await page.$eval('[id="board-taskqorg%2Ftaskq-tasks"]', d => d.open && d.querySelector('summary').textContent === 'Tasks · ask'));
@@ -106,7 +109,7 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.goto(url); await page.waitForSelector('#boards .tqp-counts');
     const tinted = () => page.$$eval('#boards .tqp-counts button.tint', bs => bs.map(b => [b.parentElement.closest('[id]').id, b.dataset.state, getComputedStyle(b).animationName]));
     const board = 'board-taskqorg%2Ftaskq';
-    // Doing 1 -> 0 (hidden), Ready 1 -> 2, Later 0 -> 1; Review, Ask, Failed and Closed `?` unchanged
+    // Doing 1 -> 0 (hidden), Ready 1 -> 2, Later 0 -> 1; Review, Ask, Failed unchanged
     snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: [...b.tasks.filter(t => t.state !== 'doing'),
       {...b.tasks.find(t => t.state === 'ready'), n: 15}, {...b.tasks.find(t => t.state === 'ready'), n: 16, state: 'later'}]});
     await page.evaluate(() => refresh());
@@ -144,7 +147,7 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.waitForFunction(q => document.querySelector(q).innerText.includes('Answer accepted on the board'), q);
     const [first] = answers.posts;
     assert.deepEqual({...first.form, op_id: 'x'}, {board: 'taskqorg/taskq', csrf: 'c1', task: '12', revision: '6139994000', op_id: 'x', choice: '1'});
-    assert(first.type.startsWith('application/x-www-form-urlencoded') && first.origin === url.slice(0, -1), 'form and Origin ' + JSON.stringify(first));
+    assert(first.type.startsWith('application/x-www-form-urlencoded') && first.origin === origin, 'form and Origin ' + JSON.stringify(first));
     // the next question (new revision) answered with free text; the reply is lost
     snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: b.tasks.map(t => t.n === 12 ? {...t, revision: t.revision + 1} : t)});
     await page.evaluate(() => refresh());

@@ -548,7 +548,7 @@ pub fn build(inp: &Value) -> Value {
             // D13: preserve canonical question identities/limits/evidence; no second parser or session authority.
             board["tasks"] = tasks.into_iter().flatten().map(|t| json!({
                 "n": t["n"], "title": t["title"], "url": t["url"], "state": t["state"],
-                "revision": t["revision"], "question": t["question"], "card": t["card"]
+                "revision": t["revision"], "controls": t["controls"], "question": t["question"], "card": t["card"]
             })).collect::<Vec<_>>().into();
             board["in_work"] = total(&["doing", "review"]);
             board["waiting"] = total(&["ask"]);
@@ -1109,6 +1109,7 @@ mod tests {
         for t in b["tasks"].as_array().unwrap() {
             let row = original.as_array().unwrap().iter().find(|r| r["n"] == t["n"]).unwrap();
             assert_eq!(t["revision"], row["revision"]);
+            assert_eq!(t["controls"], row["controls"], "#179 offers must be canonical, never inferred");
             assert_eq!(t["question"], row["question"], "D13 canonical choices/evidence/limits unchanged");
         }
         let q = &b["questions"];

@@ -2,7 +2,10 @@
 // twice, a stale draft sends to a new question, or a consequential choice is answerable outside the board.
 // Run: node tests/answer-card.test.cjs. Consumers (tray, DashQ) run the same replay over the same fixture file.
 const fs = require('node:fs'), crypto = require('node:crypto'), assert = require('node:assert/strict');
-const card = require('../assets/taskq/answer-card.js');
+// Published v4.6.30 assets are browser IIFEs; exercise the unmodified globals in this runner.
+const vm = require('node:vm');
+const bundle = (file, name) => vm.runInThisContext(fs.readFileSync('assets/taskq/' + file, 'utf8') + '\n;' + name, {filename: file});
+const card = bundle('answer-card.js', 'TaskqAnswerCard');
 const fx = JSON.parse(fs.readFileSync('assets/taskq/answer-card.json', 'utf8'));
 for (const c of fx.cases) {
   const checks = c.events.filter(e => e.type === 'check');
@@ -30,16 +33,16 @@ for (const [name, hash] of Object.entries(pin.files))
 console.log('PASS immutable asset checksums');
 // Chain: fixture /data boards -> boardProjects -> pinned TaskQ counters. Risk: DashQ loses TaskQ order, shows a zero,
 // reports an unread board as 0, or makes Closed loud; the old server renderer checked these before #43.
-const blocks = require('../assets/taskq/project-blocks.js'), {boardProjects} = require('../assets/boards.js');
+const blocks = bundle('project-blocks.js', 'TaskqProjectBlocks'), {boardProjects} = require('../assets/boards.js');
 const caps = html => [...html.matchAll(/class="([^"]*)" data-tqp="tasks"[^>]*data-state="(\w+)" aria-label="([^"]*)"/g)].map(m => [m[2], m[1], m[3]]);
 const [taskq, agentq] = boardProjects(require('../fixture/data.json').boards);
-assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready', 'Closed'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
+assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
 assert(blocks.summary(taskq).includes('href="https://github.com/taskqorg/taskq/issues"') && blocks.summary(taskq).includes('data-icon="github"'), 'board link and provider icon');
 assert.deepEqual(caps(blocks.summary(agentq)).map(c => c[2].split(' · ')[1]), blocks.states.map(([, n]) => n + ': unknown'), 'unread board: every state unknown, none 0');
 const all = blocks.aggregate([taskq, agentq]);
 assert(all.includes('Partial: taskqorg/agentq') && caps(all).every(c => c[2].endsWith('unknown')), 'aggregate of a partial set is unknown');
 const done = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'doing')};
-assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good'], ['closed', 'quiet']], 'zero hidden, Closed quiet');
+assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good']], 'zero hidden; Closed stays on the board');
 console.log('PASS counters: order, zero hidden, unknown, Closed quiet, partial aggregate');
 
 // #170/D8: only canonical, current attempt evidence scopes a host; Ready is never its assigned queue.
@@ -54,9 +57,23 @@ console.log('PASS host scope: canonical identity, fresh attempts, no shared-queu
 // B4: released long-title/count fixtures reach the same renderer as dashboard rows; catch dropped identity or counts.
 const shared = require('../assets/taskq/project-blocks.json');
 for (const count of shared.counts) {
-  const project = {...shared.project, closed: count};
+  const project = {...shared.project, tasks: Array.from({length:count}, (_,i)=>({n:i+1,state:'held',revision:1}))};
   assert(blocks.summary(project).includes(project.name), 'released project identity');
   assert.equal(caps(blocks.summary(project)).length, count === 0 ? 0 : 1, 'released count ' + count);
 }
 assert(blocks.task(shared.project, shared.row).includes(shared.row.title), 'released long task title');
 console.log('PASS released project-block fixtures');
+
+// #179 A2/A3: the released control bundle consumes only listed offers and preserves exact op identity.
+const controls = bundle('task-controls.js', 'TaskqTaskControls'), cf = require('../assets/taskq/task-controls.json');
+for (const c of cf.cases) {
+  const row = {...c.row, controls: cf.states[c.row.state]};
+  assert.deepEqual(controls.op(row, c.op.action, 'dash'), c.op);
+  const html = controls.render(row, {key:'board/task',url:'https://example.invalid/7'});
+  const offers = [...html.matchAll(/data-control="([^"]+)"/g)].map(m=>m[1]);
+  assert.deepEqual(offers, row.controls);
+  assert(html.includes('Close on board'));
+}
+assert.equal(controls.render({n:7,revision:1,controls:['unknown','close']}), '');
+assert.equal(controls.VERSION, cf.version);
+console.log('PASS released task controls: offers, op identity, Close on board');

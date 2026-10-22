@@ -392,6 +392,10 @@
           "url": "https://github.com/taskqorg/taskq/issues/10",
           "state": "doing",
           "revision": 6139993856,
+          "controls": [
+            "stop",
+            "later"
+          ],
           "question": null,
           "card": null
         },
@@ -401,6 +405,10 @@
           "url": "https://github.com/taskqorg/taskq/issues/11",
           "state": "review",
           "revision": 6139993901,
+          "controls": [
+            "stop",
+            "later"
+          ],
           "question": {
             "parsed": false,
             "text": "Merge now or wait?",
@@ -417,6 +425,10 @@
           "url": "https://github.com/taskqorg/taskq/issues/12",
           "state": "ask",
           "revision": 6139994000,
+          "controls": [
+            "stop",
+            "later"
+          ],
           "question": {
             "parsed": true,
             "text": "Done: checked\nProblem: pick a store <i>\n1. SQLite\n3. Files ★",
@@ -450,6 +462,10 @@
           "url": "https://github.com/taskqorg/taskq/issues/13",
           "state": "ready",
           "revision": 6139994100,
+          "controls": [
+            "stop",
+            "later"
+          ],
           "question": null,
           "card": null
         },
@@ -459,6 +475,9 @@
           "url": "https://github.com/taskqorg/taskq/issues/14",
           "state": "failed",
           "revision": 6139994200,
+          "controls": [
+            "retry"
+          ],
           "question": null,
           "card": null
         }
