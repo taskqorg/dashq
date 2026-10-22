@@ -537,7 +537,16 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         strip_line(r["schema"].as_str().unwrap_or(""), &mut p);
         p
     }).collect();
-    let payloads: Vec<String> = stripped.iter().map(Value::to_string).collect();
+    let mut payloads: Vec<String> = stripped.iter().map(Value::to_string).collect();
+    // a telemetry block keeps its allowlisted lines; any other line is dropped and counted (#181)
+    let mut tele = vec![false; records.len()];
+    for (i, r) in records.iter().enumerate().filter(|(_, r)| r["schema"] == TELEMETRY) {
+        match telemetry(&r["payload"]) {
+            Some(Some(kept)) => (tele[i], payloads[i]) = (true, kept.to_string()),
+            Some(None) => tele[i] = true,
+            None => {}
+        }
+    }
     let mut out: Vec<Option<&'static str>> = vec![None; records.len()];
     let mut events = Vec::new();
     let mut index = Vec::new();
@@ -546,7 +555,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
             // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
             (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
             (Some(schema), Some(_)) if !in_board(schema, &r["payload"], g) => out[i] = Some("scope"),
-            (Some(TELEMETRY), Some(observed)) if telemetry(&r["payload"]) => {
+            (Some(TELEMETRY), Some(observed)) if tele[i] => {
                 events.push(Event { id: ids[i], schema: TELEMETRY, observed, kind: Kind::Telemetry, payload: &payloads[i] });
                 index.push(i);
             }
@@ -612,32 +621,59 @@ pub fn cursor(v: &Value) -> Option<(u64, Option<&str>)> {
 /// nothing outside the allowlist hides inside the block. `first`/`last` are [`cursor`]s; a `{seq, id}` cursor must
 /// name the first and last line, whose seqs rise. `status` carries the sender's `connection.telemetry` counters
 /// `backlog_rows`, `backlog_bytes`, `gap_rows` (numbers or null).
-fn telemetry(p: &Value) -> bool {
+/// `None` refuses the block; `Some(None)` stores it as sent. A line outside the allowlist (owner-approved, #181) is
+/// dropped alone, so one bad record never stalls the sender: `Some(Some(kept))` is the block re-encoded without it,
+/// `rows`/`bytes` of the kept lines and `dropped` counting the rest. Cursors still name the block as sent.
+fn telemetry(p: &Value) -> Option<Option<Value>> {
+    use std::io::Write;
+    let (sent, lines) = telemetry_lines(p)?;
+    let (kept, bad): (Vec<_>, Vec<_>) = sent.lines().zip(&lines).partition(|(_, v)| metadata_keys(v, 0, counter_field));
+    if bad.is_empty() {
+        return Some(None);
+    }
+    let plain: String = kept.iter().map(|(l, _)| format!("{l}\n")).collect();
+    let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    z.write_all(plain.as_bytes()).ok()?;
+    let mut out = p.clone();
+    out["rows"] = json!(kept.len());
+    out["bytes"] = json!(plain.len());
+    out["gzip"] = json!(crate::base64(&z.finish().ok()?));
+    out["dropped"] = json!(bad.len());
+    Some(Some(out))
+}
+
+/// The block's plain text and its lines, each a JSON object, with the envelope and cursor checks of [`telemetry`].
+fn telemetry_lines(p: &Value) -> Option<(String, Vec<Value>)> {
     use std::io::Read;
+    telemetry_envelope(p).then_some(())?;
+    let n = |k: &str| p.get(k).and_then(Value::as_u64);
+    let (first, last, rows, bytes) = (cursor(&p["first"])?, cursor(&p["last"])?, n("rows")?, n("bytes")?);
+    let z = unbase64(p["gzip"].as_str()?).filter(|z| z.len() <= TELEMETRY_GZIP)?;
+    let mut plain = Vec::new();
+    if flate2::read::GzDecoder::new(z.as_slice()).take(bytes + 1).read_to_end(&mut plain).is_err() || plain.len() as u64 != bytes {
+        return None;
+    }
+    let plain = String::from_utf8(plain).ok()?;
+    let lines = plain.lines().map(|l| serde_json::from_str::<Value>(l).ok().filter(Value::is_object)).collect::<Option<Vec<Value>>>()?;
+    if lines.len() as u64 != rows {
+        return None;
+    }
+    // coverage is read from the cursors (D11): an identified cursor must be the block's own first and last row
+    let named = |c: (u64, Option<&str>), l: &Value| c.1.is_none_or(|i| l["seq"] == c.0 && l["id"] == i);
+    let ok = named(first, &lines[0]) && named(last, &lines[lines.len() - 1])
+        && (first.1.is_none() || lines.windows(2).all(|w| w[0]["seq"].as_u64().zip(w[1]["seq"].as_u64()).is_some_and(|(a, b)| a < b)));
+    ok.then_some((plain, lines))
+}
+
+fn telemetry_envelope(p: &Value) -> bool {
     let Some(o) = p.as_object() else { return false };
     let n = |k: &str| o.get(k).and_then(Value::as_u64);
     let status = o.get("status").is_none_or(|s| {
         s.as_object().is_some_and(|s| s.iter().all(|(k, v)| ["backlog_rows", "backlog_bytes", "gap_rows"].contains(&k.as_str()) && (v.is_null() || v.is_u64())))
     });
     let (Some(first), Some(last)) = (cursor(&p["first"]), cursor(&p["last"])) else { return false };
-    let (Some(rows), Some(bytes), Some(gzip)) = (n("rows"), n("bytes"), o.get("gzip").and_then(Value::as_str)) else { return false };
-    if p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first.0 > last.0 || rows == 0 || bytes > TELEMETRY_BYTES {
-        return false;
-    }
-    let Some(z) = unbase64(gzip).filter(|z| z.len() <= TELEMETRY_GZIP) else { return false };
-    let mut plain = Vec::new();
-    if flate2::read::GzDecoder::new(z.as_slice()).take(bytes + 1).read_to_end(&mut plain).is_err() || plain.len() as u64 != bytes {
-        return false;
-    }
-    let Ok(plain) = String::from_utf8(plain) else { return false };
-    let Some(lines) = plain.lines().map(|l| serde_json::from_str::<Value>(l).ok().filter(|v| v.is_object() && metadata_keys(v, 0, counter_field))).collect::<Option<Vec<Value>>>() else { return false };
-    if lines.len() as u64 != rows {
-        return false;
-    }
-    // coverage is read from the cursors (D11): an identified cursor must be the block's own first and last row
-    let named = |c: (u64, Option<&str>), l: &Value| c.1.is_none_or(|i| l["seq"] == c.0 && l["id"] == i);
-    named(first, &lines[0]) && named(last, &lines[lines.len() - 1])
-        && (first.1.is_none() || lines.windows(2).all(|w| w[0]["seq"].as_u64().zip(w[1]["seq"].as_u64()).is_some_and(|(a, b)| a < b)))
+    let (Some(rows), Some(bytes), Some(_)) = (n("rows"), n("bytes"), o.get("gzip").and_then(Value::as_str)) else { return false };
+    !(p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first.0 > last.0 || rows == 0 || bytes > TELEMETRY_BYTES)
 }
 
 /// TaskQ's allowlisted resource projection (taskq shared-resource-controls.md, Project overlay: Enrollment record).
@@ -1401,9 +1437,11 @@ mod tests {
     #[test]
     fn telemetry_counter_keys_allow_colon_only_in_lines() {
         let row = |k: &str| json!({"at_ms": 1, "op": "requests", "counts": {k: 3}});
-        assert!(telemetry(&block(1, &[row("GET:issues.N")], None)));
-        for k in ["GET:text", "command:GET", "GET::x", ":GET", "GET:a/b"] {
-            assert!(!telemetry(&block(1, &[row(k)], None)), "{k}");
+        assert_eq!(telemetry(&block(1, &[row("GET:issues.N")], None)), Some(None));
+        // taskq 4.6.31 still sends `GET:compare.:`; each bad line is dropped and counted, the block is kept
+        for k in ["GET:text", "command:GET", "GET::x", ":GET", "GET:a/b", "GET:compare.:"] {
+            let kept = telemetry(&block(1, &[row(k), row("GET:issues.N")], None)).flatten().unwrap_or_else(|| panic!("{k}"));
+            assert_eq!((&kept["rows"], &kept["dropped"], &kept["last"]), (&json!(1), &json!(1), &json!(2)), "{k}");
         }
         assert!(!metadata(&json!({"counts": {"GET:issues.N": 3}}), 0));
     }
@@ -1512,9 +1550,10 @@ mod tests {
         assert_eq!(json!(coreq::enroll::deliver(&host, std::slice::from_ref(&r1), &mut Default::default(), &mut w).unwrap()), ok);
         assert_eq!(coreq::enroll::receipt(&host, &r1, &mut w).unwrap(), "accepted");
         let r2 = coreq::enroll::stamp(&host, TELEMETRY, "t-2", T0 as u64 + 10, block(3, &[line(3)], None)).unwrap();
-        // allowlist inside the block: a content field, a bad block and a changed replay are refused, never stored
+        // allowlist inside the block: a line with a content field is dropped alone and counted (#181); a bad block
+        // and a changed replay are refused, never stored
         let bad = [
-            coreq::enroll::stamp(&host, TELEMETRY, "t-cmd", T0 as u64, block(4, &[json!({"op": "x", "command": "rm"})], None)).unwrap(),
+            coreq::enroll::stamp(&host, TELEMETRY, "t-cmd", T0 as u64, block(4, &[json!({"op": "x", "command": "rm"}), line(5)], None)).unwrap(),
             coreq::enroll::stamp(&host, TELEMETRY, "t-rows", T0 as u64, {
                 let mut p = block(4, &[line(4)], None);
                 p["rows"] = json!(2);
@@ -1525,11 +1564,15 @@ mod tests {
         ];
         let got: Vec<Value> = coreq::enroll::deliver(&host, &[vec![r2.clone()], bad.to_vec()].concat(), &mut Default::default(), &mut w).unwrap();
         assert_eq!(json!(got.iter().map(|r| format!("{}{}", r["state"].as_str().unwrap(), r["reason"].as_str().map(|x| format!(":{x}")).unwrap_or_default())).collect::<Vec<_>>()),
-            json!(["accepted", "rejected:payload", "rejected:payload", "rejected:replay_mismatch"]));
-        assert_eq!(stored(&e), 2);
+            json!(["accepted", "accepted", "rejected:payload", "rejected:replay_mismatch"]));
+        assert_eq!(stored(&e), 3);
+        let kept = telemetry_block(&e, &projection(&e, Some(Scope::All), None, T0 as u64 + 100).unwrap()["rows"], "t-cmd")["blocks"][0]["payload"].clone();
+        assert_eq!((&kept["rows"], &kept["dropped"], &kept["first"], &kept["last"]), (&json!(1), &json!(1), &json!(4), &json!(5)));
+        assert!(!kept.to_string().contains("rm") && unbase64(kept["gzip"].as_str().unwrap()).is_some());
         // the newest block's counters are taskq's own; a block without status leaves them unknown with the reason
         let t = row(&e);
-        assert_eq!((&t["state"], &t["blocks"], &t["last_synced"], &t["backlog_rows"], &t["reason"]), (&json!("ok"), &json!(2), &json!(T0 + 10), &Value::Null, &json!("status not reported by taskq")));
+        assert_eq!((&t["state"], &t["blocks"], &t["last_synced"], &t["backlog_rows"], &t["reason"]), (&json!("ok"), &json!(3), &json!(T0 + 10), &Value::Null, &json!("status not reported by taskq")));
+        assert_eq!(t["pruned"], json!([{"cause": "allowlist", "blocks": 1, "rows": 1, "through_seq": 5}]));
         let r3 = coreq::enroll::stamp(&host, TELEMETRY, "t-3", T0 as u64 + 20, block(4, &[line(4)], Some(status))).unwrap();
         coreq::enroll::deliver(&host, std::slice::from_ref(&r3), &mut Default::default(), &mut w).unwrap();
         let t = row(&e);
@@ -1547,7 +1590,7 @@ mod tests {
         let r4 = json!({"schema": TELEMETRY, "event_id": "t-4", "observed_at": T0 + 30, "payload": block(5, &[line(5)], None)});
         assert!(matches!(coreq::enroll::deliver(&host, std::slice::from_ref(&r4), &mut Default::default(), &mut w), Err(coreq::enroll::Delivery::Stopped(_))));
         assert_eq!(ingest(&e, a["credential"].as_str().unwrap(), vec![r4], T0 + 30), (401, json!({"protocol": 1, "error": "revoked"})));
-        assert_eq!(stored(&e), 3);
+        assert_eq!(stored(&e), 4);
     }
 
     #[test]
