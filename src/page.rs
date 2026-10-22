@@ -780,6 +780,23 @@ fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &s
 }
 
 /// D8/H1–H7: the existing canonical host identity, never a friendly-label join or a new authority.
+/// D8 / #178: show the same scoped observation as JSON, including producer time and expiry.
+fn host_observation(h: &Value, kind: &str, field: &str, now: u64) -> String {
+    let rows: Vec<_> = h["taskq"]["observations"].as_array().into_iter().flatten().filter(|o| o["kind"] == kind).collect();
+    if rows.is_empty() {
+        let why = match kind { "login" => "no login probe; activity does not prove sign-in", "queue" => "host-assigned queue not reported; shared work is in Tasks", _ => "no qualified online probe" };
+        return format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">?</span>", esc(why), esc(why));
+    }
+    rows.iter().map(|o| {
+        let shown = if o["state"] == "unknown" { "unknown".into() } else { o[field].as_str().map(esc).unwrap_or_else(|| text(&o[field])) };
+        let evidence = format!("TaskQ {} · producer {} · observed {} · valid until {} · {}", o["board"]["repo"].as_str().unwrap_or(""), o["producer"].as_str().unwrap_or("unknown"), at(&o["observed"], now), o["valid_until"].as_u64().map(|t|clock(t,now)).unwrap_or_else(|| "unknown".into()), o["reason"].as_str().unwrap_or("complete observation"));
+        let remaining = o["valid_until"].as_u64().map(|t|t.saturating_sub(now)).unwrap_or(0);
+        let expiry = if o["state"] == "unknown" { String::new() } else { format!(" data-valid-for=\"{remaining}\"") };
+        let status = if o["state"] == "unknown" { "unknown" } else { "" };
+        format!("<span class=\"{status} host-observation\" tabindex=\"0\" title=\"{}\" {expiry}>{shown}</span>", esc(&evidence))
+    }).collect::<Vec<_>>().join(" · ")
+}
+
 fn host_grid(w: &mut String, doc: &Value, now: u64) {
     let mut hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
     for r in doc["resources"]["rows"].as_array().into_iter().flatten() {
@@ -806,7 +823,7 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         let observed_age = f["age_s"].as_u64().map_or(age.clone(), |a| format!("<span data-age-s=\"{a}\">{age}</span>"));
         let why = format!("{}; {}", f["reason"].as_str().unwrap_or("AgentQ heartbeat"), h["reason"].as_str().unwrap_or("canonical host identity"));
         let (name, kind) = id.split_once('/').unwrap_or((id, "kind unknown"));
-        let _ = writeln!(w, "<article class=\"host\" id=\"host-{key}\"><div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">Online {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), unknown("no qualified online probe"), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
+        let _ = writeln!(w, "<article class=\"host\" id=\"host-{key}\"><div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">TaskQ {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), host_observation(&h, "online", "state", now), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
         for i in doc["attention"]["current"].as_array().into_iter().flatten().filter(|i| i["source"] == "serverq" && i["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))) {
             let _ = writeln!(w, "<small class=\"host-warning\">{} <a data-view-link href=\"/checks?period={}#checks\">Diagnostics</a></small>", text(&i["what"]), doc["period"].as_u64().unwrap_or(1800));
         }
@@ -825,7 +842,7 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
             let shown = if version.is_null() { unknown("running version not reported") } else { text(version) };
             let _ = writeln!(w, "<div class=\"service\" tabindex=\"0\" title=\"{}\"><span>{label}</span><span>{shown}</span><span class=\"detail\">{}</span></div>", esc(&why), esc(match update { "current" => "version current", "available" => "update available", "error" => "update error", _ => "update unknown" }));
         }
-        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Client sign-in</span><div class=\"login\">Claude {}</div><div class=\"login\">Codex {}</div></div>", unknown("no login probe; activity does not prove sign-in"), unknown("no login probe; activity does not prove sign-in"));
+        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Client sign-in</span><div class=\"login\">Claude {}</div><div class=\"login\">Codex {}</div></div>", host_observation(&h, "login", "claude", now), host_observation(&h, "login", "codex", now));
         let observation = format!("{}; observed {}; {}", src["state"].as_str().unwrap_or("unknown"), at(&src["at"], now), src["reason"].as_str().unwrap_or("resource sample"));
         let cpu = c["cpu"]["percent"].as_f64();
         let shown = cpu.map_or_else(|| unknown(c["cpu"]["reason"].as_str().unwrap_or("no resource sample")), |p| format!("{p:.1}%"));
@@ -840,10 +857,18 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
             let _ = writeln!(w, "<div class=\"disk\"><small>{}</small>{}{}</div>", text(&d["id"]), value(&format!("host-disk-{key}-{}", enc(d["id"].as_str().unwrap_or(""))), &shown, p, None), bar(p));
         }
         if c["disks"].as_array().is_none_or(Vec::is_empty) || !c["disk_reason"].is_null() { let _ = write!(w, "{}", unknown(c["disk_reason"].as_str().unwrap_or("no filesystem sample"))); }
-        let running = h["taskq"]["observed_running"].as_u64().map_or_else(|| format!("{} running", unknown("no fresh attempt evidence")), |n| format!("{n} observed running"));
-        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Tasks</span><a data-view-link class=\"count-link\" href=\"{}\">{running}</a><a data-view-link class=\"count-link\" href=\"{}\">{} queued</a></div></article>", esc(&query("/projects", id)), esc(&query("/projects", id)), unknown("host-assigned queue not reported; shared work is in Tasks"));
+        let running = if h["taskq"]["observations"].as_array().is_some_and(|a|a.iter().any(|o|o["kind"]=="queue")) { format!("{} running", host_observation(&h,"queue","running",now)) } else { h["taskq"]["observed_running"].as_u64().map_or_else(|| format!("{} running", unknown("no fresh attempt evidence")), |n| format!("{n} observed running")) };
+        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Tasks</span><a data-view-link class=\"count-link\" href=\"{}\">{running}</a><a data-view-link class=\"count-link\" href=\"{}\">{} queued</a></div>", esc(&query("/projects", id)), esc(&query("/projects", id)), host_observation(&h, "queue", "queued", now));
+        if let Some(obs) = h["taskq"]["observations"].as_array().filter(|a|!a.is_empty()) {
+            let _ = write!(w, "<details class=\"host-evidence\" id=\"host-evidence-{key}\"><summary>TaskQ evidence</summary><div class=\"host-evidence-grid\">");
+            for o in obs {
+                let _ = write!(w, "<p class=\"detail\">{} · {} · {}<br>Producer {} · workspace {}<br>Observed {} · valid until {}<br>{}</p>", text(&o["board"]["repo"]), text(&o["host"]), text(&o["kind"]), text(&o["producer"]), text(&o["workspace"]), at(&o["observed"], now), o["valid_until"].as_u64().map(|t|clock(t,now)).unwrap_or_else(|| "unknown".into()), text(&o["reason"]));
+            }
+            let _ = write!(w, "</div></details>");
+        }
+        let _ = writeln!(w, "</article>");
     }
-    let _ = writeln!(w, "<p class=\"legend\">? Unknown or unavailable · stale values are last known. Online, sign-in and assigned queue need producer probes. Running counts are observed attempts, not complete host totals.</p></section>");
+    let _ = writeln!(w, "<p class=\"legend\">? Unknown or unavailable · stale values are last known. Online is TaskQ service presence, not machine or client health. Sign-in and queues use scoped producer observations with expiry. Running counts are observed attempts, not complete host totals.</p></section>");
 }
 
 /// D8.2: a person and a named action; observations/history remain in host detail.

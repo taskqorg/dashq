@@ -257,3 +257,7 @@ a { color:var(--link);text-underline-offset:3px; }
 .host { padding:16px;border:1px solid var(--line);border-radius:7px;background:var(--paper);margin-bottom:10px; }
 .host .kind,.host-warning { display:block;font-size:.875rem; }
 .host-warning { color:var(--warn);margin-top:6px; }
+
+.host-evidence { grid-column:1/-1;min-width:0;overflow-wrap:anywhere; }
+.host-observation.unconfirmed { color:var(--muted); }
+.host-evidence-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:14px; }

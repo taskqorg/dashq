@@ -118,6 +118,7 @@ async function refresh() {
     if (pendingAnchor) { document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   } catch (e) {
     const readingY = scrollY;
+    expireHostObservations(true);
     DashqResources.bind();
     const elapsed = Math.floor((Date.now() - ageUpdatedAt) / 1000);
     document.querySelectorAll('main [data-age-s]').forEach(e => {
@@ -156,7 +157,24 @@ async function refresh() {
     busy = false;
   }
 }
+// D6 / #178: expiry also applies while refresh is unavailable or deferred by a text selection.
+function expireHostObservations(failed = false) {
+  document.querySelectorAll('.host-observation[data-valid-for]').forEach(e => {
+    e.observedSince ??= performance.now();
+    if ((performance.now() - e.observedSince) / 1000 > Number(e.dataset.validFor)) {
+      e.textContent = 'unknown';
+      e.classList.add('unknown');
+      e.classList.remove('unconfirmed');
+      e.title = 'Expired. ' + e.title;
+      delete e.dataset.validFor;
+    } else if (failed && !e.classList.contains('unconfirmed')) {
+      e.textContent += ' · unconfirmed';
+      e.classList.add('unconfirmed');
+    }
+  });
+}
 function bind() {
+  expireHostObservations();
   applyView();
   document.getElementById('refresh')?.addEventListener('click', refresh);
   document.querySelectorAll('.aq-edit').forEach(box => { aqRender(box); aqLoad(box); });
@@ -336,6 +354,7 @@ revealConnection();
 addEventListener('hashchange', revealConnection);
 refresh();
 setInterval(refresh, 60000);
+setInterval(expireHostObservations, 1000);
 
 function selectOutcome(outcome) {
   document.querySelectorAll('[data-result-outcome]').forEach(b => {

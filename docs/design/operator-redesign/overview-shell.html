@@ -1,0 +1,141 @@
+<section id="dq-overview" aria-label="DashQ overview candidate">
+<style>
+#dq-overview{color-scheme:light dark;--dq-bg:light-dark(#fafbfc,#252b32);--dq-text:light-dark(#243039,#eef2f5);--dq-secondary:light-dark(#59636e,#b9c3cd);--dq-line:light-dark(#dce0e5,#46505b);--dq-soft:light-dark(#e9edf1,#37424c);--dq-good:light-dark(#246f59,#8dd2b8);--dq-warn:light-dark(#955525,#edbc96);font:400 16px/1.4 system-ui,sans-serif;max-width:1024px;color:var(--dq-text);background:var(--dq-bg);padding:20px;container-type:inline-size;overflow-wrap:anywhere;box-sizing:border-box}
+#dq-overview .dq-bar{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding-right:90px;padding-bottom:16px;border-bottom:1px solid var(--dq-line)}#dq-overview .dq-logo{font-size:20px;font-weight:500;letter-spacing:-.4px}#dq-overview .dq-nav{display:flex;gap:4px;flex-wrap:wrap}#dq-overview .dq-control{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;color:inherit;border:0;border-radius:7px;min-height:36px;background:transparent;padding:6px 9px;text-decoration:none;box-sizing:border-box}#dq-overview .dq-control[aria-current=page],#dq-overview .dq-control:hover{background:var(--dq-soft)}#dq-overview .dq-control:focus-visible{outline:2px solid var(--dq-text);outline-offset:2px}#dq-overview .dq-control svg,#dq-overview .dq-section-title svg,#dq-overview .dq-action svg,#dq-overview .dq-person svg{width:18px;height:18px;flex-shrink:0;stroke-width:1.7}#dq-overview .dq-demo{margin-left:auto;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-titlebar{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin:20px 0 14px}#dq-overview h1{font-size:24px;font-weight:500;letter-spacing:-.5px;margin:0}#dq-overview .dq-section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 10px}#dq-overview h2{font-size:18px;font-weight:500;margin:0}#dq-overview .dq-context{display:flex;align-items:center;gap:6px;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-context svg{width:15px;height:15px}#dq-overview .dq-warning{color:var(--dq-warn)}#dq-overview .dq-muted{color:var(--dq-secondary)}#dq-overview .dq-small{font-size:.85em}#dq-overview .dq-section{margin-top:20px}#dq-overview .dq-action{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;width:100%;min-height:40px;padding:7px 0;box-sizing:border-box}#dq-overview .dq-action>span{flex:1;min-width:0}#dq-overview .dq-action:hover{background:var(--dq-soft)}#dq-overview .dq-action:focus-visible{outline:2px solid var(--dq-text);outline-offset:2px}#dq-overview .dq-bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:28px;border-top:1px solid var(--dq-line);margin-top:18px}#dq-overview .dq-person{display:flex;align-items:center;gap:10px;min-height:38px;padding:5px 0}#dq-overview .dq-person>span:nth-of-type(2){flex:1;min-width:0}#dq-overview .dq-person .dq-brand{display:inline-flex;width:18px;height:18px}#dq-overview .dq-brand svg{width:18px;height:18px;fill:currentColor}#dq-overview .dq-status{display:flex;align-items:center;gap:6px;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-status .dq-dot{width:6px;height:6px;border-radius:50%;background:var(--dq-good)}#dq-overview .dq-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--dq-line);margin-top:18px;padding-top:12px}#dq-overview .dq-footer .dq-control{margin-left:auto}#dq-overview .dq-inline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}#dq-overview .dq-block{border-top:1px solid var(--dq-line);padding-top:16px;margin-top:16px}#dq-overview .dq-stat{display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap;margin:12px 0}#dq-overview .dq-big{font-size:28px;font-weight:500;font-variant-numeric:tabular-nums}#dq-overview .dq-empty{padding:32px 0;max-width:480px}#dq-overview .dq-empty>svg{width:28px;height:28px;color:var(--dq-secondary)}#dq-overview .dq-empty p{color:var(--dq-secondary);margin:12px 0}#dq-overview .dq-control:disabled{color:var(--dq-secondary);opacity:.6}#dq-overview [hidden]{display:none!important}#dq-overview [data-task-rows]{margin:16px 0}#dq-overview [data-task-notice]{font-size:.85em;color:var(--dq-secondary)}
+#dq-overview #dq-server-study{max-width:none;background:transparent}#dq-overview #dq-server-study .ds-caption,#dq-overview #dq-server-study .ds-period{display:none}#dq-overview #dq-server-study .ds-stage{padding:0;border-radius:0}#dq-overview #dq-server-study article{background:var(--dq-bg)}
+@container(max-width:680px){#dq-overview .dq-bottom{grid-template-columns:1fr;gap:0}#dq-overview .dq-bar{gap:12px}#dq-overview .dq-demo{margin-left:0}#dq-overview .dq-titlebar{margin-top:16px}#dq-overview .dq-control{padding:6px 8px}}
+@container(max-width:480px){#dq-overview .dq-bar{padding-right:0}#dq-overview .dq-logo{flex-basis:100%;padding-right:90px;box-sizing:border-box}#dq-overview .dq-nav{gap:0}}
+@media(pointer:coarse){#dq-overview .dq-control,#dq-overview .dq-action{min-height:44px}}
+</style>
+<!-- TASKQ_STYLES -->
+<header class="dq-bar">
+ <span class="dq-logo">dashq</span>
+ <nav class="dq-nav" aria-label="Main navigation">
+  <button class="dq-control" data-route="overview" aria-current="page"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Overview</button>
+  <button class="dq-control" data-route="agents"><i data-lucide="bot" aria-hidden="true"></i>Agents</button>
+  <button class="dq-control" data-route="reports"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i>Reports</button>
+  <button class="dq-control" data-route="tasks"><i data-lucide="list-todo" aria-hidden="true"></i>Tasks</button>
+  <button class="dq-control" data-route="telemetry"><i data-lucide="chart-no-axes-column" aria-hidden="true"></i>Telemetry</button>
+  <button class="dq-control" data-route="pm" aria-label="Open Project Manager"><i data-lucide="messages-square" aria-hidden="true"></i>PM</button>
+  <button class="dq-control" data-route="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>System</button>
+ </nav>
+</header>
+<div data-page="overview">
+ <div class="dq-titlebar"><h1>Overview</h1><span class="dq-small dq-muted">Design preview · example states</span></div>
+ <div class="dq-section-title"><h2>Infrastructure</h2><span class="dq-context"><i data-lucide="clock-3" aria-hidden="true"></i>Last 30 minutes <span data-tooltip="All utilization trends use the same 0–100% scale." aria-label="Trend scale: 0 to 100 percent"><i data-lucide="info" aria-hidden="true"></i></span></span></div>
+ <!-- SERVER_COMPONENT -->
+ <section class="dq-section" aria-labelledby="dq-attention-title">
+  <div class="dq-section-title"><h2 id="dq-attention-title">Needs attention <span class="dq-small dq-warning">2</span></h2></div>
+  <button class="dq-action" data-open-finding><i data-lucide="triangle-alert" class="dq-warning" aria-hidden="true"></i><span><span class="dq-warning">FRA</span> · review disk capacity</span><span class="dq-small dq-muted" style="flex:0 0 auto;white-space:nowrap">Finding</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+  <button class="dq-action" data-open-question><i data-lucide="message-circle-question-mark" class="dq-warning" aria-hidden="true"></i><span>TaskQ · one answer needed</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+ </section>
+ <div class="dq-bottom">
+  <section aria-labelledby="dq-work-title"><div class="dq-section-title"><h2 id="dq-work-title">Work</h2><button class="dq-control dq-small" data-route="tasks" data-all-tasks aria-label="Open all tasks"><i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div><div data-project-summary></div></section>
+  <section aria-labelledby="dq-agents-title"><div class="dq-section-title"><h2 id="dq-agents-title">Agents</h2><button class="dq-control dq-small" data-route="agents" aria-label="Open agent activity"><i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div><div data-agent-summary></div></section>
+ </div>
+ <footer class="dq-footer"><span class="dq-context"><i data-lucide="radio" aria-hidden="true"></i>Data coverage</span><span class="dq-small dq-muted">Some sources need connecting</span><button class="dq-control dq-small" data-route="telemetry">Inspect<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></footer>
+</div>
+<div data-page="tasks" hidden>
+ <div class="dq-titlebar"><h1>Tasks</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-context" data-task-scope>All projects</div>
+ <div class="dq-block" data-task-projects></div>
+ <div data-task-rows></div>
+ <div data-task-detail></div>
+ <p data-task-notice role="status"></p>
+</div>
+<!-- AGENT_PAGES -->
+<!-- DIAGNOSTIC_PAGES -->
+<!-- REPORT_PAGES -->
+<div data-page="pm" hidden>
+ <div class="dq-titlebar"><h1>Project Manager</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <form data-pm-form class="dq-block" style="max-width:620px">
+  <label for="dq-pm-project">Project</label><select id="dq-pm-project" class="dq-control"><option>TaskQ</option><option>AgentQ</option><option>DashQ</option></select>
+  <label for="dq-pm-request" style="display:block;margin:18px 0 8px">Request for Project Manager</label>
+  <textarea id="dq-pm-request" rows="4" style="width:100%;box-sizing:border-box;font:inherit;color:inherit;background:var(--dq-bg);border:1px solid var(--dq-line);border-radius:8px;padding:12px" placeholder="What should PM investigate or plan?"></textarea>
+  <div class="dq-inline" style="margin-top:12px"><button class="dq-next" type="button" data-pm-review-trigger>Review request<i data-lucide="arrow-right" aria-hidden="true"></i></button><span class="dq-small dq-muted">Continue in the native session</span></div>
+  <div data-pm-review hidden class="dq-block" role="status"><h2>Ready for TaskQ</h2><p data-pm-summary></p><p class="dq-small dq-muted">The native session opens after TaskQ accepts the request.</p><button class="dq-control" type="button" disabled>Send · not connected in preview</button></div>
+ </form>
+</div>
+<div data-page="system" hidden>
+ <div class="dq-titlebar"><h1>System</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-bottom"><section><h2>Infrastructure</h2><button class="dq-action" data-system="Services"><i data-lucide="server-cog" aria-hidden="true"></i><span>Services</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Checks & findings"><i data-lucide="list-checks" aria-hidden="true"></i><span>Checks &amp; findings</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Versions & updates"><i data-lucide="package" aria-hidden="true"></i><span>Versions &amp; updates</span><i data-lucide="chevron-right" aria-hidden="true"></i></button></section><section><h2>Connections &amp; controls</h2><button class="dq-action" data-system="Integrations & enrollment"><i data-lucide="plug" aria-hidden="true"></i><span>Integrations &amp; enrollment</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Resources & configuration"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>Resources &amp; configuration</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Optimization & stage totals"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>Optimization &amp; stage totals</span><i data-lucide="chevron-right" aria-hidden="true"></i></button></section></div>
+ <section class="dq-block" data-system-detail hidden><h2 data-system-title></h2><p data-system-description class="dq-muted"></p><p class="dq-small dq-muted">Existing destination retained. Detailed layouts and live operations require their own qualification.</p></section>
+ <button class="dq-control dq-small" data-route="telemetry"><i data-lucide="radio" aria-hidden="true"></i>Source status &amp; telemetry</button>
+</div>
+<!-- TASKQ_SCRIPTS -->
+<script>
+{
+ const root=document.getElementById('dq-overview');
+ const mark=name=>`<i data-lucide="${name}" aria-hidden="true"></i>`;
+ const diskSamples=[42,48,57,67,78,86,92];
+ root.querySelector('[data-disk-history]').innerHTML=diskSamples.map((value,index)=>`<button aria-label="${index===6?'Now':(30-index*5)+' minutes ago'}: ${value} GiB used" data-growth-index="${index}"><span style="--height:${value}%"></span></button>`).join('');
+ const question={n:103,state:'ask',revision:1,title:'Choose rollout scope',url:'https://example.invalid/taskq/103',question:{parsed:true,text:'Choose the rollout scope.',done:'The candidate passed review.',problem:'Which hosts should receive the candidate first?',evidence:[],choices:[{id:1,text:'One host first',recommended:true,consequential:false},{id:2,text:'All hosts',recommended:false,consequential:false}],limits:{lines:4,chars:240}}};
+ // TASK_CONTROL_POLICY
+ const projects=[
+  {id:'taskq',name:'TaskQ',board:{kind:'github',url:'https://github.com/taskqorg/taskq/issues'},complete:true,closed:0,tasks:[{n:101,state:'doing',revision:1,title:'Prepare the operator workspace',url:'https://example.invalid/taskq/101'},{n:102,state:'review',revision:1,title:'Verify telemetry delivery',url:'https://example.invalid/taskq/102'},question]},
+  {id:'agentq',name:'AgentQ',board:{kind:'github',url:'https://github.com/taskqorg/agentq/issues'},complete:true,closed:0,tasks:[{n:201,state:'ready',revision:1,title:'Qualify client probes',url:'https://example.invalid/agentq/201'},{n:202,state:'waiting',revision:1,title:'Wait for resource history',url:'https://example.invalid/agentq/202'}]}
+ ];
+ // AGENT_LOGIC
+ // REPORT_LOGIC
+ root.querySelector('[data-project-summary]').innerHTML=projects.map(p=>TaskqProjectBlocks.summary(p)).join('');
+ root.querySelector('[data-task-projects]').innerHTML=projects.map(p=>TaskqProjectBlocks.summary(p)).join('');
+ root.querySelector('[data-agent-summary]').innerHTML=agentRows();
+ root.querySelector('[data-agent-detail]').innerHTML=agentRows(true);
+ const savedAgent=window.openai?.widgetState?.privateContent?.agentStudy;
+ selectAgent(savedAgent?.v===1&&agents.some(a=>a.id===savedAgent.selected)?savedAgent.selected:'claude-mac');
+ let overviewReturn=null;
+ function show(route){
+  if(!['overview','tasks','agents','reports','telemetry','pm','disk','queue','system','finding'].includes(route))return;
+  const previous=root.querySelector('[data-page]:not([hidden])');
+  const moveFocus=previous&&previous.dataset.page!==route&&previous.contains(document.activeElement);
+  if(previous?.dataset.page==='overview'&&moveFocus)overviewReturn=document.activeElement;
+  for(const page of root.querySelectorAll('[data-page]'))page.hidden=page.dataset.page!==route;
+  for(const button of root.querySelectorAll('.dq-nav [data-route]')){if(button.dataset.route===route)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
+  if(moveFocus)(root.querySelector(`.dq-nav [data-route="${route}"]`)||root.querySelector(`[data-page="${route}"] button`))?.focus({preventScroll:true});
+  if(previous&&previous.dataset.page!==route){
+   if(route==='overview'&&overviewReturn?.isConnected){
+    const target=overviewReturn;target.focus({preventScroll:true});
+    // Let the containing preview resize after the longer overview becomes visible.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!target.closest('[data-page]').hidden)target.scrollIntoView({block:'center'});}));
+   }
+   else root.scrollIntoView({block:'start'});
+  }
+ }
+ function tasks(project='',state='',number=null){
+  show('tasks');const selected=projects.filter(p=>!project||p.id===project);
+  root.querySelector('[data-task-scope]').textContent=(project?selected[0]?.name||'All projects':'All projects')+(state?' · '+(TaskqProjectBlocks.states.find(s=>s[0]===state)?.[1]||state):'');
+  root.querySelector('[data-task-rows]').innerHTML=selected.map(p=>p.tasks.filter(t=>(!state||t.state===state)&&(!number||t.n===number)).map(t=>TaskqProjectBlocks.task(p,t,!project)).join('')).join('');
+  const hasQuestion=selected.some(p=>p.tasks.some(t=>t.n===103&&(!state||t.state===state)&&(!number||t.n===number)));
+  root.querySelector('[data-task-detail]').innerHTML=hasQuestion?TaskqAnswerCard.render('demo/taskq',question,{draft:'',bound:1,op:null,receipt:null},{answer:false,reason:'Preview only; no answer is sent'}):'';
+  const chosen=number?selected.flatMap(p=>p.tasks).find(t=>t.n===number):null;
+  if(chosen)root.querySelector('[data-task-detail]').insertAdjacentHTML('beforeend','<fieldset disabled aria-label="Task controls disabled in preview" style="border:0;padding:0;margin:12px 0">'+TaskqTaskControls.render({...chosen,controls:taskControlStates[chosen.state]||[]},{key:'demo'})+'</fieldset>');
+  root.querySelector('[data-task-notice]').textContent=chosen?'Preview only · no task operation is sent.':'';
+ }
+ function fixtureLink(url){const match=/example\.invalid\/(taskq|agentq)\/(\d+)/.exec(url);if(match)tasks(match[1],'',Number(match[2]));}
+ root.addEventListener('click',event=>{
+  const system=event.target.closest('[data-system]');if(system){const descriptions={'Services':'Service observations with their own source and observation time.','Checks & findings':'Current findings, observation gaps, manual checks and incident history remain distinct.','Versions & updates':'Installed, running, selected and latest versions, with updater state.','Integrations & enrollment':'Connection, consent, last accepted snapshot, gaps and revocation.','Resources & configuration':'Existing TaskQ resource controls and AgentQ review/apply, gated by actor capability.','Optimization & stage totals':'Paired experiment evidence and existing D21 stage aggregates retain their separate meaning.'};root.querySelector('[data-system-detail]').hidden=false;root.querySelector('[data-system-title]').textContent=system.dataset.system;root.querySelector('[data-system-description]').textContent=descriptions[system.dataset.system];return;}
+  if(event.target.closest('[data-scenario="warning"] button[data-view="disk"]')){event.stopPropagation();show('disk');}
+ },true);
+ root.addEventListener('click',event=>{
+  const route=event.target.closest('[data-route]');if(route){if(route.hasAttribute('data-all-tasks'))tasks();else show(route.dataset.route);return;}
+  if(event.target.closest('[data-open-question]')){tasks('taskq','ask',103);return;}
+  if(event.target.closest('[data-open-finding]')){show('finding');return;}
+  if(event.target.closest('[data-finding-request]')){show('pm');root.querySelector('[data-pm-review]').hidden=true;root.querySelector('#dq-pm-project').value='DashQ';root.querySelector('#dq-pm-request').value='Investigate the ServerQ disk-headroom finding for FRA (demo episode). Review its structured evidence and prepare a plan.';root.querySelector('#dq-pm-request').focus();return;}
+  if(event.target.closest('[data-open-disk]')){show('disk');return;}
+  if(event.target.closest('[data-open-ready]')){tasks('agentq','ready',201);return;}
+  const evidence=event.target.closest('[data-inspect-growth],[data-queue-evidence]');if(evidence){const detail=root.querySelector(evidence.hasAttribute('data-inspect-growth')?'[data-growth-evidence]':'[data-admission-evidence]');detail.open=true;detail.querySelector('summary').focus({preventScroll:true});detail.scrollIntoView({block:'nearest'});return;}
+  const growth=event.target.closest('[data-growth-index]');if(growth){const index=Number(growth.dataset.growthIndex);root.querySelector('[data-growth-readout]').textContent=`${index===6?'Now':(30-index*5)+'m ago'} · ${diskSamples[index]} GiB used`;return;}
+  if(TaskqProjectBlocks.handle(event,{project:id=>tasks(id),tasks:(id,state)=>tasks(id,state),open:url=>{if(url.includes('example.invalid'))fixtureLink(url);else window.open(url,'_blank','noopener');}}))return;
+  const answerLink=event.target.closest('.qac a');if(answerLink){event.preventDefault();fixtureLink(answerLink.href);}
+ });
+ root.querySelector('[data-pm-form]').addEventListener('input',()=>{root.querySelector('[data-pm-review]').hidden=true;});
+ root.querySelector('[data-pm-review-trigger]').addEventListener('click',event=>{event.preventDefault();const text=root.querySelector('#dq-pm-request').value.trim();if(!text){root.querySelector('#dq-pm-request').focus();return;}root.querySelector('[data-pm-review]').hidden=false;root.querySelector('[data-pm-summary]').textContent=root.querySelector('#dq-pm-project').value+' · '+text;});
+ tasks();show('overview');
+ console.assert(root.querySelectorAll('[data-project-summary] .tqp-project').length===2,'Overview must use the two shared TaskQ project blocks');
+ console.assert(root.querySelector('[data-task-detail] .qac')?.dataset.qacState==='read-only','Example answers must stay read-only');
+ console.assert(diskSamples.length===7&&diskSamples[6]-diskSamples[0]===50,'Disk growth and scheduled history must agree');
+ console.assert(root.querySelectorAll('[data-page="telemetry"]').length===1&&root.querySelectorAll('[data-page="queue"]').length===1,'Diagnostic destinations must be unique');
+ if(globalThis.lucide)lucide.createIcons({attrs:{width:18,height:18}});
+}
+</script>
+</section>

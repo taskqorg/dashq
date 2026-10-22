@@ -1963,7 +1963,10 @@ mod tests {
         let (good, v2) = (join_board("tq-win"), join_board("tq-v2"));
         let board = json!({"kind": "github", "host": "github.com", "repo": "taskqorg/taskq"});
         let choices = json!([{"number": 1, "text": "Approve narrowly scoped choice content in D11 ★", "recommended": true}, {"number": 2, "text": "Defer choice support", "recommended": false}]);
-        let observation = |tasks: Value| json!({"schema": 1, "installation": "tq-win", "board": board, "observed": now, "complete": true, "reason": null, "totals": {"doing": 2, "ask": 1}, "tasks": tasks});
+        let observation = |tasks: Value| json!({"schema": 1, "installation": "tq-win", "board": board, "observed": now, "complete": true, "reason": null, "totals": {"doing": 2, "ask": 1}, "tasks": tasks, "observations": [
+            {"host":"win","kind":"online","state":"online","producer":"aaaaaaaaaaaa","observed":now-10,"valid_until":now+290,"complete":true,"reason":null},
+            {"host":"win","kind":"login","state":"logged in","claude":"logged in","codex":"logged in","producer":"aaaaaaaaaaaa","observed":now-10,"valid_until":now+590,"complete":true,"reason":null},
+            {"host":"win","kind":"queue","state":"busy","running":1,"queued":2,"producer":"aaaaaaaaaaaa","observed":now-10,"valid_until":now+290,"complete":true,"reason":null}]});
         let record = |id: &str, payload: Value| json!({"schema": schema, "event_id": id, "observed_at": now, "payload": payload});
         // text outside `tasks[].choices[].text`, or choice text that is not short single-line metadata, stays refused
         let refused = [
@@ -1995,6 +1998,22 @@ lines", "recommended": true}]}])),
         assert_eq!((receipt(&good, "b-1"), receipt(&v2, "b-2")), (json!("projected"), json!("accepted")));
         let row = doc["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "tq-win").unwrap().clone();
         assert_eq!(row["snapshot"]["payload"]["tasks"][0]["choices"], choices);
+        let host_observations = |d: &Value| d["hosts"].as_array().unwrap().iter().find(|h|h["id"]=="win").unwrap()["taskq"]["observations"].clone();
+        let obs = host_observations(&doc);
+        assert_eq!(obs.as_array().unwrap().len(),3,"stored observations reach /data without optional sources");
+        assert!(obs.as_array().unwrap().iter().any(|o|o["kind"]=="online" && o["state"]=="online" && o["valid_until"]==now+290));
+        let report = app.doc(1800,json!({}),Some(Scope::All));
+        assert_eq!(host_observations(&report),obs,"local report and HTTP share the projection");
+        let scoped = data(&app,"host=win",Some(Scope::All)).1;
+        assert_eq!(host_observations(&scoped),obs,"host filter retains board observations");
+        assert!(data(&app,"",None).1["hosts"].as_array().unwrap().iter().all(|h|h["taskq"]["observations"].as_array().unwrap().is_empty()),"no observation escapes browser scope");
+        let html = crate::page::render(&doc,&json!({}));
+        assert!(html.contains("valid until") && html.contains("aaaaaaaaaaaa") && html.contains("logged in"));
+        if let Some(dir) = std::env::var_os("DASHQ_HOST_OBSERVATIONS_EVIDENCE") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(std::path::Path::new(&dir).join("page.html"),html).unwrap();
+        }
+
         let ver = |inst: &str| doc["versions"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst).unwrap().clone();
         assert_eq!((ver("tq-win")["provenance"].as_str(), ver("tq-win")["observation"]["state"].as_str(), ver("tq-win")["reason"].as_str()), (Some("enrollment"), Some("ok"), None));
         assert_eq!((ver("tq-v2")["provenance"].as_str(), ver("tq-v2")["reason"].as_str()), (Some("unsupported"), Some("unsupported snapshot schema taskq-board/1")));

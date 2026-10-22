@@ -163,4 +163,83 @@
     ]}},
     "fra": {"value": null, "at": null, "error": "log missing", "incomplete": false}
   }
+,
+  "installations": {
+  "source": {
+    "state": "ok",
+    "at": 1791875139,
+    "age_s": 0,
+    "reason": null,
+    "incomplete": false
+  },
+  "rows": [
+    {
+      "installation": "tq-fixture",
+      "product": "taskq",
+      "runtime": "native",
+      "host_label": "fra",
+      "workspace": "example",
+      "connection": "active",
+      "projected": true,
+      "observation": {
+        "state": "ok",
+        "at": 1791875119,
+        "age_s": 20,
+        "reason": null
+      },
+      "snapshot": {
+        "schema": "taskq-board/1",
+        "event_id": "host-fixture",
+        "payload": {
+          "schema": 1,
+          "board": {
+            "kind": "github",
+            "host": "github.com",
+            "repo": "taskqorg/dashq"
+          },
+          "complete": true,
+          "totals": {},
+          "tasks": [],
+          "observations": [
+            {
+              "host": "fra",
+              "kind": "login",
+              "producer": "cccccccccccc",
+              "observed": 1791875119,
+              "valid_until": 1791875419,
+              "claude": "logged in",
+              "codex": "logged in",
+              "state": "logged in",
+              "complete": true,
+              "reason": null
+            },
+            {
+              "host": "fra",
+              "kind": "online",
+              "state": "online",
+              "producer": "aaaaaaaaaaaa",
+              "observed": 1791875119,
+              "heartbeat": 1791875109,
+              "valid_until": 1791875419,
+              "complete": true,
+              "reason": null
+            },
+            {
+              "host": "fra",
+              "kind": "queue",
+              "state": "idle",
+              "producer": "cccccccccccc",
+              "observed": 1791875119,
+              "valid_until": 1791875419,
+              "complete": true,
+              "reason": null,
+              "running": 0,
+              "queued": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
 }
