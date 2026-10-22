@@ -630,7 +630,7 @@ fn telemetry(p: &Value) -> bool {
         return false;
     }
     let Ok(plain) = String::from_utf8(plain) else { return false };
-    let Some(lines) = plain.lines().map(|l| serde_json::from_str::<Value>(l).ok().filter(|v| v.is_object() && metadata(v, 0))).collect::<Option<Vec<Value>>>() else { return false };
+    let Some(lines) = plain.lines().map(|l| serde_json::from_str::<Value>(l).ok().filter(|v| v.is_object() && metadata_keys(v, 0, counter_field))).collect::<Option<Vec<Value>>>() else { return false };
     if lines.len() as u64 != rows {
         return false;
     }
@@ -740,13 +740,23 @@ fn unbase64(s: &str) -> Option<Vec<u8>> {
 /// an array of scalars may sit in the fifth (AgentQ `configuration.profiles[].writes.reasons`).
 // ponytail: one shape allowlist for every schema; per-schema field catalogs when producers publish them
 fn metadata(v: &Value, depth: usize) -> bool {
+    metadata_keys(v, depth, field)
+}
+
+/// A telemetry line's key (#181, owner-approved): TaskQ request counters name `method:route` (`GET:issues.N`), so
+/// `:` may join segments that each pass [`field`]; the deny list applies to every segment.
+fn counter_field(k: &str) -> bool {
+    k.len() <= 128 && k.split(':').all(field)
+}
+
+fn metadata_keys(v: &Value, depth: usize, key: fn(&str) -> bool) -> bool {
     match v {
         Value::Null | Value::Bool(_) | Value::Number(_) => depth > 0,
         Value::String(s) => {
             depth > 0 && s.chars().count() <= 256 && !s.chars().any(char::is_control) && !s.starts_with(['/', '~', '\\']) && !s.get(1..3).is_some_and(|x| x == ":\\" || x == ":/")
         }
-        Value::Array(a) => depth > 0 && depth < 6 && a.len() <= 256 && a.iter().all(|x| metadata(x, depth + 1)),
-        Value::Object(o) => depth < 5 && o.len() <= 256 && o.iter().all(|(k, x)| field(k) && metadata(x, depth + 1)),
+        Value::Array(a) => depth > 0 && depth < 6 && a.len() <= 256 && a.iter().all(|x| metadata_keys(x, depth + 1, key)),
+        Value::Object(o) => depth < 5 && o.len() <= 256 && o.iter().all(|(k, x)| key(k) && metadata_keys(x, depth + 1, key)),
     }
 }
 
@@ -1384,6 +1394,18 @@ mod tests {
             p["status"] = s;
         }
         p
+    }
+
+    /// #181: TaskQ `requests` rows count `method:route` keys; `:` passes in telemetry lines only, every segment
+    /// still allowlisted, and stays refused in snapshot payloads.
+    #[test]
+    fn telemetry_counter_keys_allow_colon_only_in_lines() {
+        let row = |k: &str| json!({"at_ms": 1, "op": "requests", "counts": {k: 3}});
+        assert!(telemetry(&block(1, &[row("GET:issues.N")], None)));
+        for k in ["GET:text", "command:GET", "GET::x", ":GET", "GET:a/b"] {
+            assert!(!telemetry(&block(1, &[row(k)], None)), "{k}");
+        }
+        assert!(!metadata(&json!({"counts": {"GET:issues.N": 3}}), 0));
     }
 
     /// The `/ingest` records taskq v4.6.30's own `telemetry_sync` posted (generator: fixture/taskq-telemetry/generate.rs).
