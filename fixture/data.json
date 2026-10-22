@@ -1576,6 +1576,9 @@
           "reason": "log retains stages from 06:37 UTC; earlier unknown",
           "incomplete": true
         },
+        "provenance": [
+          "log"
+        ],
         "records": 28,
         "retained_from": 1791873439,
         "coverage": "log retains stages from 06:37 UTC; earlier unknown"
@@ -1589,6 +1592,9 @@
           "reason": "read failed (log missing)",
           "incomplete": false
         },
+        "provenance": [
+          "log"
+        ],
         "records": null,
         "retained_from": null,
         "coverage": null
@@ -1605,7 +1611,12 @@
           "failed": 1,
           "ok": 2
         },
-        "time_ms": 4572180.0,
+        "time_ms": 4560000.0,
+        "elapsed": {
+          "known": 4,
+          "of": 4,
+          "reasons": []
+        },
         "untimed": 0,
         "tokens": {
           "sum": 15210000,
@@ -1721,7 +1732,14 @@
         "outcomes": {
           "ok": 1
         },
-        "time_ms": 660000.0,
+        "time_ms": null,
+        "elapsed": {
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "attempt start not retained"
+          ]
+        },
         "untimed": 0,
         "tokens": {
           "sum": null,
@@ -1779,7 +1797,14 @@
         "outcomes": {
           "ok": 3
         },
-        "time_ms": 2233800.0,
+        "time_ms": 675000.0,
+        "elapsed": {
+          "known": 2,
+          "of": 3,
+          "reasons": [
+            "adopted"
+          ]
+        },
         "untimed": 1,
         "tokens": {
           "sum": 2140000,
@@ -1947,7 +1972,292 @@
           }
         ]
       }
-    ]
+    ],
+    "attempts": [
+      {
+        "project": null,
+        "task": 140,
+        "attempt": 6181339003,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "claude"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "build"
+        ],
+        "outcome": "failed",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 1320000.0,
+        "tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "no-usage"
+          ]
+        },
+        "calls": {
+          "sum": 80,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        }
+      },
+      {
+        "project": null,
+        "task": 138,
+        "attempt": 6181339012,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "codex"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "checks",
+          "review",
+          "close"
+        ],
+        "outcome": "ok",
+        "state": "adopted",
+        "reason": "adopted",
+        "elapsed_ms": null,
+        "tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "adopted"
+          ]
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "adopted"
+          ]
+        }
+      },
+      {
+        "project": null,
+        "task": 139,
+        "attempt": 6181339020,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "codex-app"
+        ],
+        "stages": [
+          "review"
+        ],
+        "outcome": "ok",
+        "state": "partial",
+        "reason": "attempt start not retained",
+        "elapsed_ms": null,
+        "tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        }
+      },
+      {
+        "project": null,
+        "task": 139,
+        "attempt": 6181339002,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "claude"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "build"
+        ],
+        "outcome": "ask",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 540000.0,
+        "tokens": {
+          "sum": 2010000,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        },
+        "calls": {
+          "sum": 35,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        }
+      },
+      {
+        "project": null,
+        "task": 137,
+        "attempt": 6181339011,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "codex"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "checks",
+          "review",
+          "close"
+        ],
+        "outcome": "ok",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 300000.0,
+        "tokens": {
+          "sum": 890000,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        }
+      },
+      {
+        "project": null,
+        "task": 136,
+        "attempt": 6181339001,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "claude"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "build"
+        ],
+        "outcome": "ok",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 1860000.0,
+        "tokens": {
+          "sum": 9020000,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        },
+        "calls": {
+          "sum": 118,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        }
+      },
+      {
+        "project": null,
+        "task": 131,
+        "attempt": 6181339010,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "codex"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "checks",
+          "review",
+          "close"
+        ],
+        "outcome": "ok",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 375000.0,
+        "tokens": {
+          "sum": 1250000,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        },
+        "calls": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        }
+      },
+      {
+        "project": null,
+        "task": 131,
+        "attempt": 6181339000,
+        "link": null,
+        "hosts": [
+          "macbook-m2"
+        ],
+        "runtimes": [
+          "claude"
+        ],
+        "stages": [
+          "claim",
+          "start",
+          "build"
+        ],
+        "outcome": "ok",
+        "state": "complete",
+        "reason": null,
+        "elapsed_ms": 840000.0,
+        "tokens": {
+          "sum": 4180000,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        },
+        "calls": {
+          "sum": 62,
+          "known": 1,
+          "of": 1,
+          "reasons": []
+        }
+      }
+    ],
+    "attempts_total": 8
   },
   "installations": {
     "source": {

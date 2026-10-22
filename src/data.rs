@@ -772,7 +772,7 @@ pub fn build(inp: &Value) -> Value {
     }
     let agent_work = crate::agent_work::build(inp);
     // listed only when configured, like the taskq adapter
-    if !inp["agent_work"].is_null() {
+    if agent_work["source"]["reason"] != "not configured" {
         sources["agent_work"] = agent_work["source"].clone();
         att_states.push(("Agent work".to_string(), agent_work["source"].clone()));
     }

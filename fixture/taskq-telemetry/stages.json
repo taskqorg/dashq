@@ -1,0 +1,557 @@
+{
+ "source": {
+  "encoding": "taskq v4.6.31 src/telemetry/semantic.rs encode() of taskq-stage records inside coreq export rows {seq, id, received_ms, observation}",
+  "note": "hand-encoded replay for dashq#182 A6; times are absolute, one hour before T0 = 1800000000 s; DashQ tests shift them when they need the current clock",
+  "cases": {
+   "complete": "101/1001 (nested start inside build: elapsed 670 s, stage sum 672 s)",
+   "partial": "102/1002 (mac seq 8-9 not received)",
+   "open": "103/1003",
+   "restart-adopted": "201/2001",
+   "cross-host": "301/3001 (claim on mac, build on win)",
+   "unlinked": "401/4001 (no project, no host: label)",
+   "cutover": "log/mac 900 only in the log; 1001 claim in both"
+  }
+ },
+ "t0": 1800000000,
+ "installations": [
+  {
+   "label": "mac",
+   "blocks": [
+    [
+     {
+      "seq": 1,
+      "id": "mac-0001",
+      "received_ms": 1799996402500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799996402000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": 2000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 2,
+      "id": "mac-0002",
+      "received_ms": 1799996405500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799996405000,
+       "outcome": "unknown",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "duration_us": "open-stage"
+       },
+       "host": "mac",
+       "open": true,
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": null,
+       "usage_status": "open-stage"
+      }
+     },
+     {
+      "seq": 3,
+      "id": "mac-0003",
+      "received_ms": 1799996407500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "start",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799996407000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": 5000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 4,
+      "id": "mac-0004",
+      "received_ms": 1799997000500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997000000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": 595000000,
+       "calls": 40,
+       "tokens": 900000
+      }
+     },
+     {
+      "seq": 5,
+      "id": "mac-0005",
+      "received_ms": 1799997060500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "checks",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997060000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": 60000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 6,
+      "id": "mac-0006",
+      "received_ms": 1799997070500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "close",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997070000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 101,
+       "attempt": 1001,
+       "runtime": "claude",
+       "duration_us": 10000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 7,
+      "id": "mac-0007",
+      "received_ms": 1799997100500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997100000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 102,
+       "attempt": 1002,
+       "runtime": "claude",
+       "duration_us": 1000000,
+       "usage_status": "no-model"
+      }
+     }
+    ],
+    [
+     {
+      "seq": 10,
+      "id": "mac-0010",
+      "received_ms": 1799997400500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997400000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "tokens": "no-usage"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 102,
+       "attempt": 1002,
+       "runtime": "claude",
+       "duration_us": 300000000,
+       "calls": 5,
+       "usage_status": "no-usage"
+      }
+     },
+     {
+      "seq": 11,
+      "id": "mac-0011",
+      "received_ms": 1799997500500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997500000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 103,
+       "attempt": 1003,
+       "runtime": "claude",
+       "duration_us": 1000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 12,
+      "id": "mac-0012",
+      "received_ms": 1799997501500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997501000,
+       "outcome": "unknown",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "duration_us": "open-stage"
+       },
+       "host": "mac",
+       "open": true,
+       "project": "taskqorg/dashq",
+       "task": 103,
+       "attempt": 1003,
+       "runtime": "claude",
+       "duration_us": null,
+       "usage_status": "open-stage"
+      }
+     },
+     {
+      "seq": 13,
+      "id": "mac-0013",
+      "received_ms": 1799997600500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997600000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "mac",
+       "project": "taskqorg/dashq",
+       "task": 301,
+       "attempt": 3001,
+       "runtime": "codex",
+       "duration_us": 3000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 14,
+      "id": "mac-0014",
+      "received_ms": 1799997700500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997700000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "task": 401,
+       "attempt": 4001,
+       "runtime": "claude",
+       "duration_us": 1000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 15,
+      "id": "mac-0015",
+      "received_ms": 1799997800500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997800000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "task": 401,
+       "attempt": 4001,
+       "runtime": "claude",
+       "duration_us": 100000000,
+       "calls": 2,
+       "tokens": 1000
+      }
+     }
+    ]
+   ]
+  },
+  {
+   "label": "win",
+   "blocks": [
+    [
+     {
+      "seq": 1,
+      "id": "win-0001",
+      "received_ms": 1799997899500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "claim",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997899000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "win",
+       "project": "taskqorg/dashq",
+       "task": 201,
+       "attempt": 2001,
+       "runtime": "codex",
+       "duration_us": 1000000,
+       "usage_status": "no-model"
+      }
+     },
+     {
+      "seq": 2,
+      "id": "win-0002",
+      "received_ms": 1799997900500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997900000,
+       "outcome": "unknown",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "duration_us": "open-stage"
+       },
+       "host": "win",
+       "open": true,
+       "project": "taskqorg/dashq",
+       "task": 201,
+       "attempt": 2001,
+       "runtime": "codex",
+       "duration_us": null,
+       "usage_status": "open-stage"
+      }
+     },
+     {
+      "seq": 3,
+      "id": "win-0003",
+      "received_ms": 1799998400500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799998400000,
+       "outcome": "failed",
+       "error": "exit",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "duration_us": "adopted",
+        "tokens": "adopted"
+       },
+       "host": "win",
+       "project": "taskqorg/dashq",
+       "task": 201,
+       "attempt": 2001,
+       "runtime": "codex",
+       "duration_us": null,
+       "usage_status": "adopted"
+      }
+     },
+     {
+      "seq": 4,
+      "id": "win-0004",
+      "received_ms": 1799997603500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799997603000,
+       "outcome": "unknown",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded",
+        "duration_us": "open-stage"
+       },
+       "host": "win",
+       "open": true,
+       "project": "taskqorg/dashq",
+       "task": 301,
+       "attempt": 3001,
+       "runtime": "codex",
+       "duration_us": null,
+       "usage_status": "open-stage"
+      }
+     },
+     {
+      "seq": 5,
+      "id": "win-0005",
+      "received_ms": 1799998203500,
+      "observation": {
+       "product": "taskq",
+       "version": "4.6.31",
+       "kind": "stage",
+       "operation": "build",
+       "trace": null,
+       "span": null,
+       "started_ms": 1799998203000,
+       "outcome": "ok",
+       "error": "none",
+       "unknown": {
+        "version": "not-recorded",
+        "trace": "not-recorded",
+        "span": "not-recorded"
+       },
+       "host": "win",
+       "project": "taskqorg/dashq",
+       "task": 301,
+       "attempt": 3001,
+       "runtime": "codex",
+       "duration_us": 600000000,
+       "calls": 10,
+       "tokens": 50000
+      }
+     }
+    ]
+   ]
+  }
+ ],
+ "log": {
+  "mac": [
+   "2026-10-22T07:00:00Z service pass",
+   "taskq-stage {\"stage\":\"claim\",\"task\":90,\"attempt\":900,\"rt\":\"claude\",\"us\":1000000,\"outcome\":\"ok\",\"error\":\"none\",\"at_ms\":1799995800000,\"unknown\":\"no-model\"}",
+   "taskq-stage {\"stage\":\"build\",\"task\":90,\"attempt\":900,\"rt\":\"claude\",\"us\":99000000,\"outcome\":\"ok\",\"error\":\"none\",\"at_ms\":1799995900000,\"calls\":3,\"tokens\":7000}",
+   "taskq-stage {\"stage\":\"claim\",\"task\":101,\"attempt\":1001,\"rt\":\"claude\",\"us\":2000000,\"outcome\":\"ok\",\"error\":\"none\",\"at_ms\":1799996402000,\"unknown\":\"no-model\"}"
+  ]
+ }
+}

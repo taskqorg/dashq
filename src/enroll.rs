@@ -98,6 +98,8 @@ pub struct Enroll {
     recent: Mutex<HashMap<String, Vec<i64>>>,
     /// Per-device token buckets: (tokens, last refill).
     buckets: Mutex<HashMap<(String, i64), (f64, i64)>>,
+    /// Stage records of each decoded telemetry block by block id (D21 #182): blocks never change.
+    stages: Mutex<HashMap<i64, std::sync::Arc<Vec<Value>>>>,
 }
 
 /// The deployment unit: `dashq.db` and its key `dashq.key` (0600) in the config folder (C4).
@@ -135,6 +137,7 @@ impl Enroll {
             rng: SystemRandom::new(),
             recent: Mutex::new(HashMap::new()),
             buckets: Mutex::new(HashMap::new()),
+            stages: Mutex::new(HashMap::new()),
         })
     }
 
@@ -970,6 +973,45 @@ pub fn telemetry_block(e: &Result<Enroll, String>, rows: &Value, id: &str) -> Va
     json!({"event_id": id, "state": "ok", "reason": null, "blocks": blocks})
 }
 
+/// D21 (#182): attempt stage records of each TaskQ installation in `rows` with telemetry in its grant, from its stored
+/// `taskq-telemetry/1` blocks received at or after `since`: `[{installation, workspace, label, telemetry, records, error}]`,
+/// `telemetry` the row's coverage, `records` as [`crate::agent_work::from_telemetry`] maps them, oldest block first.
+pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
+    let Ok(e) = e else { return json!([]) };
+    let mut memo = e.stages.lock().unwrap_or_else(|p| p.into_inner());
+    let mut oldest = i64::MAX;
+    let out: Vec<Value> = rows
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| r["product"] == "taskq" && r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == TELEMETRY)))
+        .filter_map(|r| {
+            let (inst, ws) = (r["installation"].as_str()?, r["workspace"].as_str()?);
+            let label = r["host_label"].as_str().unwrap_or(inst);
+            let (mut records, mut error) = (vec![], Value::Null);
+            match e.store.telemetry_since(inst, ws, since, |id| !memo.contains_key(&id)) {
+                Ok(blocks) => {
+                    for (id, payload) in blocks {
+                        oldest = oldest.min(id);
+                        if let Some(p) = payload {
+                            // blocks were checked at ingest; one that no longer decodes yields no records
+                            let lines = serde_json::from_str::<Value>(&p).ok().and_then(|p| telemetry_lines(&p)).map_or(vec![], |(_, l)| l);
+                            memo.insert(id, std::sync::Arc::new(lines.iter().filter_map(|l| crate::agent_work::from_telemetry(l, label, inst)).collect()));
+                        }
+                        records.extend(memo[&id].iter().cloned());
+                    }
+                }
+                Err(_) => error = json!("store unavailable"),
+            }
+            Some(json!({"installation": inst, "workspace": ws, "label": label, "telemetry": r["telemetry"], "records": records, "error": error}))
+        })
+        .collect();
+    // ponytail: ids grow with receipt time, so older entries fell out of every caller's window; a narrower scope may
+    // evict a block another scope still reads, which only costs one more decode
+    memo.retain(|id, _| *id >= oldest);
+    json!(out)
+}
+
 /// D15 retained episode evidence: bounded, workspace-scoped, independent of the activity period.
 pub fn finding_samples(e: &Result<Enroll, String>, rows: &Value) -> Value {
     let Ok(e) = e else { return json!([]) };
@@ -1598,6 +1640,71 @@ mod tests {
         assert!(matches!(coreq::enroll::deliver(&host, std::slice::from_ref(&r4), &mut Default::default(), &mut w), Err(coreq::enroll::Delivery::Stopped(_))));
         assert_eq!(ingest(&e, a["credential"].as_str().unwrap(), vec![r4], T0 + 30), (401, json!({"protocol": 1, "error": "revoked"})));
         assert_eq!(stored(&e), 4);
+    }
+
+    /// Chain (#182 A1–A6): TaskQ stage rows in telemetry blocks -> coreq client -> /machine/ingest allowlist -> store
+    /// -> [`stage_records`] -> `/data.agent_work` with a cutover log. Risk: stage rows dropped at ingest, nested stages
+    /// or a log/telemetry overlap counted twice, elapsed time shown for open, adopted or gapped attempts, a
+    /// cross-host attempt split in two, an unlinked record linked by guess.
+    #[test]
+    fn taskq_stage_replay_through_ingest() {
+        let fx: Value = serde_json::from_str(include_str!("../fixture/taskq-telemetry/stages.json")).unwrap();
+        let t0 = fx["t0"].as_i64().unwrap();
+        let (_d, e) = setup("stages");
+        let mut w = Wire { e: &e, now: t0, code: None, calls: vec![], tick: false };
+        for (n, inst) in fx["installations"].as_array().unwrap().iter().enumerate() {
+            let host = dir(&format!("stages-host{n}"));
+            let label = inst["label"].as_str().unwrap();
+            let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: label, schemas: &[TELEMETRY], scope: None, capabilities: &[] };
+            coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+            let recs: Vec<Value> = inst["blocks"].as_array().unwrap().iter().enumerate().map(|(i, b)| {
+                let lines = b.as_array().unwrap();
+                let mut p = block(lines[0]["seq"].as_u64().unwrap(), lines, None);
+                p["last"] = lines[lines.len() - 1]["seq"].clone();
+                coreq::enroll::stamp(&host, TELEMETRY, &format!("t-{label}-{i}"), t0 as u64, p).unwrap()
+            }).collect();
+            let got = coreq::enroll::deliver(&host, &recs, &mut Default::default(), &mut w).unwrap();
+            assert!(got.iter().all(|r| r["state"] == "accepted"), "every stage row passes the allowlist: {got:?}");
+        }
+        let now = t0 as u64 + 60;
+        let p = projection(&e, Some(Scope::All), None, now).unwrap();
+        let stages = stage_records(&e, &p["rows"], t0 - 2 * 86400);
+        assert_eq!(stages.as_array().unwrap().iter().map(|s| s["records"].as_array().unwrap().len()).sum::<usize>(), 18);
+        // decoded once: a second read is served from the per-block memo, identical
+        assert_eq!(stage_records(&e, &p["rows"], t0 - 2 * 86400), stages);
+        let log: Vec<Value> = fx["log"]["mac"].as_array().unwrap().iter().filter_map(|l| serde_json::from_str(l.as_str()?.strip_prefix("taskq-stage ")?).ok()).collect();
+        let snap = json!({"value": {"records": log, "corrupt": 0}, "at": now, "error": null, "incomplete": false});
+        let inp = json!({"now": now, "period": 7200, "filters": {}, "projects": ["taskqorg/dashq"], "agent_telemetry": stages, "agent_work": {"mac": snap}});
+        let a = crate::agent_work::build(&inp);
+        let hosts: Vec<(&str, &str)> = a["hosts"].as_array().unwrap().iter().map(|h| (h["host"].as_str().unwrap(), h["source"]["state"].as_str().unwrap())).collect();
+        assert_eq!(hosts, [("mac", "incomplete"), ("win", "ok")], "{}", a["hosts"]);
+        assert_eq!((&a["hosts"][0]["source"]["reason"], &a["hosts"][0]["provenance"]), (&json!("2 telemetry rows not received"), &json!(["log", "telemetry"])));
+        let by = |task: u64| a["attempts"].as_array().unwrap().iter().find(|t| t["task"] == task).unwrap().clone();
+        let seen = |task: u64| { let t = by(task); (t["state"].as_str().unwrap().to_string(), t["reason"].as_str().map(String::from), t["elapsed_ms"].as_f64()) };
+        assert_eq!(a["attempts_total"], 7);
+        assert_eq!(seen(101), ("complete".into(), None, Some(670_000.0)), "nested start inside build counts once (stage sum 672 s)");
+        assert_eq!(seen(102), ("partial".into(), Some("rows not received".into()), None));
+        assert_eq!(seen(103), ("open".into(), Some("open-stage".into()), None));
+        assert_eq!(seen(201), ("adopted".into(), Some("adopted".into()), None));
+        assert_eq!(seen(301), ("complete".into(), None, Some(603_000.0)));
+        assert_eq!((&by(301)["hosts"], &by(301)["runtimes"]), (&json!(["mac", "win"]), &json!(["codex"])), "one cross-host attempt, one row");
+        let (t101, t401) = (by(101), by(401));
+        assert_eq!((&t101["link"], &t101["project"], &t101["attempt"]), (&json!("https://github.com/taskqorg/dashq/issues/101"), &json!("taskqorg/dashq"), &json!(1001)));
+        assert_eq!((&t401["link"], &t401["project"], &t401["hosts"], &t401["elapsed_ms"]), (&Value::Null, &Value::Null, &json!(["mac"]), &json!(101_000.0)), "no project: unlinked; no host: label");
+        assert_eq!(seen(90), ("complete".into(), None, Some(100_000.0)), "the log fills the cutover");
+        assert_eq!((&t101["tokens"], &by(102)["tokens"]["reasons"]), (&json!({"sum": 900_000, "known": 1, "of": 1, "reasons": []}), &json!(["no-usage"])));
+        let row = |host: &str, rt: &str| a["rows"].as_array().unwrap().iter().find(|r| r["host"] == host && r["runtime"] == rt).unwrap().clone();
+        let mc = row("mac", "claude");
+        let claim = mc["stages"].as_array().unwrap().iter().find(|s| s["stage"] == "claim").unwrap().clone();
+        assert_eq!(claim["count"], 5, "the claim of 1001 in both log and telemetry counts once");
+        assert_eq!((&mc["time_ms"], &mc["elapsed"]), (&json!(871_000.0), &json!({"known": 3, "of": 5, "reasons": ["open-stage", "rows not received"]})));
+        assert_eq!(mc["tokens"]["sum"], 908_000, "context tokens (cache included) summed once per build record");
+        assert_eq!(row("win", "codex")["elapsed"], json!({"known": 1, "of": 2, "reasons": ["adopted"]}));
+        let mut html = String::new();
+        crate::agent_work::render(&mut html, &json!({"agent_work": a, "generated_at": now}));
+        assert!(html.contains("<a href=\"https://github.com/taskqorg/dashq/issues/101\">taskqorg/dashq#101</a>") && html.contains("title=\"unknown: adopted\">—</span> <small>adopted</small>") && html.contains("partial: rows not received") && html.contains(">#401<"), "{html}");
+        let solo = crate::agent_work::build(&json!({"now": now, "period": 7200, "filters": {"host": "win"}, "agent_telemetry": stages}));
+        assert_eq!((solo["hosts"].as_array().unwrap().len(), &solo["source"]["state"]), (1, &json!("ok")), "host filter; telemetry alone configures the block");
     }
 
     #[test]

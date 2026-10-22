@@ -1125,6 +1125,18 @@ impl Store {
         Ok((blocks, gone))
     }
 
+    /// Stored telemetry blocks of one installation and workspace received at or after `since`, oldest first, as
+    /// `(id, payload)`; the payload only where `need(id)`, since blocks never change and callers decode each once (#182).
+    pub fn telemetry_since(&self, installation: &str, workspace: &str, since: i64, need: impl Fn(i64) -> bool) -> Result<Vec<(i64, Option<String>)>, Error> {
+        let c = self.lock()?;
+        let ids: Vec<i64> = c
+            .prepare_cached("SELECT id FROM telemetry WHERE installation = ?1 AND workspace = ?2 AND received >= ?3 ORDER BY id")?
+            .query_map(params![installation, workspace, since], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        let mut q = c.prepare_cached("SELECT payload FROM telemetry WHERE id = ?1")?;
+        ids.into_iter().map(|id| Ok((id, if need(id) { Some(q.query_row([id], |r| r.get(0))?) } else { None }))).collect()
+    }
+
     /// The newest current snapshot of an installation in any workspace.
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
