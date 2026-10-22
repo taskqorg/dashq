@@ -112,6 +112,13 @@ function renderBoards() {
       const el = document.createElement('div');
       el.id = wrap.id + '-task-' + row.n;
       el.innerHTML = TaskqProjectBlocks.task(p, row);
+      // TaskQ R6 3 (#1565): an off-host session's progress from its host's record; TaskQ links here, never codex:// off host
+      if (row.session) {
+        const s = row.session, progress = document.createElement('p');
+        progress.className = 'detail';
+        progress.textContent = 'Progress on ' + s.host + ' (' + s.runtime + '): ' + s.stage + ' · ' + (s.age_s == null ? 'update age unknown' : 'updated ' + s.age_s + ' s ago') + (s.line ? ' · ' + s.line : '');
+        el.append(progress);
+      }
       const failed = b.failed?.find(f => f.number === row.n);
       if (failed) {
         const reason = document.createElement('p');
