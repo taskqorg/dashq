@@ -339,6 +339,32 @@
 <tr><td>mac</td><td>claude</td><td>claude-opus-5-5</td><td>2</td><td>cache_creation_tokens 6000 <small>(2 of 2)</small><br>cache_read_tokens 420000 <small>(2 of 2)</small><br>input_tokens 2100 <small>(2 of 2)</small><br>output_tokens 800 <small>(1 of 2)</small></td><td>≥0.18 USD <small>(1 of 2 calls; output_tokens not reported)</small></td><td><span class="unknown" title="unknown: not reported">—</span> <small>unknown: not reported</small></td></tr>
 </table>
 </section>
+<section id="expenses">
+<h2>Actual expenses</h2>
+<p class="note">From owner-supplied billing records only; no estimate enters these subtotals. Currencies are never converted.</p>
+<p class="note">6 records · 5 distinct · 4 current · 1 duplicates counted once · 1 superseded by a higher revision</p>
+<table>
+<tr><th>Billing period</th><th>API</th><th>Subscription</th><th>Infrastructure</th><th>Unknown basis</th></tr>
+<tr><td>2026-09-01 – 2026-09-30</td><td>100.10 USD</td><td>-5.00 USD</td><td>39.90 EUR</td><td>10.00 USD</td></tr>
+<tr><th>Total</th><th>100.10 USD</th><th>-5.00 USD</th><th>39.90 EUR</th><th>10.00 USD</th></tr>
+</table>
+<h3>Allocation (explicit rules only)</h3>
+<table>
+<tr><th>Target</th><th>Amount</th></tr>
+<tr><td>taskqorg/dashq</td><td>60.00 USD</td></tr>
+<tr><td>Unallocated</td><td>39.90 EUR + 35.10 USD</td></tr>
+</table>
+<p class="note">Rule inv-1 rev 1 → taskqorg/taskq not applied: exceeds the record amount</p>
+<p class="note">Rule sub-1 rev 1 → taskqorg/taskq not applied: revision superseded</p>
+<p class="note">Rule x-1 rev 1 → taskqorg/taskq not applied: unknown basis is not allocated</p>
+<h3>Reconciliation per source</h3>
+<table>
+<tr><th>Source</th><th>Provider</th><th>Kind</th><th>Period</th><th>Source total</th><th>Records</th><th>State</th></tr>
+<tr><td>anthropic-2026-09</td><td>anthropic</td><td>invoice</td><td>2026-09-01 – 2026-09-30</td><td>130.10 USD</td><td>130.10 USD</td><td><span class="s ok">reconciled</span></td></tr>
+<tr><td>fra-2026-09</td><td>host-provider</td><td>invoice</td><td>2026-09-01 – 2026-09-30</td><td>39.90 EUR</td><td>39.90 EUR</td><td><span class="s ok">reconciled</span></td></tr>
+<tr><td>openai-2026-09</td><td>openai</td><td>export</td><td>2026-09-01 – 2026-09-30</td><td>6.00 USD</td><td>5.00 USD</td><td><span class="s warn">mismatch</span> <small>difference -1.00 USD</small></td></tr>
+</table>
+</section>
 <section id="checks">
 <h2>Server checks</h2>
 <p class="note">Report at 06:05 UTC (60m ago)</p>

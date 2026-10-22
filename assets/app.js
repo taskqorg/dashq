@@ -3,7 +3,7 @@
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
-  '/agents': ['agents', 'agentwork', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
+  '/agents': ['agents', 'agentwork', 'modeluse', 'expenses', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';

@@ -2,6 +2,7 @@
 
 mod accounting;
 mod agent_work;
+mod expenses;
 mod model_use;
 mod answer;
 mod clients;
@@ -65,6 +66,8 @@ struct Config {
     limits: store::Limits,
     /// `prices`: the owner's model price table for API-equivalent estimates (D24); `null`: estimates read unknown.
     prices: Value,
+    /// `expenses`: absolute path of the owner's billing records file (D25); `None`: not configured.
+    expenses: Option<String>,
 }
 
 fn config_path(t: &Tool) -> PathBuf {
@@ -163,6 +166,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         limits.telemetry_bytes = m << 20;
     }
     let prices = v.get("prices").map(model_use::prices).transpose()?.unwrap_or(Value::Null);
+    let expenses = match v.get("expenses") {
+        None => None,
+        Some(_) => Some(s("/expenses", &|x| std::path::Path::new(x).is_absolute())?),
+    };
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     Ok(Config {
         limits,
@@ -181,6 +188,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         agentq_configure,
         taskq_logs,
         prices,
+        expenses,
     })
 }
 
@@ -277,7 +285,7 @@ impl App {
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings, "prices": c.prices,
+            "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings, "prices": c.prices, "expenses": c.expenses.as_deref().map_or(Value::Null, expenses::read),
         }));
         profile::step("build", t0);
         let mut doc = doc;
@@ -511,13 +519,19 @@ fn style_css() -> String {
     [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css")].join("\n")
 }
 
+/// The fixture input with the invented billing records of fixture/expenses.json (D25).
+fn fixture_input() -> Value {
+    let mut v: Value = serde_json::from_str(FIXTURE).expect("fixture JSON");
+    v["expenses"] = json!({"at": v["now"].as_u64().unwrap_or(0) - 86400, "value": serde_json::from_str::<Value>(include_str!("../fixture/expenses.json")).expect("fixture JSON")});
+    v
+}
+
 fn fixture_doc() -> Value {
-    data::build(&serde_json::from_str(FIXTURE).expect("fixture JSON"))
+    data::build(&fixture_input())
 }
 
 fn fixture_html() -> String {
-    let input: Value = serde_json::from_str(FIXTURE).unwrap();
-    page::render(&fixture_doc(), &input["links"])
+    page::render(&fixture_doc(), &fixture_input()["links"])
 }
 
 /// The fixture page as one file: stylesheet inlined, script dropped (D2 --snapshot).
@@ -939,6 +953,7 @@ mod tests {
         let mut cfg = load_config_fixture();
         cfg.projects = vec!["taskqorg/dashq".into()];
         cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
+        cfg.expenses = Some(concat!(env!("CARGO_MANIFEST_DIR"), "/fixture/expenses.json").into());
         let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
         let data: Value = serde_json::from_slice(&body).unwrap();
@@ -950,11 +965,15 @@ mod tests {
         for k in ["query", "changes"] { assert_eq!(data[k], report[k], "{k}"); }
         assert_eq!((&data["attention"]["requests"], &data["query"]["timezone"], &data["query"]["cap"]), (&report["attention"]["requests"], &json!("UTC"), &json!(200)));
         assert_eq!(data["model_use"], report["model_use"], "#184 A5: the report reproduces the page's model use");
+        // #185 A5: the owner-supplied Anthropic invoice reconciles to its source total, and the report reproduces it
+        assert_eq!(data["expenses"], report["expenses"]);
+        assert_eq!((data["expenses"]["sources"][0]["state"].as_str(), data["expenses"]["sources"][0]["totals"].clone(), data["sources"]["expenses"]["state"].as_str()), (Some("reconciled"), json!({"USD": 130.1}), Some("ok")));
         assert_eq!((a["attempts_total"].as_u64(), data["sources"]["agent_work"]["state"].as_str()), (Some(7), Some("incomplete")));
         let page = String::from_utf8(route(&app, "GET", "/agents", "period=7200", Some(store::Scope::All)).2).unwrap();
         for t in a["attempts"].as_array().unwrap() {
             assert!(page.contains(&format!("<td>{}</td>", t["attempt"])), "attempt {} on the page", t["attempt"]);
         }
+        assert!(page.contains("<h2>Actual expenses</h2>") && page.contains("130.10 USD"), "#185: expenses on the Agents view");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -991,7 +1010,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { prices: Value::Null, expenses: None, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.

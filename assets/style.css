@@ -222,7 +222,7 @@ body[data-view="/"] #host-grid,body[data-view="/"] #attention,body[data-view="/"
 body[data-view] #startup,body[data-view] #more { display:block; }
 body[data-view="/projects"] #boards,
 body[data-view="/hosts"] #host-grid,body[data-view="/hosts"] #servers,body[data-view="/hosts"] #resources,body[data-view="/hosts"] #observations,
-body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #modeluse,body[data-view="/agents"] #aqresults,
+body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #modeluse,body[data-view="/agents"] #expenses,body[data-view="/agents"] #aqresults,
 body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
 body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
 .grid-head,.host { display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.6fr) minmax(0,1.15fr) minmax(0,1.25fr) minmax(0,1fr);gap:14px; }

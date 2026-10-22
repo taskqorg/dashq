@@ -233,6 +233,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     }
     crate::agent_work::render(w, doc);
     if configured("langfuse") { crate::model_use::render(w, doc); }
+    crate::expenses::render(w, doc);
     if configured("serverq") || enrolled_checks {
         let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>");
         if configured("serverq") {

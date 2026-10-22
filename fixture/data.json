@@ -39,6 +39,13 @@
       "reason": "fra: read failed (log missing)",
       "incomplete": true
     },
+    "expenses": {
+      "state": "ok",
+      "at": 1791788739,
+      "age_s": 86400,
+      "reason": null,
+      "incomplete": false
+    },
     "enrollment": {
       "state": "ok",
       "at": 1791875139,
@@ -207,8 +214,8 @@
   "attention": {
     "source": {
       "state": "unknown",
-      "at": 1791871539,
-      "age_s": 3600,
+      "at": 1791788739,
+      "age_s": 86400,
       "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout); Agent work: fra: read failed (log missing)",
       "incomplete": true
     },
@@ -2881,6 +2888,148 @@
         "output_tokens not reported"
       ]
     }
+  },
+  "expenses": {
+    "source": {
+      "state": "ok",
+      "at": 1791788739,
+      "age_s": 86400,
+      "reason": null,
+      "incomplete": false
+    },
+    "label": "Actual expenses",
+    "records": {
+      "count": 6,
+      "distinct": 5,
+      "current": 4,
+      "duplicates": 1,
+      "superseded": 1
+    },
+    "periods": [
+      {
+        "period": {
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "categories": {
+          "api": {
+            "USD": 100.1
+          },
+          "infrastructure": {
+            "EUR": 39.9
+          },
+          "subscription": {
+            "USD": -5.0
+          }
+        },
+        "unknown_basis": {
+          "USD": 10.0
+        }
+      }
+    ],
+    "totals": {
+      "api": {
+        "USD": 100.1
+      },
+      "infrastructure": {
+        "EUR": 39.9
+      },
+      "subscription": {
+        "USD": -5.0
+      }
+    },
+    "unknown_basis": {
+      "USD": 10.0
+    },
+    "allocation": {
+      "targets": [
+        {
+          "target": "taskqorg/dashq",
+          "amounts": {
+            "USD": 60.0
+          }
+        }
+      ],
+      "unallocated": {
+        "EUR": 39.9,
+        "USD": 35.1
+      },
+      "rejected": [
+        {
+          "billing_id": "inv-1",
+          "revision": 1,
+          "target": "taskqorg/taskq",
+          "reason": "exceeds the record amount"
+        },
+        {
+          "billing_id": "sub-1",
+          "revision": 1,
+          "target": "taskqorg/taskq",
+          "reason": "revision superseded"
+        },
+        {
+          "billing_id": "x-1",
+          "revision": 1,
+          "target": "taskqorg/taskq",
+          "reason": "unknown basis is not allocated"
+        }
+      ]
+    },
+    "sources": [
+      {
+        "id": "anthropic-2026-09",
+        "provider": "anthropic",
+        "kind": "invoice",
+        "period": {
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "totals": {
+          "USD": 130.1
+        },
+        "records": {
+          "USD": 130.1
+        },
+        "state": "reconciled",
+        "difference": {}
+      },
+      {
+        "id": "fra-2026-09",
+        "provider": "host-provider",
+        "kind": "invoice",
+        "period": {
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "totals": {
+          "EUR": 39.9
+        },
+        "records": {
+          "EUR": 39.9
+        },
+        "state": "reconciled",
+        "difference": {}
+      },
+      {
+        "id": "openai-2026-09",
+        "provider": "openai",
+        "kind": "export",
+        "period": {
+          "from": "2026-09-01",
+          "to": "2026-09-30"
+        },
+        "totals": {
+          "USD": 6.0
+        },
+        "records": {
+          "USD": 5.0
+        },
+        "state": "mismatch",
+        "difference": {
+          "USD": -1.0
+        }
+      }
+    ]
   },
   "changes": {
     "window_s": 1800,

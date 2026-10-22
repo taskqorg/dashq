@@ -795,6 +795,11 @@ pub fn build(inp: &Value) -> Value {
         att_states.push(("Agent work".to_string(), agent_work["source"].clone()));
     }
     let model_use = crate::model_use::build(inp, &agent_work);
+    let expenses = crate::expenses::build(inp);
+    if expenses["source"]["reason"] != "not configured" {
+        sources["expenses"] = expenses["source"].clone();
+        att_states.push(("Expenses".to_string(), expenses["source"].clone()));
+    }
     let versions = crate::version::build(inp, &fleet, &heartbeats.into_values().collect::<Vec<_>>());
     if inp["installations"].is_object() {
         sources["enrollment"] = inp["installations"]["source"].clone();
@@ -819,6 +824,7 @@ pub fn build(inp: &Value) -> Value {
         "optimization": crate::optimization::build(inp),
         "agent_work": agent_work,
         "model_use": model_use,
+        "expenses": expenses,
     });
     // D23: changes while away, person requests and the query shape, from the parts above
     let mut sources: Vec<(&str, Option<String>)> = Vec::new();

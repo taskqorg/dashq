@@ -1,0 +1,142 @@
+{
+ "_comment": "Invented billing records for tests and the fixture page (dashq.md D25); no real invoice.",
+ "schema": 1,
+ "sources": [
+  {
+   "id": "anthropic-2026-09",
+   "provider": "anthropic",
+   "kind": "invoice",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "totals": {
+    "USD": "130.10"
+   }
+  },
+  {
+   "id": "fra-2026-09",
+   "provider": "host-provider",
+   "kind": "invoice",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "totals": {
+    "EUR": 39.9
+   }
+  },
+  {
+   "id": "openai-2026-09",
+   "provider": "openai",
+   "kind": "export",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "totals": {
+    "USD": 6
+   }
+  }
+ ],
+ "records": [
+  {
+   "billing_id": "inv-1",
+   "revision": 1,
+   "source": "anthropic-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "USD",
+   "amount": "100.10",
+   "category": "api"
+  },
+  {
+   "billing_id": "inv-1",
+   "revision": 1,
+   "source": "anthropic-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "USD",
+   "amount": "100.10",
+   "category": "api"
+  },
+  {
+   "billing_id": "sub-1",
+   "revision": 1,
+   "source": "anthropic-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "USD",
+   "amount": 30,
+   "category": "subscription"
+  },
+  {
+   "billing_id": "sub-1",
+   "revision": 2,
+   "source": "openai-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "USD",
+   "amount": "-5",
+   "category": "subscription"
+  },
+  {
+   "billing_id": "fra-1",
+   "revision": 1,
+   "source": "fra-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "EUR",
+   "amount": "39.90",
+   "category": "infrastructure"
+  },
+  {
+   "billing_id": "x-1",
+   "revision": 1,
+   "source": "openai-2026-09",
+   "period": {
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+   },
+   "currency": "USD",
+   "amount": 10,
+   "category": "unknown"
+  }
+ ],
+ "rules": [
+  {
+   "billing_id": "inv-1",
+   "revision": 1,
+   "target": "taskqorg/dashq",
+   "amount": "60"
+  },
+  {
+   "billing_id": "inv-1",
+   "revision": 1,
+   "target": "taskqorg/taskq",
+   "amount": "50"
+  },
+  {
+   "billing_id": "sub-1",
+   "revision": 1,
+   "target": "taskqorg/taskq",
+   "amount": "30"
+  },
+  {
+   "billing_id": "x-1",
+   "revision": 1,
+   "target": "taskqorg/taskq",
+   "amount": "1"
+  }
+ ]
+}
