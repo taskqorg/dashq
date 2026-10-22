@@ -161,11 +161,15 @@ async function refresh() {
 function expireHostObservations(failed = false) {
   document.querySelectorAll('.host-observation[data-valid-for]').forEach(e => {
     e.observedSince ??= performance.now();
-    if (failed || (performance.now() - e.observedSince) / 1000 > Number(e.dataset.validFor)) {
+    if ((performance.now() - e.observedSince) / 1000 > Number(e.dataset.validFor)) {
       e.textContent = 'unknown';
       e.classList.add('unknown');
-      e.title = (failed ? 'Unconfirmed after refresh failure. ' : 'Expired. ') + e.title;
+      e.classList.remove('unconfirmed');
+      e.title = 'Expired. ' + e.title;
       delete e.dataset.validFor;
+    } else if (failed && !e.classList.contains('unconfirmed')) {
+      e.textContent += ' · unconfirmed';
+      e.classList.add('unconfirmed');
     }
   });
 }

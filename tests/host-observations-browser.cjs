@@ -39,12 +39,26 @@ const css = ['assets/style.css','assets/taskq/resource-controls.css','assets/res
       await page.evaluate(()=>{const e=document.querySelector('#host-win .host-observation');e.dataset.validFor='1';});
       await page.clock.fastForward(2000);
       assert.equal(await host.locator('.host-observation').first().innerText(),'unknown','expiry without a new fetch');
+      await page.evaluate(()=>document.querySelectorAll('#host-win .host-observation[data-valid-for]').forEach(e=>{e.dataset.validFor='5';}));
+      const claims = await host.locator('.host-observation').allTextContents();
+      const titles = await host.locator('.host-observation').evaluateAll(es=>es.map(e=>e.title));
       failed = true;await page.evaluate(()=>refresh());
-      assert((await host.locator('.host-observation').allTextContents()).every(x=>x==='unknown'),'failed refresh cannot retain positive claims');
+      const retained = claims.map(x=>x==='unknown'?x:x+' · unconfirmed');
+      assert.deepEqual(await host.locator('.host-observation').allTextContents(),retained,'D5/D6: failed refresh retains unexpired values as unconfirmed');
+      assert(await host.locator('.host-observation[data-valid-for]').evaluateAll(es=>es.every(e=>e.classList.contains('unconfirmed'))),'retained values have non-ok state');
+      assert(await host.locator('.host-observation').evaluateAll((es,titles)=>es.every((e,i)=>e.title.includes(titles[i])),titles),'original observation time remains in title');
+      await page.clock.fastForward(2000);
+      await page.evaluate(()=>refresh());
+      assert.deepEqual(await host.locator('.host-observation').allTextContents(),retained,'repeated failure does not duplicate the state or reset expiry');
       assert(await evidence.evaluate(e=>e.open),'disclosure preserved');
       assert(await evidence.locator('summary').evaluate(e=>e===document.activeElement),'focus preserved');
+      await page.clock.fastForward(2000);
+      assert((await host.locator('.host-observation').allTextContents()).every(x=>x==='unknown'),'unconfirmed values still expire without a fetch');
+      await page.evaluate(()=>refresh());
+      assert((await host.locator('.host-observation').allTextContents()).every(x=>x==='unknown'),'failure cannot restore expired values');
       failed = false;await page.evaluate(()=>refresh());
       assert((await page.locator('#host-win').innerText()).includes('logged in'),'recovery reads producer evidence');
+      assert.equal(await page.locator('#host-win .host-observation.unconfirmed').count(),0,'recovery clears unconfirmed state');
       assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);
       await page.close();cells++;
     }
