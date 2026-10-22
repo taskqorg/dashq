@@ -532,7 +532,12 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
         return error("400 Bad Request", "invalid_request");
     };
     // the grant supplies ownership; authority fields in a payload are data, and only allowlisted metadata is stored
-    let payloads: Vec<String> = records.iter().map(|r| r["payload"].to_string()).collect();
+    let stripped: Vec<Value> = records.iter().map(|r| {
+        let mut p = r["payload"].clone();
+        strip_line(r["schema"].as_str().unwrap_or(""), &mut p);
+        p
+    }).collect();
+    let payloads: Vec<String> = stripped.iter().map(Value::to_string).collect();
     let mut out: Vec<Option<&'static str>> = vec![None; records.len()];
     let mut events = Vec::new();
     let mut index = Vec::new();
@@ -553,7 +558,7 @@ fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i64) -> Resp
                 }
                 Err(why) => out[i] = Some(why),
             },
-            (Some(schema), Some(observed)) if snapshot_metadata(schema, &r["payload"]) => {
+            (Some(schema), Some(observed)) if snapshot_metadata(schema, &stripped[i]) => {
                 let kind = if schema == crate::export::SCHEMA { Kind::Export } else { Kind::Snapshot };
                 events.push(Event { id: ids[i], schema, observed, kind, payload: &payloads[i] });
                 index.push(i);
@@ -747,6 +752,19 @@ fn snapshot_metadata(schema: &str, p: &Value) -> bool {
     metadata(&p, 0)
 }
 
+/// D13 (#180): TaskQ session progress is host, runtime, stage and time only. A worker `line` in a `taskq-board/1`
+/// task `session` is dropped before storing, and from snapshots stored earlier until retention ages them out.
+fn strip_line(schema: &str, p: &mut Value) {
+    if schema != "taskq-board/1" {
+        return;
+    }
+    for t in p.get_mut("tasks").and_then(Value::as_array_mut).into_iter().flatten() {
+        if let Some(s) = t.get_mut("session").and_then(Value::as_object_mut) {
+            s.remove("line");
+        }
+    }
+}
+
 fn field(k: &str) -> bool {
     const DENY: [&str; 18] = [
         "prompt", "command", "cmd", "args", "stdout", "stderr", "output", "input", "content", "text", "message", "path", "cwd", "env", "token", "secret",
@@ -795,7 +813,9 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
                     } else {
                         crate::data::source(&json!({"value": true, "at": s.observed.max(0)}), now, stale_secs(&s.schema), None)
                     };
-                    (obs, json!({"event_id": s.event_id, "schema": s.schema, "payload": serde_json::from_str::<Value>(&s.payload).unwrap_or(Value::Null)}))
+                    let mut payload = serde_json::from_str::<Value>(&s.payload).unwrap_or(Value::Null);
+                    strip_line(&s.schema, &mut payload);
+                    (obs, json!({"event_id": s.event_id, "schema": s.schema, "payload": payload}))
                 }
             };
             // history warmup and export gaps are separate from connection and data age (C5)
@@ -1980,6 +2000,40 @@ lines", "recommended": true}]}])),
         assert_eq!((ver("tq-v2")["provenance"].as_str(), ver("tq-v2")["reason"].as_str()), (Some("unsupported"), Some("unsupported snapshot schema taskq-board/1")));
         let html = crate::page::render(&doc, &json!({}));
         assert!(html.contains("Board github:github.com/taskqorg/taskq · doing 2 · ask 1 · 2 tasks observed"), "board summary");
+    }
+
+    /// #180 A2/A3: a `taskq-board/1` task `session` keeps host, runtime, stage and time; its worker `line` is dropped
+    /// before storing, a retry of the same record keeps its receipt, and a snapshot stored with a line before #180
+    /// projects without it. Risk: worker text reaches the store, `/data`, `dashq report` or the page.
+    #[test]
+    fn taskq_session_line_is_never_stored_or_projected() {
+        let now = crate::source::now() as i64;
+        let (d, e) = setup("taskq-line");
+        let scope = json!({"name": "taskq-board/1", "value": "github:github.com/taskqorg/taskq"});
+        let dev = machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": "taskq", "installation": "tq-1", "runtime": "native", "host_label": "win", "schemas": ["taskq-board/1"], "scope": scope}), now).1;
+        assert!(decide(&e, "github|1", dev["user_code"].as_str().unwrap(), "approve", "ws-1", now).1.contains("Approved"));
+        let cred = machine(&e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": dev["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
+        assert_eq!(machine(&e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
+        let session = json!({"host": "win", "runtime": "codex", "stage": "doing", "at": now});
+        let mut with_line = session.clone();
+        with_line["line"] = json!("Running tests in the worker");
+        let payload = |s: &Value| json!({"schema": 1, "board": {"kind": "github", "host": "github.com", "repo": "taskqorg/taskq"}, "complete": true, "totals": {"doing": 1},
+            "tasks": [{"n": 7, "state": "doing", "revision": 1, "session": s}]});
+        let rec = json!({"schema": "taskq-board/1", "event_id": "b-1", "observed_at": now, "payload": payload(&with_line)});
+        assert_eq!(states(&ingest(&e, &cred, vec![rec.clone()], now).1), ["accepted"]);
+        let db = rusqlite::Connection::open(d.join("dashq.db")).unwrap();
+        let stored: String = db.query_row("SELECT payload FROM snapshots WHERE event_id = 'b-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), payload(&session));
+        assert_eq!(states(&ingest(&e, &cred, vec![rec], now).1), ["accepted"], "a retry is the same content");
+        // a snapshot stored before the change keeps its line until retention ages it out; no view projects it
+        db.execute("UPDATE snapshots SET payload = ?1 WHERE event_id = 'b-1'", [payload(&with_line).to_string()]).unwrap();
+        let app = app(e, None);
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let row = doc["installations"]["rows"].as_array().unwrap().iter().find(|r| r["installation"] == "tq-1").unwrap().clone();
+        assert_eq!(row["snapshot"]["payload"], payload(&session));
+        assert!(!doc.to_string().contains("Running tests"), "no line in /data or dashq report");
+        assert!(!crate::page::render(&doc, &json!({})).contains("Running tests"), "no line on the page");
     }
 
     /// #160 A1/A2: TaskQ sends its board and the release fixture `enrollment_record` (taskq v4.6.25
