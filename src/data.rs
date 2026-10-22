@@ -81,7 +81,7 @@ fn agent_name(a: &str) -> Option<&'static str> {
     AGENTS.iter().find(|(k, _)| *k == a).map(|(_, n)| *n)
 }
 
-/// `period=&host=&agent=&session=&block=` (D7): the period and the filters, or `Err` for 400.
+/// `period=&host=&agent=&session=&block=&cursor=` (D7): the period and the filters, or `Err` for 400.
 pub fn query(q: &str) -> Result<(u64, Value), String> {
     let (mut period, mut f) = (1800, json!({}));
     for pair in q.split('&').filter(|p| !p.is_empty()) {
@@ -97,6 +97,8 @@ pub fn query(q: &str) -> Result<(u64, Value), String> {
             "session" => safe_id(&v),
             // #181 A6: a telemetry block event id; it adds `telemetry_block` and filters nothing else
             "block" => crate::enroll::id(&v, 128),
+            // D23: offset into the capped lists
+            "cursor" => v.len() <= 9 && v.parse::<usize>().is_ok(),
             _ => false,
         };
         if !ok || (k != "period" && f.get(k).is_some()) {
@@ -548,7 +550,7 @@ pub fn build(inp: &Value) -> Value {
             // D13: preserve canonical question identities/limits/evidence; no second parser or session authority.
             board["tasks"] = tasks.into_iter().flatten().map(|t| json!({
                 "n": t["n"], "title": t["title"], "url": t["url"], "state": t["state"],
-                "revision": t["revision"], "controls": t["controls"], "question": t["question"], "card": t["card"]
+                "revision": t["revision"], "controls": t["controls"], "question": t["question"], "card": t["card"], "admission": t["admission"]
             })).collect::<Vec<_>>().into();
             board["in_work"] = total(&["doing", "review"]);
             board["waiting"] = total(&["ask"]);
@@ -563,6 +565,8 @@ pub fn build(inp: &Value) -> Value {
         // (runtime, stage, update time; never a worker line, #180); the newest per task wins, shown on doing and review rows only.
         // the host shown is the enrolled row's label, not the payload's; a future `at` cannot pin newest-wins
         let mut progress: BTreeMap<u64, (&Value, &str)> = BTreeMap::new();
+        // D23: the newest enrolled admission per task; a future time cannot win
+        let mut admitted: BTreeMap<u64, &Value> = BTreeMap::new();
         for r in inp["installations"]["rows"].as_array().into_iter().flatten()
             .filter(|r| r["product"] == "taskq" && r["connection"] != "revoked" && r["snapshot"]["schema"] == "taskq-board/1")
         {
@@ -572,13 +576,26 @@ pub fn build(inp: &Value) -> Value {
                 continue;
             }
             for t in p["tasks"].as_array().into_iter().flatten() {
+                if let (Some(n), Some(o)) = (t["n"].as_u64(), t["admission"]["observed"].as_u64().filter(|&o| o <= now + 60))
+                    && admitted.get(&n).is_none_or(|a| a["observed"].as_u64() < Some(o))
+                {
+                    admitted.insert(n, &t["admission"]);
+                }
                 let (Some(n), Some(at)) = (t["n"].as_u64(), t["session"]["at"].as_u64().filter(|&at| at <= now)) else { continue };
                 if progress.get(&n).is_none_or(|(v, _)| v["at"].as_u64() < Some(at)) {
                     progress.insert(n, (&t["session"], label));
                 }
             }
         }
+        let snapshot = board["adapter"] == "taskq-snapshot";
         for t in board["tasks"].as_array_mut().unwrap() {
+            if matches!(t["state"].as_str(), Some("ready" | "waiting")) {
+                let own = t.get("admission").filter(|a| snapshot && a.is_object()).cloned();
+                let raw = own.as_ref().map(|a| (a, "taskq-snapshot")).or_else(|| t["n"].as_u64().and_then(|n| admitted.get(&n)).map(|a| (*a, "taskq-board/1")));
+                t["admission"] = crate::explain::admission(raw, now);
+            } else if let Some(o) = t.as_object_mut() {
+                o.remove("admission");
+            }
             if let Some(&(s, host)) = t["n"].as_u64().and_then(|n| progress.get(&n)).filter(|_| matches!(t["state"].as_str(), Some("doing" | "review"))) {
                 t["session"] = json!({"host": host, "runtime": s["runtime"], "stage": s["stage"], "age_s": now - s["at"].as_u64().unwrap()});
             }
@@ -770,6 +787,7 @@ pub fn build(inp: &Value) -> Value {
         sources["taskq"] = t.clone();
         att_states.push(("taskq".to_string(), t));
     }
+    let cursor = f["cursor"].as_str().and_then(|c| c.parse().ok()).unwrap_or(0);
     let agent_work = crate::agent_work::build(inp);
     // listed only when configured, like the taskq adapter
     if agent_work["source"]["reason"] != "not configured" {
@@ -800,8 +818,39 @@ pub fn build(inp: &Value) -> Value {
         "optimization": crate::optimization::build(inp),
         "agent_work": agent_work,
     });
+    // D23: changes while away, person requests and the query shape, from the parts above
+    let mut sources: Vec<(&str, Option<String>)> = Vec::new();
+    if !sq.is_null() || doc["checks"]["installations"].as_array().is_some_and(|a| !a.is_empty()) {
+        let capped = doc["checks"]["installations"].as_array().into_iter().flatten().any(|c| c["findings_incomplete"] == true);
+        sources.push(("serverq", match (doc["checks"]["installations"].as_array().is_some_and(|a| !a.is_empty()), capped) {
+            (false, _) => Some("no baseline: the local report keeps no verified end time".into()),
+            (true, true) => Some("episode history capped".into()),
+            _ => None,
+        }));
+    }
+    if !lf.is_null() {
+        sources.push(("agentq", (!matches!(lf_src["state"].as_str(), Some("ok" | "incomplete"))).then(|| format!("Langfuse: {}", lf_src["reason"].as_str().unwrap_or("read not confirmed")))));
+        sources.push(("Langfuse", Some("no baseline: model errors carry no start time".into())));
+    }
+    if !doc["boards"].as_array().is_none_or(Vec::is_empty) {
+        sources.push(("taskq", Some("no baseline: TaskQ reports no state change times".into())));
+    }
+    let items: Vec<Value> = doc["attention"]["current"].as_array().into_iter().flatten().chain(doc["attention"]["gaps"].as_array().into_iter().flatten()).cloned().collect();
+    // incident events, and every retained ServerQ episode (not only the 24 h history list)
+    let mut events: Vec<Value> = doc["attention"]["incidents"].as_array().into_iter().flatten().filter(|i| i["source"] != "serverq").cloned().collect();
+    for c in doc["checks"]["installations"].as_array().into_iter().flatten() {
+        events.extend(c["findings"].as_array().into_iter().flatten().map(|f| json!({"source": "serverq", "host": c["host"], "installation": c["installation"],
+            "what": format!("{}: {}", f["rule"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")), "since": f["first_seen"], "verified_at": f["verified_at"], "episode": f})));
+    }
+    doc["changes"] = crate::explain::changes(&items, &events, &sources, now, period, cursor);
+    doc["attention"]["requests"] = crate::explain::requests(&doc, now).into();
+    let longest = doc["changes"]["rows_total"].as_u64().max(doc["agent_work"]["attempts_total"].as_u64()).unwrap_or(0) as usize;
+    doc["query"] = crate::explain::query(period, now, cursor, longest);
     if inp["installations"].is_object() {
         doc["installations"] = inp["installations"].clone();
+        for r in doc["installations"]["rows"].as_array_mut().into_iter().flatten() {
+            r["route"] = crate::explain::route(r);
+        }
         // Filter after canonical host joins: one TaskQ sender can observe other hosts of its approved board.
         if let Some(host) = fhost {
             let owners: HashSet<String> = doc["hosts"].as_array().into_iter().flatten().flat_map(|h| h["taskq"]["observations"].as_array().into_iter().flatten())
@@ -1010,6 +1059,28 @@ mod tests {
         input["installations"] = json!({"rows": [{"product": "serverq", "installation": "sq-1", "workspace": "ws-1", "host_label": "same", "runtime": "native", "connection": "active", "observation": {"state": "ok", "at": 1792000000u64}, "snapshot": {"schema": "serverq-report/1", "payload": p}}]});
         let doc = build(&input);
         assert_eq!(doc["checks"]["installations"][0]["findings"][0]["verified_at"], 1791907200u64);
+    }
+
+    /// D23 A3/A5: an enrolled ServerQ warn rule is one person request that opens its exact open episode, the
+    /// verified episode inside the window reads resolved, and Attention lists nothing a person need not act on.
+    #[test]
+    fn requests_open_the_exact_finding_and_changes_resolve_episodes() {
+        let mut input: Value = serde_json::from_str(crate::FIXTURE).unwrap();
+        let p: Value = serde_json::from_str(include_str!("../fixture/serverq/linux.json")).unwrap();
+        input["now"] = json!(1791993000u64);
+        input["period"] = json!(86400);
+        input["installations"] = json!({"rows": [{"product": "serverq", "installation": "sq-1", "workspace": "ws-1", "host_label": "same", "runtime": "native", "connection": "active", "observation": {"state": "ok", "at": 1791993000u64}, "snapshot": {"schema": "serverq-report/1", "payload": p}}]});
+        let doc = build(&input);
+        let finding = doc["checks"]["installations"][0]["findings"].as_array().unwrap().iter().find(|f| f["rule"] == "failed-services" && f["state"] == "open").unwrap().clone();
+        let r: Vec<&Value> = doc["attention"]["requests"].as_array().unwrap().iter().filter(|r| r["installation"] == "sq-1").collect();
+        assert_eq!(r.len(), 1, "one request per warn rule");
+        assert_eq!((&r[0]["kind"], &r[0]["rule"], &r[0]["since"]), (&json!("finding"), &json!("failed-services"), &json!(1791992800u64)));
+        assert_eq!(r[0]["target"], format!("/checks?period=86400#finding-{}", crate::explain::finding_id(&finding)));
+        let kinds: HashSet<&str> = doc["attention"]["requests"].as_array().unwrap().iter().filter_map(|r| r["kind"].as_str()).collect();
+        assert!(kinds.iter().all(|k| ["question", "failed", "finding"].contains(k)), "{kinds:?}");
+        let resolved: Vec<&Value> = doc["changes"]["rows"].as_array().unwrap().iter().filter(|r| r["state"] == "resolved").collect();
+        assert_eq!((resolved.len(), &resolved[0]["until"]), (1, &json!(1791907200u64)), "disk-headroom verified inside the window");
+        assert_eq!(doc["changes"]["coverage"].as_array().unwrap().iter().find(|c| c["source"] == "serverq").unwrap()["baseline"], true, "enrolled episodes keep the window's history");
     }
 
     /// D19 U2: cached resource collection failure is unconfirmed, with producer ages and other boards retained.

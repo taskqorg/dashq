@@ -299,6 +299,64 @@
         "occurrences": 1,
         "trace_id": null
       }
+    ],
+    "requests": [
+      {
+        "kind": "question",
+        "source": "taskq",
+        "host": null,
+        "project": "taskqorg/taskq",
+        "task": 11,
+        "rule": null,
+        "installation": null,
+        "reason": "Review task",
+        "since": null,
+        "age_s": null,
+        "action": "Answer",
+        "target": "/projects?period=1800#board-taskqorg%2Ftaskq-q-11"
+      },
+      {
+        "kind": "question",
+        "source": "taskq",
+        "host": null,
+        "project": "taskqorg/taskq",
+        "task": 12,
+        "rule": null,
+        "installation": null,
+        "reason": "Which option? <b>",
+        "since": null,
+        "age_s": null,
+        "action": "Answer",
+        "target": "/projects?period=1800#board-taskqorg%2Ftaskq-q-12"
+      },
+      {
+        "kind": "failed",
+        "source": "taskq",
+        "host": null,
+        "project": "taskqorg/taskq",
+        "task": 14,
+        "rule": null,
+        "installation": null,
+        "reason": "Reason: CI <red> on every runner",
+        "since": null,
+        "age_s": null,
+        "action": "Review failure",
+        "target": "https://github.com/taskqorg/taskq/issues/14"
+      },
+      {
+        "kind": "finding",
+        "source": "serverq",
+        "host": "fra/native",
+        "project": null,
+        "task": null,
+        "rule": "failed-services",
+        "installation": null,
+        "reason": "1 failed unit",
+        "since": 1791860000,
+        "age_s": 15139,
+        "action": "Diagnostics",
+        "target": "/checks?period=1800#check-report-failed-services"
+      }
     ]
   },
   "boards": [
@@ -382,7 +440,7 @@
         "ask": 1,
         "failed": 1,
         "ready": 1,
-        "waiting": 0,
+        "waiting": 1,
         "later": 0
       },
       "tasks": [
@@ -467,7 +525,16 @@
             "later"
           ],
           "question": null,
-          "card": null
+          "card": null,
+          "admission": {
+            "code": "capacity",
+            "meaning": "runtime, project or host slots are full or another project has the turn",
+            "observed": 1791875079,
+            "age_s": 60,
+            "host": "mac",
+            "reason": null,
+            "source": "taskq-snapshot"
+          }
         },
         {
           "n": 14,
@@ -480,6 +547,25 @@
           ],
           "question": null,
           "card": null
+        },
+        {
+          "n": 15,
+          "title": "Waits on #13",
+          "url": "https://github.com/taskqorg/taskq/issues/15",
+          "state": "waiting",
+          "revision": 6139994300,
+          "controls": [],
+          "question": null,
+          "card": null,
+          "admission": {
+            "code": "dependency",
+            "meaning": "a Depends on issue is open or unknown",
+            "observed": 1791875079,
+            "age_s": 60,
+            "host": null,
+            "reason": "#13 open",
+            "source": "taskq-snapshot"
+          }
         }
       ]
     },
@@ -2259,6 +2345,82 @@
     ],
     "attempts_total": 8
   },
+  "changes": {
+    "window_s": 1800,
+    "from": 1791873339,
+    "to": 1791875139,
+    "timezone": "UTC",
+    "comparison": {
+      "state": "partial",
+      "reason": "some sources keep no baseline"
+    },
+    "coverage": [
+      {
+        "source": "serverq",
+        "baseline": false,
+        "reason": "no baseline: the local report keeps no verified end time"
+      },
+      {
+        "source": "agentq",
+        "baseline": true,
+        "reason": null
+      },
+      {
+        "source": "Langfuse",
+        "baseline": false,
+        "reason": "no baseline: model errors carry no start time"
+      },
+      {
+        "source": "taskq",
+        "baseline": false,
+        "reason": "no baseline: TaskQ reports no state change times"
+      }
+    ],
+    "rows": [
+      {
+        "state": "new",
+        "source": "langfuse",
+        "host": "win-1/native",
+        "what": "resources of inst-win: stale",
+        "since": 1791873600,
+        "until": null,
+        "installation": null
+      },
+      {
+        "state": "ongoing",
+        "source": "serverq",
+        "host": "fra/native",
+        "what": "bounded-journal: unknown",
+        "since": 1791871539,
+        "until": null,
+        "installation": null
+      },
+      {
+        "state": "ongoing",
+        "source": "serverq",
+        "host": "fra/native",
+        "what": "failed-services: warn",
+        "since": 1791860000,
+        "until": null,
+        "installation": null
+      }
+    ],
+    "rows_total": 3,
+    "unclassified": {
+      "Langfuse": 2,
+      "taskq": 1,
+      "agentq": 1
+    }
+  },
+  "query": {
+    "period": 1800,
+    "from": 1791873339,
+    "to": 1791875139,
+    "timezone": "UTC",
+    "cursor": 0,
+    "next_cursor": null,
+    "cap": 200
+  },
   "installations": {
     "source": {
       "state": "ok",
@@ -2332,6 +2494,44 @@
                 "queued": 0
               }
             ]
+          }
+        },
+        "route": {
+          "emitted": {
+            "state": "unknown",
+            "value": null,
+            "at": null,
+            "reason": "producer reports no emitted count"
+          },
+          "queued": {
+            "state": "unknown",
+            "value": null,
+            "at": null,
+            "reason": "producer reports no queue"
+          },
+          "accepted": {
+            "state": "unknown",
+            "value": null,
+            "at": null,
+            "reason": "no receipt"
+          },
+          "projected": {
+            "state": "known",
+            "value": true,
+            "at": 1791875119,
+            "reason": null
+          },
+          "exported": {
+            "state": "unknown",
+            "value": null,
+            "at": null,
+            "reason": "no export evidence"
+          },
+          "queryable": {
+            "state": "known",
+            "value": true,
+            "at": 1791875119,
+            "reason": null
           }
         }
       }
