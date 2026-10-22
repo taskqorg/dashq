@@ -168,6 +168,7 @@
         "reason": null
       },
       "taskq": {
+        "observations": [],
         "version": "4.2.0",
         "latest": "4.2.0",
         "behind": false,
@@ -199,6 +200,7 @@
         "reason": null
       },
       "taskq": {
+        "observations": [],
         "version": null,
         "latest": "4.2.0",
         "behind": null,
@@ -230,6 +232,7 @@
         "reason": null
       },
       "taskq": {
+        "observations": [],
         "version": "4.2.0",
         "latest": "4.2.0",
         "behind": false,
@@ -263,6 +266,7 @@
         "reason": null
       },
       "taskq": {
+        "observations": [],
         "version": "4.2.0",
         "latest": "4.2.0",
         "behind": false,
@@ -294,6 +298,7 @@
         "reason": "no agentq heartbeat"
       },
       "taskq": {
+        "observations": [],
         "version": "4.2.0-dev.1791998010",
         "latest": "4.2.0",
         "behind": true,

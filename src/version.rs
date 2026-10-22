@@ -358,11 +358,12 @@ mod tests {
         }
         inp["boards"]["taskqorg/taskq"]["error"] = json!("timeout");
         let failed = crate::data::build(&inp);
+        assert_eq!(failed["versions"]["rows"].as_array().unwrap().iter().find(|r|r["provenance"]=="enrollment").unwrap()["observation"]["state"],"ok","independent enrolled evidence survives a GitHub outage");
         for row in failed["versions"]["rows"]
             .as_array()
             .unwrap()
             .iter()
-            .filter(|r| r["product"] == "taskq")
+            .filter(|r| r["product"] == "taskq" && r["provenance"] == "taskq-heartbeat")
         {
             assert_eq!(row["observation"]["state"], "unconfirmed");
             assert_eq!(row["running"]["last_known"], true);

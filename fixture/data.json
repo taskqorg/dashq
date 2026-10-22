@@ -38,6 +38,13 @@
       "age_s": null,
       "reason": "fra: read failed (log missing)",
       "incomplete": true
+    },
+    "enrollment": {
+      "state": "ok",
+      "at": 1791875139,
+      "age_s": 0,
+      "reason": null,
+      "incomplete": false
     }
   },
   "hosts": [
@@ -51,6 +58,64 @@
         "reason": "Langfuse: capped query"
       },
       "taskq": {
+        "observations": [
+          {
+            "host": "fra",
+            "kind": "login",
+            "producer": "cccccccccccc",
+            "observed": 1791875119,
+            "valid_until": 1791875419,
+            "claude": "logged in",
+            "codex": "logged in",
+            "state": "logged in",
+            "complete": true,
+            "reason": null,
+            "board": {
+              "kind": "github",
+              "host": "github.com",
+              "repo": "taskqorg/dashq"
+            },
+            "workspace": "example",
+            "installation": "tq-fixture"
+          },
+          {
+            "host": "fra",
+            "kind": "online",
+            "state": "online",
+            "producer": "aaaaaaaaaaaa",
+            "observed": 1791875119,
+            "heartbeat": 1791875109,
+            "valid_until": 1791875419,
+            "complete": true,
+            "reason": null,
+            "board": {
+              "kind": "github",
+              "host": "github.com",
+              "repo": "taskqorg/dashq"
+            },
+            "workspace": "example",
+            "installation": "tq-fixture"
+          },
+          {
+            "host": "fra",
+            "kind": "queue",
+            "state": "idle",
+            "producer": "cccccccccccc",
+            "observed": 1791875119,
+            "valid_until": 1791875419,
+            "complete": true,
+            "reason": null,
+            "running": 0,
+            "queued": 0,
+            "board": {
+              "kind": "github",
+              "host": "github.com",
+              "repo": "taskqorg/dashq"
+            },
+            "workspace": "example",
+            "installation": "tq-fixture"
+          }
+        ],
         "version": "4.2.0",
         "latest": "4.2.0",
         "behind": false,
@@ -84,6 +149,7 @@
         "reason": "no agentq heartbeat"
       },
       "taskq": {
+        "observations": [],
         "version": "4.1.2",
         "latest": "4.2.0",
         "behind": true,
@@ -115,6 +181,7 @@
         "reason": "no heartbeat in 24 h"
       },
       "taskq": {
+        "observations": [],
         "version": null,
         "latest": "4.2.0",
         "behind": null,
@@ -990,6 +1057,66 @@
   "versions": {
     "rows": [
       {
+        "product": "taskq",
+        "provenance": "enrollment",
+        "installation": "tq-fixture",
+        "workspace": "example",
+        "host": "fra/native",
+        "observation": {
+          "state": "ok",
+          "at": 1791875119,
+          "age_s": 20,
+          "reason": null
+        },
+        "running": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "selected": {
+          "version": null,
+          "source": null,
+          "reason": "not reported",
+          "last_known": false
+        },
+        "release": {
+          "version": "4.2.0",
+          "at": 1791875000,
+          "state": "ok",
+          "reason": null
+        },
+        "reported_available": null,
+        "update": {
+          "state": "unknown",
+          "reason": "no verified version comparison"
+        },
+        "health": {
+          "state": "unknown",
+          "reason": "health receipt not reported by enrollment"
+        },
+        "lifecycle": {
+          "state": "unknown",
+          "reason": "lifecycle stage not reported by enrollment"
+        },
+        "libraries": {
+          "coreq": null,
+          "engines": null
+        },
+        "queue_age_s": null,
+        "connection": "active",
+        "coverage": [],
+        "gaps": [
+          "running",
+          "selected",
+          "health",
+          "lifecycle",
+          "coreq",
+          "engines",
+          "queue"
+        ]
+      },
+      {
         "product": "agentq",
         "provenance": "langfuse",
         "installation": "inst-fra",
@@ -1800,6 +1927,84 @@
             }
           }
         ]
+      }
+    ]
+  },
+  "installations": {
+    "source": {
+      "state": "ok",
+      "at": 1791875139,
+      "age_s": 0,
+      "reason": null,
+      "incomplete": false
+    },
+    "rows": [
+      {
+        "installation": "tq-fixture",
+        "product": "taskq",
+        "runtime": "native",
+        "host_label": "fra",
+        "workspace": "example",
+        "connection": "active",
+        "projected": true,
+        "observation": {
+          "state": "ok",
+          "at": 1791875119,
+          "age_s": 20,
+          "reason": null
+        },
+        "snapshot": {
+          "schema": "taskq-board/1",
+          "event_id": "host-fixture",
+          "payload": {
+            "schema": 1,
+            "board": {
+              "kind": "github",
+              "host": "github.com",
+              "repo": "taskqorg/dashq"
+            },
+            "complete": true,
+            "totals": {},
+            "tasks": [],
+            "observations": [
+              {
+                "host": "fra",
+                "kind": "login",
+                "producer": "cccccccccccc",
+                "observed": 1791875119,
+                "valid_until": 1791875419,
+                "claude": "logged in",
+                "codex": "logged in",
+                "state": "logged in",
+                "complete": true,
+                "reason": null
+              },
+              {
+                "host": "fra",
+                "kind": "online",
+                "state": "online",
+                "producer": "aaaaaaaaaaaa",
+                "observed": 1791875119,
+                "heartbeat": 1791875109,
+                "valid_until": 1791875419,
+                "complete": true,
+                "reason": null
+              },
+              {
+                "host": "fra",
+                "kind": "queue",
+                "state": "idle",
+                "producer": "cccccccccccc",
+                "observed": 1791875119,
+                "valid_until": 1791875419,
+                "complete": true,
+                "reason": null,
+                "running": 0,
+                "queued": 0
+              }
+            ]
+          }
+        }
       }
     ]
   }

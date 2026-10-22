@@ -7,3 +7,4 @@ fixture/taskq-resources/resource-policy-v1.json -text
 fixture/page.html -text
 assets/taskq/answer-card.* -text
 assets/taskq/project-blocks.* -text
+fixture/taskq/host-observations.json -text

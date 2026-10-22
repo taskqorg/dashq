@@ -1,0 +1,7 @@
+{
+  "repo": "taskqorg/taskq",
+  "tag": "v4.6.30",
+  "commit": "09cb0d7db35d0de51bef83d9fa3ec803eafad42d",
+  "path": "tests/fixtures/host-observations.json",
+  "sha256": "c0fba64e81d7845b12ef3c329b05cbe72e7e5cddbf36be8a66e4d1ade9808c56"
+}

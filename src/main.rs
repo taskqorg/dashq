@@ -261,9 +261,8 @@ impl App {
             c.taskq_logs.iter().map(|(h, p)| (h.clone(), self.cache.get(&format!("tasklog:{h}"), 60, || agent_work::read(p)))).collect::<serde_json::Map<_, _>>().into()
         };
         let t0 = std::time::Instant::now();
-        let host = filters["host"].as_str().map(String::from);
         // committed snapshots never wait for or depend on the optional sources above (D11)
-        let projection = enroll::projection(&self.enroll, scope, host.as_deref(), now);
+        let projection = enroll::projection(&self.enroll, scope, None, now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
         let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
         profile::step("enrollment", t0);
@@ -529,13 +528,18 @@ fn snapshot(dir: &std::path::Path) -> Result<(), String> {
     std::fs::write(&html, snapshot_html()).map_err(|e| format!("snapshot: {e}"))?;
     let _ = std::fs::remove_file(&png);
     let c = chrome().ok_or("snapshot: PNG renderer not found (headless Chrome; set DASHQ_CHROME)")?;
+    // Chrome's default profile may be unavailable; own a fresh profile and remove only that directory.
+    let profile = std::env::temp_dir().join(format!("dashq-chrome-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()));
+    std::fs::create_dir(&profile).map_err(|e| format!("snapshot: renderer profile: {e}"))?;
     // ponytail: fixed 1280x4000 window; measure the page height if the fixture outgrows it
     let out = std::process::Command::new(&c)
         .args(["--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars", "--window-size=1280,4000"])
+        .arg(format!("--user-data-dir={}", profile.display()))
         .arg(format!("--screenshot={}", png.display()))
         .arg(format!("file://{}", html.display()))
-        .output()
-        .map_err(|e| format!("snapshot: run {}: {e}", c.display()))?;
+        .output();
+    let _ = std::fs::remove_dir_all(&profile);
+    let out = out.map_err(|e| format!("snapshot: run {}: {e}", c.display()))?;
     if !png.is_file() {
         return Err(format!("snapshot: no page.png ({})", out.status));
     }

@@ -167,7 +167,7 @@ fn host_row(id: &str) -> Value {
         "id": id,
         "reason": null,
         "freshness": {"state": "unknown", "at": null, "age_s": null, "reason": "no agentq heartbeat"},
-        "taskq": {"version": null, "latest": null, "behind": null, "state": "unknown", "age_s": null, "reason": "no heartbeat"},
+        "taskq": {"observations": [], "version": null, "latest": null, "behind": null, "state": "unknown", "age_s": null, "reason": "no heartbeat"},
         "agentq": {"installation": null, "running": null, "latest": null, "behind": null},
         "serverq": {"status": null, "state": "unknown", "age_s": null, "reason": "no serverq report for this host"},
     })
@@ -441,6 +441,7 @@ pub fn build(inp: &Value) -> Value {
     // `unconfirmed`: hosts whose heartbeat came from a failed, stale or cached board read, with that reason
     let mut working: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut unconfirmed: BTreeMap<String, String> = BTreeMap::new();
+    let mut taskq_hosts = BTreeMap::new();
     for repo in inp["projects"].as_array().into_iter().flatten().filter_map(Value::as_str) {
         let snap = &inp["boards"][repo];
         let src = source(snap, now, GITHUB_LIMIT, None);
@@ -471,6 +472,7 @@ pub fn build(inp: &Value) -> Value {
                 None if machines.known(name) => (machines.id(name, "native"), true),
                 None => (name.to_string(), false),
             };
+            taskq_hosts.insert((repo.to_ascii_lowercase(), name.to_ascii_lowercase()), row.clone());
             let ttl = body.lines().find_map(|l| l.strip_prefix("ttl ")?.trim().parse().ok()).unwrap_or(HEARTBEAT_TTL);
             let first = attempts.len();
             for l in body.lines() {
@@ -723,6 +725,7 @@ pub fn build(inp: &Value) -> Value {
     let manual: Vec<Value> = report["manual_rules"].as_array().into_iter().flatten().map(|r| json!({"rule": r, "status": "not verified"})).collect();
     let enrolled_checks = serverq_enrolled(inp, now, &machines, &mut hosts, &mut current, &mut gaps, &mut history);
 
+    taskq_observations(inp, now, &machines, &taskq_hosts, &mut hosts);
     for h in hosts.values_mut() {
         let id = h["id"].as_str().unwrap_or("").to_ascii_lowercase();
         h["taskq"]["observed_running"] = if unconfirmed.contains_key(&id) { Value::Null } else {
@@ -797,8 +800,78 @@ pub fn build(inp: &Value) -> Value {
     });
     if inp["installations"].is_object() {
         doc["installations"] = inp["installations"].clone();
+        // Filter after canonical host joins: one TaskQ sender can observe other hosts of its approved board.
+        if let Some(host) = fhost {
+            let owners: HashSet<String> = doc["hosts"].as_array().into_iter().flatten().flat_map(|h| h["taskq"]["observations"].as_array().into_iter().flatten())
+                .filter_map(|o|o["installation"].as_str().map(String::from)).collect();
+            if let Some(rows) = doc["installations"]["rows"].as_array_mut() { rows.retain(|r| {
+                format!("{}/{}",r["host_label"].as_str().unwrap_or(""),r["runtime"].as_str().unwrap_or("")).eq_ignore_ascii_case(host)
+                    || r["installation"].as_str().is_some_and(|i|owners.contains(i))
+            }); }
+        }
     }
     doc
+}
+
+/// D8 / #178: newest board-scoped evidence, never inferred from activity or shared queue totals.
+fn taskq_observations(inp: &Value, now: u64, machines: &Machines, aliases: &BTreeMap<(String, String), String>, hosts: &mut BTreeMap<String, Value>) {
+    let mut latest: BTreeMap<(String, String, String, String), Value> = BTreeMap::new();
+    for r in inp["installations"]["rows"].as_array().into_iter().flatten().filter(|r|
+        r["product"] == "taskq" && r["connection"] == "active" && r["projected"] != false && r["snapshot"]["schema"] == "taskq-board/1") {
+        let p = &r["snapshot"]["payload"];
+        let b = &p["board"];
+        let Some(repo) = b["repo"].as_str() else { continue };
+        if p["schema"] != 1 || b["kind"] != "github" || b["host"] != "github.com" { continue }
+        for o in p["observations"].as_array().into_iter().flatten() {
+            let (Some(host), Some(kind)) = (o["host"].as_str().filter(|h| safe(h,64,b"_.-")), o["kind"].as_str().filter(|k| matches!(*k,"online"|"login"|"queue"))) else { continue };
+            let row = aliases.get(&(repo.to_ascii_lowercase(), host.to_ascii_lowercase())).cloned()
+                .unwrap_or_else(|| if machines.known(host) { machines.id(host,"native") } else { host.to_string() });
+            let key = (repo.to_ascii_lowercase(), r["workspace"].as_str().unwrap_or("").into(), row.to_ascii_lowercase(), kind.into());
+            let mut v = o.clone();
+            v["board"] = b.clone(); v["workspace"] = r["workspace"].clone(); v["installation"] = r["installation"].clone();
+            let rank = |v: &Value| (v["observed"].as_u64().is_some_and(|t|t<=now), v["observed"].as_u64());
+            if let Some(old) = latest.get_mut(&key) {
+                if rank(old) > rank(&v) { continue }
+                if rank(old) == rank(&v) {
+                    let mut a = old.clone(); let mut b = v.clone();
+                    for x in [&mut a, &mut b] { x.as_object_mut().unwrap().remove("installation"); }
+                    if a != b { old["state"] = json!("unknown"); old["complete"] = json!(false); old["reason"] = json!("conflicting observations"); }
+                    continue;
+                }
+            }
+            latest.insert(key, v);
+            host_entry(hosts, &row);
+        }
+    }
+    for ((repo, workspace, row, _), v) in latest.clone() {
+        for kind in ["online", "login", "queue"] {
+            latest.entry((repo.clone(), workspace.clone(), row.clone(), kind.into())).or_insert_with(|| json!({
+                "host":v["host"],"kind":kind,"board":v["board"],"workspace":workspace,"installation":null,
+                "producer":null,"observed":null,"valid_until":null,"state":"unknown","complete":false,"reason":"no observation"}));
+        }
+    }
+    for ((_, _, row, kind), mut o) in latest {
+        let valid = match kind.as_str() {
+            "online" => matches!(o["state"].as_str(),Some("online"|"offline")),
+            "login" => matches!(o["state"].as_str(),Some("logged in"|"not logged in")),
+            _ => matches!(o["state"].as_str(),Some("busy"|"idle")) && o["running"].as_u64().is_some() && o["queued"].as_u64().is_some(),
+        };
+        let reason = if o["observed"].as_u64().is_some_and(|t|t>now) { Some("clock uncertain") }
+            else if o["valid_until"].as_u64().is_some_and(|t|now>t) { Some("expired") }
+            else if o["complete"] != true || o["state"] == "unknown" { Some(o["reason"].as_str().unwrap_or("incomplete observation")) }
+            else if o["observed"].as_u64().is_none_or(|t|t==0) || o["valid_until"].as_u64().is_none_or(|t|Some(t)<o["observed"].as_u64()) { Some("invalid observation time") }
+            else if kind == "login" && ["claude","codex"].iter().any(|k| !matches!(o[*k].as_str(),Some("logged in"|"not logged in"|"not installed"))) { Some("runtime login unknown") }
+            else if !valid || !o["producer"].as_str().is_some_and(|p|p.len()==12 && p.bytes().all(|b|b.is_ascii_hexdigit())) { Some("invalid observation") }
+            else { None };
+        if let Some(reason) = reason.map(str::to_string) {
+            o["state"] = json!("unknown"); o["complete"] = json!(false); o["reason"] = json!(reason);
+            for k in ["running","queued"] { if o.get(k).is_some() { o[k] = Value::Null; } }
+            for k in ["claude","codex","codex-app"] { if o.get(k).is_some() { o[k] = json!("unknown"); } }
+        }
+        let h = hosts.get_mut(&row).unwrap();
+        if !h["taskq"]["observations"].is_array() { h["taskq"]["observations"] = json!([]); }
+        h["taskq"]["observations"].as_array_mut().unwrap().push(o);
+    }
 }
 
 /// Enrolled `serverq-report/1` snapshots (serverq.md § 3 projection, schema 1): one Server checks entry per
@@ -961,6 +1034,67 @@ mod tests {
         for bad in ["period=60", "host=a%2Fb", "agent=x", "session=a%20b", "x=1", "host=a&host=b", "period"] {
             assert!(query(bad).is_err(), "{bad}");
         }
+    }
+
+    /// #178 A2–A5 / D6: released producer cases must reach the shared JSON/report projection without false health.
+    #[test]
+    fn taskq_host_observations_released_cases() {
+        let bytes = include_bytes!("../fixture/taskq/host-observations.json");
+        let hash: String = ring::digest::digest(&ring::digest::SHA256, bytes).as_ref().iter().map(|b|format!("{b:02x}")).collect();
+        assert_eq!(hash,"c0fba64e81d7845b12ef3c329b05cbe72e7e5cddbf36be8a66e4d1ade9808c56","TaskQ v4.6.30 exact bytes");
+        let cases: Value = serde_json::from_str(include_str!("../fixture/taskq/host-observations.json")).unwrap();
+        for (name, case) in cases.as_object().unwrap() {
+            let obs = case.as_array().cloned().unwrap_or_else(|| vec![case.clone()]);
+            let now = if name == "read expired" { 2000 } else { 1000 };
+            let inp = json!({"now":now,"projects":["taskqorg/dashq"],"installations":{"source":{"state":"ok"},"rows":[{
+                "product":"taskq","connection":"active","workspace":"ws","installation":"tq-one","observation":{"state":"ok"},
+                "snapshot":{"schema":"taskq-board/1","payload":{"schema":1,"board":{"kind":"github","host":"github.com","repo":"taskqorg/dashq"},"observations":obs}}
+            }]}});
+            let doc = build(&inp);
+            assert_eq!(doc["schema"], 2);
+            for o in obs {
+                let h = doc["hosts"].as_array().unwrap().iter().find(|h| h["id"] == o["host"]).expect("observation host must exist");
+                let got = h["taskq"]["observations"].as_array().unwrap().iter().find(|v| v["kind"] == o["kind"]).unwrap();
+                for k in ["producer","observed","valid_until"] { assert_eq!(got[k],o[k],"{name}: {k}"); }
+                assert_eq!(got["board"]["repo"], "taskqorg/dashq");
+                if o["complete"] == true { assert_eq!(got["state"],o["state"],"{name}"); }
+                else {
+                    assert_eq!(got["state"],"unknown","{name}");
+                    assert_eq!(got["reason"],o["reason"],"{name}");
+                    assert!(got["running"].is_null() && got["queued"].is_null(),"partial counts are not current");
+                    assert_ne!(got["claude"],"logged in");
+                }
+            }
+        }
+    }
+
+    /// #178 / H2 / D11: identity, expiry, conflict and revocation cannot become positive host evidence.
+    #[test]
+    fn taskq_host_observations_identity_and_freshness() {
+        let cases: Value = serde_json::from_str(include_str!("../fixture/taskq/host-observations.json")).unwrap();
+        let online = cases["read fresh"].as_array().unwrap().iter().find(|o|o["host"]=="mac" && o["kind"]=="online").unwrap().clone();
+        let record = |o: Value| json!({"product":"taskq","connection":"active","workspace":"ws","installation":"one","projected":true,
+            "snapshot":{"schema":"taskq-board/1","payload":{"schema":1,"board":{"kind":"github","host":"github.com","repo":"taskqorg/dashq"},"observations":[o]}}});
+        let mut inp = json!({"now":1000,"projects":["taskqorg/dashq"],"boards":{"taskqorg/dashq":{"at":1000,"value":{"date":1000,"hosts":[{
+            "title":"taskq host mac","body":"machine DESKTOP wsl","updated_at":"1970-01-01T00:16:40Z"}]}}},"installations":{"rows":[record(online.clone())]}});
+        let get = |d: Value| d["hosts"].as_array().unwrap().iter().find(|h|h["id"]=="DESKTOP/wsl").unwrap()["taskq"]["observations"].as_array().unwrap().iter().find(|o|o["kind"]=="online").unwrap().clone();
+        assert_eq!(get(build(&inp))["state"],"online");
+        let missing = build(&inp);
+        assert!(missing["hosts"][0]["taskq"]["observations"].as_array().unwrap().iter().any(|o|o["kind"]=="login" && o["reason"]=="no observation"));
+        inp["now"] = json!(1300); assert_eq!(get(build(&inp))["state"],"online","expiry boundary inclusive");
+        inp["now"] = json!(1301); assert_eq!(get(build(&inp))["reason"],"expired");
+        inp["now"] = json!(999); assert_eq!(get(build(&inp))["reason"],"clock uncertain");
+        inp["now"] = json!(1000);
+        let mut other = record(online); other["installation"] = json!("two");
+        inp["installations"]["rows"].as_array_mut().unwrap().push(other);
+        assert_eq!(get(build(&inp))["state"],"online","duplicates do not sum or conflict");
+        inp["installations"]["rows"][1]["snapshot"]["payload"]["observations"][0]["state"] = json!("offline");
+        assert_eq!(get(build(&inp))["reason"],"conflicting observations");
+        for r in inp["installations"]["rows"].as_array_mut().unwrap() { r["connection"] = json!("revoked"); }
+        assert!(build(&inp)["hosts"][0]["taskq"]["observations"].as_array().unwrap().is_empty());
+        inp["installations"]["rows"][0]["connection"] = json!("active");
+        inp["installations"]["rows"][0]["projected"] = json!(false);
+        assert!(build(&inp)["hosts"][0]["taskq"]["observations"].as_array().unwrap().is_empty(),"previous grant snapshot is not current");
     }
 
     #[test]

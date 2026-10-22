@@ -1,0 +1,1535 @@
+<!-- TaskQ v4.6.30 · https://github.com/taskqorg/taskq/releases/tag/v4.6.30
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-->
+<section id="dq-overview" aria-label="DashQ overview candidate">
+<style>
+#dq-overview{color-scheme:light dark;--dq-bg:light-dark(#fafbfc,#252b32);--dq-text:light-dark(#243039,#eef2f5);--dq-secondary:light-dark(#59636e,#b9c3cd);--dq-line:light-dark(#dce0e5,#46505b);--dq-soft:light-dark(#e9edf1,#37424c);--dq-good:light-dark(#246f59,#8dd2b8);--dq-warn:light-dark(#955525,#edbc96);font:400 16px/1.4 system-ui,sans-serif;max-width:1024px;color:var(--dq-text);background:var(--dq-bg);padding:20px;container-type:inline-size;overflow-wrap:anywhere;box-sizing:border-box}
+#dq-overview .dq-bar{display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding-right:90px;padding-bottom:16px;border-bottom:1px solid var(--dq-line)}#dq-overview .dq-logo{font-size:20px;font-weight:500;letter-spacing:-.4px}#dq-overview .dq-nav{display:flex;gap:4px;flex-wrap:wrap}#dq-overview .dq-control{display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;color:inherit;border:0;border-radius:7px;min-height:36px;background:transparent;padding:6px 9px;text-decoration:none;box-sizing:border-box}#dq-overview .dq-control[aria-current=page],#dq-overview .dq-control:hover{background:var(--dq-soft)}#dq-overview .dq-control:focus-visible{outline:2px solid var(--dq-text);outline-offset:2px}#dq-overview .dq-control svg,#dq-overview .dq-section-title svg,#dq-overview .dq-action svg,#dq-overview .dq-person svg{width:18px;height:18px;flex-shrink:0;stroke-width:1.7}#dq-overview .dq-demo{margin-left:auto;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-titlebar{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin:20px 0 14px}#dq-overview h1{font-size:24px;font-weight:500;letter-spacing:-.5px;margin:0}#dq-overview .dq-section-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 10px}#dq-overview h2{font-size:18px;font-weight:500;margin:0}#dq-overview .dq-context{display:flex;align-items:center;gap:6px;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-context svg{width:15px;height:15px}#dq-overview .dq-warning{color:var(--dq-warn)}#dq-overview .dq-muted{color:var(--dq-secondary)}#dq-overview .dq-small{font-size:.85em}#dq-overview .dq-section{margin-top:20px}#dq-overview .dq-action{display:flex;align-items:center;gap:10px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;width:100%;min-height:40px;padding:7px 0;box-sizing:border-box}#dq-overview .dq-action>span{flex:1;min-width:0}#dq-overview .dq-action:hover{background:var(--dq-soft)}#dq-overview .dq-action:focus-visible{outline:2px solid var(--dq-text);outline-offset:2px}#dq-overview .dq-bottom{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:28px;border-top:1px solid var(--dq-line);margin-top:18px}#dq-overview .dq-person{display:flex;align-items:center;gap:10px;min-height:38px;padding:5px 0}#dq-overview .dq-person>span:nth-of-type(2){flex:1;min-width:0}#dq-overview .dq-person .dq-brand{display:inline-flex;width:18px;height:18px}#dq-overview .dq-brand svg{width:18px;height:18px;fill:currentColor}#dq-overview .dq-status{display:flex;align-items:center;gap:6px;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-status .dq-dot{width:6px;height:6px;border-radius:50%;background:var(--dq-good)}#dq-overview .dq-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid var(--dq-line);margin-top:18px;padding-top:12px}#dq-overview .dq-footer .dq-control{margin-left:auto}#dq-overview .dq-inline{display:flex;gap:12px;align-items:center;flex-wrap:wrap}#dq-overview .dq-block{border-top:1px solid var(--dq-line);padding-top:16px;margin-top:16px}#dq-overview .dq-stat{display:flex;justify-content:space-between;align-items:baseline;gap:20px;flex-wrap:wrap;margin:12px 0}#dq-overview .dq-big{font-size:28px;font-weight:500;font-variant-numeric:tabular-nums}#dq-overview .dq-empty{padding:32px 0;max-width:480px}#dq-overview .dq-empty>svg{width:28px;height:28px;color:var(--dq-secondary)}#dq-overview .dq-empty p{color:var(--dq-secondary);margin:12px 0}#dq-overview .dq-control:disabled{color:var(--dq-secondary);opacity:.6}#dq-overview [hidden]{display:none!important}#dq-overview [data-task-rows]{margin:16px 0}#dq-overview [data-task-notice]{font-size:.85em;color:var(--dq-secondary)}
+#dq-overview #dq-server-study{max-width:none;background:transparent}#dq-overview #dq-server-study .ds-caption,#dq-overview #dq-server-study .ds-period{display:none}#dq-overview #dq-server-study .ds-stage{padding:0;border-radius:0}#dq-overview #dq-server-study article{background:var(--dq-bg)}
+@container(max-width:680px){#dq-overview .dq-bottom{grid-template-columns:1fr;gap:0}#dq-overview .dq-bar{gap:12px}#dq-overview .dq-demo{margin-left:0}#dq-overview .dq-titlebar{margin-top:16px}#dq-overview .dq-control{padding:6px 8px}}
+@container(max-width:480px){#dq-overview .dq-bar{padding-right:0}#dq-overview .dq-logo{flex-basis:100%;padding-right:90px;box-sizing:border-box}#dq-overview .dq-nav{gap:0}}
+@media(pointer:coarse){#dq-overview .dq-control,#dq-overview .dq-action{min-height:44px}}
+</style>
+<style>
+/* Parent: menu-next-variants.html (#943), visual-style.md. Scoped internals belong to TaskQ. */
+.tqp{--paper:light-dark(#fafbfc,#252b32);--ink:light-dark(#243039,#eef2f5);--secondary:light-dark(#59636e,#b9c3cd);--line:light-dark(#dce0e5,#46505b);--hover:light-dark(#e9edf1,#37424c);--good:light-dark(#246f59,#8dd2b8);--ask:light-dark(#955525,#edbc96);--bad:light-dark(#a6324b,#ee96a5);font:inherit;line-height:1.4;color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.tqp,.tqp *{box-sizing:border-box}
+.tqp button{font:inherit;color:inherit;border:0;background:transparent;border-radius:5px;padding:4px 6px;min-width:32px;min-height:32px;text-align:left;max-width:100%;overflow-wrap:anywhere}
+.tqp a{color:inherit;text-decoration:none;border-radius:5px;display:inline-block;min-width:32px;min-height:32px;padding:4px 0}
+.tqp button:hover,.tqp a:hover{background:var(--hover)}
+.tqp button:focus-visible,.tqp a:focus-visible{outline:2px solid var(--good);outline-offset:1px}
+.tqp svg{display:inline-block;width:16px;height:16px;vertical-align:-3px;flex-shrink:0}
+.tqp svg:not([fill]){fill:currentColor}
+.tqp .good{color:var(--good)}.tqp .ask{color:var(--ask)}.tqp .danger{color:var(--bad)}
+.tqp small,.tqp-meta,.tqp-partial{color:var(--secondary);font-size:max(12px,.85em)}
+.tqp-meta{white-space:nowrap}
+.tqp-project{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;padding:3px 0}
+.tqp-identity{display:flex;align-items:center;flex-wrap:wrap;gap:4px;max-width:100%}
+.tqp-project>.tqp-counts{margin-left:auto;max-width:100%}
+.tqp-counts{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+/* One chip style (#1523): icon alone, or icon and count, centered as one group with equal padding. */
+.tqp-counts button{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-height:32px;padding:2px 6px;border-radius:20px;background:var(--hover);white-space:nowrap;text-align:center}
+.tqp-counts svg{vertical-align:0}
+.tqp-project .tqp-counts{gap:2px}
+.tqp-partial{display:block;width:100%}
+.tqp-task-head .tqp-meta{white-space:normal}
+.tqp-task{display:block;width:100%;padding:5px 4px;overflow-wrap:anywhere}
+@media(pointer:coarse){.tqp button,.tqp a{min-width:44px;min-height:44px}}
+/* TaskQ shared answer card (docs/design/answer-card.md); tokens are the visual-style.md palette, layout the plans-and-decisions.html qcard. Size inherits the host font (16-20 px). */
+.qac{--qac-fg:light-dark(#243039,#eef2f5);--qac-muted:light-dark(#59636e,#b9c3cd);--qac-edge:light-dark(#dce0e5,#46505b);--qac-hover:light-dark(#e9edf1,#37424c);--qac-work:light-dark(#246f59,#8dd2b8);--qac-ask:light-dark(#955525,#edbc96);--qac-failed:light-dark(#a6324b,#ee96a5);color:var(--qac-fg);line-height:1.4;min-width:0;overflow-wrap:anywhere;border-top:1px solid var(--qac-edge);padding:7px 2px}
+.qac *{box-sizing:border-box}
+.qac p{margin:4px 0}
+.qac a{color:inherit}
+.qac-mark{color:var(--qac-ask)}
+.qac-muted,.qac-why{color:var(--qac-muted)}
+.qac-text{white-space:pre-wrap;font:inherit;margin:.25em 0}
+.qac-choices{display:flex;align-items:stretch;gap:4px;flex-wrap:wrap;margin:6px 0}
+.qac-number{font-variant-numeric:tabular-nums;flex:none}
+.qac details{margin:5px 0}
+.qac summary{min-height:30px;cursor:pointer}
+.qac button{font:inherit;color:inherit;background:none;border:0;border-radius:5px;padding:4px 6px;min-height:32px;text-align:left;cursor:pointer}
+.qac-choices button{display:flex;align-items:baseline;gap:6px;background:var(--qac-hover);white-space:normal}
+.qac button:disabled{opacity:.55;cursor:default}
+.qac button:focus-visible,.qac textarea:focus-visible,.qac a:focus-visible{outline:2px solid var(--qac-ask);outline-offset:1px}
+.qac-star{color:var(--qac-ask)}
+.qac-why,.qac-link{font-size:.875em;padding-left:.6em;flex-basis:100%}
+.qac-text-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.4em;align-items:start}
+.qac textarea{font:inherit;color:inherit;background:none;border:1px solid var(--qac-edge);border-radius:4px;padding:.3em;resize:vertical;min-width:0;width:100%}
+.qac-receipt:empty,.qac-hint:empty{display:none}
+.qac-hint{grid-column:1/-1;font-size:.875em;color:var(--qac-ask)}
+.qac-sending,.qac-unknown,.qac-stale{color:var(--qac-ask)}
+.qac-accepted{color:var(--qac-work)}
+.qac-rejected{color:var(--qac-failed)}
+.qac-read-only{color:var(--qac-muted)}
+@media(pointer:coarse){.qac button{min-height:44px}}
+
+</style>
+<header class="dq-bar">
+ <span class="dq-logo">dashq</span>
+ <nav class="dq-nav" aria-label="Main navigation">
+  <button class="dq-control" data-route="overview" aria-current="page"><i data-lucide="layout-dashboard" aria-hidden="true"></i>Overview</button>
+  <button class="dq-control" data-route="agents"><i data-lucide="bot" aria-hidden="true"></i>Agents</button>
+  <button class="dq-control" data-route="reports"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i>Reports</button>
+  <button class="dq-control" data-route="tasks"><i data-lucide="list-todo" aria-hidden="true"></i>Tasks</button>
+  <button class="dq-control" data-route="telemetry"><i data-lucide="chart-no-axes-column" aria-hidden="true"></i>Telemetry</button>
+  <button class="dq-control" data-route="pm" aria-label="Open Project Manager"><i data-lucide="messages-square" aria-hidden="true"></i>PM</button>
+  <button class="dq-control" data-route="system"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>System</button>
+ </nav>
+</header>
+<div data-page="overview">
+ <div class="dq-titlebar"><h1>Overview</h1><span class="dq-small dq-muted">Design preview · example states</span></div>
+ <div class="dq-section-title"><h2>Infrastructure</h2><span class="dq-context"><i data-lucide="clock-3" aria-hidden="true"></i>Last 30 minutes <span data-tooltip="All utilization trends use the same 0–100% scale." aria-label="Trend scale: 0 to 100 percent"><i data-lucide="info" aria-hidden="true"></i></span></span></div>
+ <section id="dq-server-study" aria-label="Server component study">
+<style>
+#dq-server-study{--ds-surface:light-dark(#fafbfc,#252b32);--ds-text:light-dark(#243039,#eef2f5);--ds-secondary:light-dark(#59636e,#b9c3cd);--ds-line:light-dark(#dce0e5,#46505b);--ds-soft:light-dark(#e9edf1,#37424c);--ds-ok:light-dark(#246f59,#8dd2b8);--ds-warn:light-dark(#955525,#edbc96);--ds-warn-fill:light-dark(#faf0e6,#3e332c);--ds-font:16px;max-width:736px;color-scheme:light dark;color:var(--ds-text);font:400 var(--ds-font)/1.4 system-ui,sans-serif;container-type:inline-size}
+#dq-server-study *{box-sizing:border-box}#dq-server-study .ds-caption{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:var(--ds-secondary);font-size:.85em;margin:0 0 12px;padding-right:90px}#dq-server-study .ds-stage{padding:16px;border-radius:18px}#dq-server-study .ds-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,14em),1fr));gap:12px;align-items:start}#dq-server-study article{background:var(--ds-surface);border:1px solid var(--ds-line);border-radius:14px;padding:16px;min-width:0;overflow-wrap:anywhere}#dq-server-study button{font:inherit;color:inherit;cursor:default}#dq-server-study button:focus-visible{outline:2px solid var(--ds-text);outline-offset:3px}#dq-server-study svg:not(.ds-spark){width:18px;height:18px;flex-shrink:0;stroke-width:1.7}#dq-server-study .ds-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}#dq-server-study .ds-machine{width:36px;height:36px;display:grid;place-items:center;background:var(--ds-soft);border-radius:10px;flex-shrink:0}#dq-server-study .ds-machine svg{width:20px;height:20px}#dq-server-study .ds-name{font-size:1.125em;font-weight:500;margin:0}#dq-server-study .ds-age{font-size:.85em;color:var(--ds-secondary);display:flex;gap:4px;align-items:center}#dq-server-study .ds-age svg{width:12px;height:12px}#dq-server-study .ds-state{display:flex;align-items:center;gap:6px;font-size:.85em;min-height:24px;margin-bottom:14px}#dq-server-study .ds-good{color:var(--ds-ok)}#dq-server-study .ds-warning{color:var(--ds-warn)}#dq-server-study .ds-quiet{color:var(--ds-secondary)}#dq-server-study .ds-metrics{display:grid;gap:12px;min-height:156px}#dq-server-study .ds-metric{display:block;width:100%;background:none;border:0;padding:0;text-align:left;border-radius:5px}#dq-server-study .ds-metric-top{display:flex;align-items:center;justify-content:space-between;gap:10px}#dq-server-study .ds-number{font-variant-numeric:tabular-nums;white-space:nowrap}#dq-server-study .ds-unit{font-size:.85em;color:var(--ds-secondary)}#dq-server-study .ds-track{display:block;height:4px;background:var(--ds-soft);border-radius:2px;margin:6px 0 0 28px;overflow:hidden}#dq-server-study .ds-track span{display:block;height:100%;background:var(--ds-secondary);border-radius:2px}#dq-server-study .ds-metric.ds-alert{background:var(--ds-warn-fill);padding:7px 8px;margin:-7px -8px;width:calc(100% + 16px);color:var(--ds-warn);border-radius:7px}#dq-server-study .ds-alert .ds-track span{background:var(--ds-warn)}#dq-server-study .ds-empty{min-height:156px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--ds-secondary)}#dq-server-study .ds-empty svg{height:30px;width:30px}#dq-server-study .ds-empty span{font-size:.85em}#dq-server-study .ds-open{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;margin-top:16px;padding:7px 8px;min-height:36px;background:var(--ds-soft);border:0;border-radius:7px;font-size:.9em;font-weight:500}#dq-server-study .ds-open.ds-primary{background:var(--ds-warn-fill);color:var(--ds-warn)}#dq-server-study .ds-back{display:flex;align-items:center;gap:4px;min-height:32px;background:none;border:0;padding:0;margin-bottom:12px;color:var(--ds-secondary);font-size:.85em}#dq-server-study .ds-detail-name{display:flex;align-items:center;gap:8px;font-weight:500;margin-bottom:8px}#dq-server-study .ds-detail-value{font-size:2em;font-weight:500;font-variant-numeric:tabular-nums;margin:6px 0 0}#dq-server-study .ds-detail-sub{font-size:.85em;color:var(--ds-secondary);margin:0 0 16px}#dq-server-study dl{margin:16px 0 0;display:grid;gap:8px}#dq-server-study dl>div{display:flex;gap:8px;justify-content:space-between;font-size:.85em}#dq-server-study dt{color:var(--ds-secondary)}#dq-server-study dd{margin:0;text-align:right}#dq-server-study .ds-note{font-size:.85em;margin:12px 0 0;color:var(--ds-secondary)}#dq-server-study details{font-size:.85em;border-top:1px solid var(--ds-line);padding-top:12px;margin-top:16px}#dq-server-study summary{min-height:32px;color:var(--ds-secondary)}#dq-server-study .ds-evidence{display:grid;gap:6px;margin:4px 0 0;overflow-wrap:anywhere}
+@container(max-width:620px){#dq-server-study .ds-grid{grid-template-columns:1fr}#dq-server-study .ds-stage{padding:12px}#dq-server-study article{max-width:340px;width:100%;justify-self:center}}
+@media(pointer:coarse){#dq-server-study .ds-metric,#dq-server-study .ds-open,#dq-server-study .ds-back,#dq-server-study summary{min-height:44px}}
+#dq-server-study .ds-metric-body{display:grid;grid-template-columns:minmax(0,1fr) 64px;align-items:center;gap:10px}#dq-server-study .ds-current{min-width:0}#dq-server-study .ds-metric-top{gap:6px}#dq-server-study .ds-history{display:block;width:64px;height:36px}#dq-server-study .ds-spark{display:block;width:64px;height:36px;overflow:visible;stroke-width:1.7}#dq-server-study .ds-period{display:block;text-align:right;color:var(--ds-secondary);font-size:.85em;margin:-6px 0 10px}#dq-server-study .ds-track{margin-left:0}
+</style>
+<div class="ds-caption"><span>One server · three states</span><span>Illustrative data</span></div>
+<div class="ds-stage"><div class="ds-grid" data-cards></div></div>
+</section>
+<script>
+{
+ const root=document.getElementById('dq-server-study');
+ const saved=window.openai?.widgetState?.privateContent?.overviewServers;
+ const panels={};
+ const ui={font:16};
+ const samples=[
+  {id:'normal',name:'Mac',label:'Resource data unavailable',icon:'circle-help',tone:'ds-quiet',age:'TaskQ observed 12s ago',resourcesMissing:true,cpu:28,ram:6.2,disk:42,action:'Source details'},
+  {id:'warning',name:'FRA',label:'Low disk space',icon:'triangle-alert',tone:'ds-warning',age:'12s ago',cpu:28,ram:6.2,disk:92,action:'Inspect disk'},
+  {id:'stale',name:'Desktop',label:'No recent data',icon:'clock-3',tone:'ds-quiet',age:'26m ago',action:'Connection'}
+ ];
+ const histories={normal:{cpu:[61,43,null,41,30,25,28],ram:[43,44,41,40,42,39,38.75],disk:[62,58,56,52,47,45,42]},warning:{cpu:[18,31,21,28,24,30,28],ram:[24,27,31,34,36,37,38.75],disk:[42,48,57,67,78,86,92]}};
+ const views=['overview','host','cpu','ram','disk','connection'];
+ if(saved?.v===2)for(const s of samples)if(views.includes(saved.panels?.[s.id]))panels[s.id]=saved.panels[s.id];
+ const icon=name=>`<i data-lucide="${name}" aria-hidden="true"></i>`;
+ function sparkPath(values){
+  let joined=false;
+  return values.map((v,i)=>{if(!Number.isFinite(v)||v<0||v>100){joined=false;return '';}const point=`${(3+58*i/Math.max(1,values.length-1)).toFixed(1)},${(33-30*v/100).toFixed(1)}`;const command=(joined?'L':'M')+point;joined=true;return command;}).join('');
+ }
+ function spark(s,type,name){
+  const values=histories[s.id][type],first=values.find(Number.isFinite),last=values.at(-1),delta=last-first;
+  const tone=type==='disk'?(s.id==='warning'?'ds-warning':delta<0?'ds-good':'ds-quiet'):'ds-quiet';
+  const description=`${name} · last 30 minutes · 0–100% · ${first}% to ${last}% (${delta>0?'+':''}${Number(delta.toFixed(1))} pp)${values.some(v=>v===null)?' · missing sample':''}`;
+  return `<span class="ds-history ${tone}"><svg class="ds-spark" viewBox="0 0 64 36" role="img" aria-label="${description}" data-tooltip="${description}"><title>${description}</title><path d="${sparkPath(values)}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>${Number.isFinite(last)?`<circle cx="61" cy="${33-30*last/100}" r="2" fill="currentColor"/>`:''}</svg></span>`;
+ }
+ function metric(s,type,name,value,percent){return `<button class="ds-metric ${s.id==='warning'&&type==='disk'?'ds-alert':''}" data-id="${s.id}" data-view="${type}" aria-label="${name}: ${value.replace(/<[^>]*>/g,'')}. Open details" data-tooltip="${name}"><span class="ds-metric-body"><span class="ds-current"><span class="ds-metric-top">${icon(type==='cpu'?'cpu':type==='ram'?'memory-stick':'hard-drive')}<span class="ds-number">${value}</span></span><span class="ds-track" aria-hidden="true"><span style="width:${percent}%"></span></span></span>${spark(s,type,name)}</span></button>`}
+
+ function overview(s){return `<div class="ds-state ${s.tone}">${icon(s.icon)}<span>${s.label}</span></div><span class="ds-period" aria-hidden="${s.id==='stale'?'true':'false'}">${s.id==='stale'?'&nbsp;':'Last 30 minutes'}</span>${s.id==='stale'||s.resourcesMissing?`<div class="ds-empty" role="img" aria-label="Current metrics unavailable">${icon('circle-help')}<span>CPU · memory · disk unavailable</span></div>`:`<div class="ds-metrics">${metric(s,'cpu','CPU','28<span class="ds-unit">%</span>',28)}${metric(s,'ram','Memory','6.2 <span class="ds-unit">/ 16 GiB</span>',38.75)}${metric(s,'disk','Root disk',`${s.disk} <span class="ds-unit">/ 100 GiB</span>`,s.disk)}</div>`}<button class="ds-open ${s.id==='warning'?'ds-primary':''}" data-id="${s.id}" data-view="${s.id==='warning'?'disk':s.id==='stale'?'connection':'host'}">${icon(s.id==='warning'?'hard-drive':s.id==='stale'?'plug-zap':'arrow-up-right')}${s.action}</button>`}
+ function detail(s,type){
+  const data={host:{name:s.name || 'FRA',icon:'server',value:'Partial',sub:'TaskQ presence observed; resources unavailable',rows:[['Observed',s.age],['Resource source','Not established']]},cpu:{name:'CPU',icon:'cpu',value:s.id==='stale'?'—':'28%',sub:'Current utilization',rows:[['Observed',s.age],['Source','AgentQ']]},ram:{name:'Memory',icon:'memory-stick',value:'6.2 GiB',sub:'of 16 GiB used',rows:[['Available','9.8 GiB'],['Observed',s.age]]},disk:{name:'Root disk',icon:'hard-drive',value:`${s.disk}%`,sub:`${s.disk} of 100 GiB used`,rows:[['Free',`${100-s.disk} GiB`],['Finding',s.id==='warning'?'Separate producer finding':'None reported'],['Observed',s.age]]},connection:{name:'Connection',icon:'unplug',value:'Unknown',sub:'Last observation 26 minutes ago',rows:[['TaskQ heartbeat','Expired'],['Physical host','Not established'],['Current resources','Unavailable']]}}[type];
+  return `<button class="ds-back" data-id="${s.id}" data-view="overview">${icon('arrow-left')}${s.name || 'FRA'}</button><div class="ds-detail-name">${icon(data.icon)}${data.name}</div><div class="ds-detail-value ${s.id==='warning'&&type==='disk'?'ds-warning':''}">${data.value}</div><p class="ds-detail-sub">${data.sub}</p><dl>${data.rows.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>${s.id==='warning'&&type==='disk'?'<p class="ds-note">Inspect disk usage before choosing a cleanup action.</p>':''}<details><summary>Evidence</summary><div class="ds-evidence"><span>${type==='host'?'TaskQ presence is separate from resource and service health. Resource data is not established in this example.':s.id==='stale'?'No fresh producer observation. Silence does not establish an offline host.':type==='disk'&&s.id==='warning'?'ServerQ · open disk-space finding. The sample includes a producer finding; 92% is not a new policy threshold.':'AgentQ · timestamped resource sample. A resource reading does not establish overall host health.'}</span><span>Fixture · no live connection</span></div></details>`;
+ }
+ function render(){
+  root.style.setProperty('--ds-font',ui.font+'px');
+  root.querySelector('[data-cards]').innerHTML=samples.map(s=>{const view=panels[s.id]||'overview';return `<article aria-label="${s.name || 'FRA'} · ${s.label}" data-scenario="${s.id}">${view==='overview'?`<div class="ds-header"><span class="ds-machine">${icon('server')}</span><div><h3 class="ds-name">${s.name || 'FRA'}</h3><div class="ds-age">${icon('clock-3')}${s.age}</div></div></div>${overview(s)}`:detail(s,view)}</article>`}).join('');
+  if(globalThis.lucide)lucide.createIcons({root,attrs:{width:18,height:18}});
+ }
+ root.addEventListener('click',e=>{
+  const button=e.target.closest('button[data-view]');if(!button)return;
+  const id=button.dataset.id,view=button.dataset.view;
+  if(!samples.some(s=>s.id===id)||!views.includes(view))return;
+  panels[id]=view;render();
+  root.querySelector(`[data-scenario="${id}"] button`).focus({preventScroll:true});
+  window.openai?.setWidgetState({modelContent:null,privateContent:{...(window.openai?.widgetState?.privateContent||{}),overviewServers:{v:2,panels}}})?.catch(()=>{});
+ });
+ window.addEventListener('openai:set_globals',event=>{const next=event.detail?.globals?.widgetState?.privateContent?.overviewServers;if(next?.v!==2)return;for(const s of samples)panels[s.id]=views.includes(next.panels?.[s.id])?next.panels[s.id]:'overview';render();});
+ console.assert((sparkPath([0,null,100]).match(/M/g)||[]).length===2&&!sparkPath([0,null,100]).includes('L'),'Missing samples must break the line');
+ console.assert(sparkPath([null,null])===''&&histories.normal.disk.at(-1)===samples[0].disk&&histories.warning.disk.at(-1)===samples[1].disk,'History must retain gaps and match current values');
+ render();
+ console.assert(root.querySelectorAll('article').length===3,'Three server states must render');
+ if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:render});tweak.addSlider(ui,'font',{label:'Text size',min:16,max:20,step:2,unit:'px'});}
+}
+</script>
+
+ <section class="dq-section" aria-labelledby="dq-attention-title">
+  <div class="dq-section-title"><h2 id="dq-attention-title">Needs attention <span class="dq-small dq-warning">2</span></h2></div>
+  <button class="dq-action" data-open-finding><i data-lucide="triangle-alert" class="dq-warning" aria-hidden="true"></i><span><span class="dq-warning">FRA</span> · review disk capacity</span><span class="dq-small dq-muted" style="flex:0 0 auto;white-space:nowrap">Finding</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+  <button class="dq-action" data-open-question><i data-lucide="message-circle-question-mark" class="dq-warning" aria-hidden="true"></i><span>TaskQ · one answer needed</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+ </section>
+ <div class="dq-bottom">
+  <section aria-labelledby="dq-work-title"><div class="dq-section-title"><h2 id="dq-work-title">Work</h2><button class="dq-control dq-small" data-route="tasks" data-all-tasks aria-label="Open all tasks"><i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div><div data-project-summary></div></section>
+  <section aria-labelledby="dq-agents-title"><div class="dq-section-title"><h2 id="dq-agents-title">Agents</h2><button class="dq-control dq-small" data-route="agents" aria-label="Open agent activity"><i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div><div data-agent-summary></div></section>
+ </div>
+ <footer class="dq-footer"><span class="dq-context"><i data-lucide="radio" aria-hidden="true"></i>Data coverage</span><span class="dq-small dq-muted">Some sources need connecting</span><button class="dq-control dq-small" data-route="telemetry">Inspect<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></footer>
+</div>
+<div data-page="tasks" hidden>
+ <div class="dq-titlebar"><h1>Tasks</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-context" data-task-scope>All projects</div>
+ <div class="dq-block" data-task-projects></div>
+ <div data-task-rows></div>
+ <div data-task-detail></div>
+ <p data-task-notice role="status"></p>
+</div>
+<style>
+#dq-overview .dq-agent-layout{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:26px;margin-top:20px}#dq-overview [data-page=agents]>.dq-inline>.dq-warning{display:inline-flex;align-items:center;gap:6px}
+#dq-overview .dq-agent-list{margin-top:18px}#dq-overview .dq-agent-row{display:grid;grid-template-columns:minmax(0,1fr) auto 18px;align-items:center;gap:18px;width:100%;font:inherit;text-align:left;border:0;border-bottom:1px solid var(--dq-line);background:transparent;color:inherit;padding:12px 10px;border-radius:0;min-height:64px;box-sizing:border-box}#dq-overview .dq-agent-row[aria-pressed=true]{background:var(--dq-soft);border-radius:8px}#dq-overview .dq-agent-row:hover{background:var(--dq-soft)}#dq-overview .dq-agent-row:focus-visible{outline:2px solid var(--dq-text);outline-offset:2px}#dq-overview .dq-agent-who{display:flex;align-items:center;gap:10px;min-width:0}#dq-overview .dq-agent-who .dq-brand{width:20px;height:20px;flex-shrink:0;display:inline-flex}#dq-overview .dq-agent-who .dq-brand svg{width:20px;height:20px;fill:currentColor}#dq-overview .dq-agent-who .dq-brand .lucide{fill:none}#dq-overview .dq-agent-name{font-weight:500}#dq-overview .dq-agent-task{display:block;margin-top:3px;font-size:.85em;color:var(--dq-secondary)}#dq-overview .dq-agent-state{text-align:right;font-size:.85em}#dq-overview .dq-agent-state>span{display:flex;align-items:center;justify-content:flex-end;gap:6px}#dq-overview .dq-agent-state small{display:block;margin-top:3px;font-size:1em;color:var(--dq-secondary)}#dq-overview .dq-agent-row>svg,#dq-overview .dq-agent-state svg{width:16px;height:16px;flex-shrink:0}#dq-overview .dq-agent-panel{border-top:1px solid var(--dq-line);margin-top:24px;padding-top:20px}#dq-overview .dq-agent-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px}#dq-overview .dq-agent-heading h2{font-size:20px;letter-spacing:-.3px}#dq-overview .dq-agent-context{margin:8px 0;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-timebar{display:flex;gap:2px;height:28px;margin-top:18px}#dq-overview .dq-timebar button{min-width:0;flex-basis:0;border:0;border-radius:3px;padding:0;background:var(--dq-secondary);height:100%;color:var(--dq-text)}#dq-overview .dq-timebar button[data-kind=wait]{background:var(--dq-warn)}#dq-overview .dq-timebar button[data-kind=unknown]{background:repeating-linear-gradient(135deg,var(--dq-line) 0,var(--dq-line) 2px,var(--dq-bg) 2px,var(--dq-bg) 6px)}#dq-overview .dq-timebar button:focus-visible{outline:2px solid var(--dq-text);outline-offset:3px}#dq-overview .dq-timebar button[aria-pressed=true]{outline:2px solid var(--dq-text);outline-offset:3px}#dq-overview .dq-time-legend{display:flex;gap:10px 20px;flex-wrap:wrap;margin-top:18px;font-size:.85em}#dq-overview .dq-time-legend>span{display:flex;align-items:center;gap:7px}#dq-overview .dq-time-key{width:10px;height:10px;background:var(--dq-secondary);border-radius:2px}#dq-overview .dq-time-key.dq-wait{background:var(--dq-warn)}#dq-overview .dq-time-key.dq-unknown{background:repeating-linear-gradient(135deg,var(--dq-line) 0,var(--dq-line) 2px,var(--dq-bg) 2px,var(--dq-bg) 4px)}#dq-overview .dq-phase-detail{font-size:.85em;color:var(--dq-secondary);margin:14px 0 0;min-height:2.8em}#dq-overview .dq-agent-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:32px;margin-top:18px}#dq-overview .dq-agent-grid h3{font-size:16px;font-weight:500;margin:0 0 8px}#dq-overview .dq-agent-grid p{margin:6px 0;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-agent-events{list-style:none;padding:0;margin:14px 0}#dq-overview .dq-agent-events li{display:grid;grid-template-columns:70px minmax(0,1fr);gap:12px;padding:8px 0;font-size:.85em}#dq-overview .dq-agent-events time{color:var(--dq-secondary);font-variant-numeric:tabular-nums}#dq-overview .dq-agent-events small{display:block;color:var(--dq-secondary);font-size:1em;margin-top:3px}#dq-overview .dq-agent-announcement{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}#dq-overview [data-agent-summary] .dq-person{width:100%;text-align:left;border:0;background:transparent;color:inherit;font:inherit;box-sizing:border-box}#dq-overview [data-agent-summary] .dq-person:hover{background:var(--dq-soft)}
+@container(max-width:620px){#dq-overview .dq-agent-grid{grid-template-columns:1fr;gap:18px}#dq-overview .dq-agent-row{gap:10px;padding:12px 6px;grid-template-columns:minmax(0,1fr) 18px}#dq-overview .dq-agent-state{grid-row:2;grid-column:1;text-align:left;margin-left:30px}#dq-overview .dq-agent-state>span{justify-content:flex-start}#dq-overview .dq-agent-state small{display:block;margin:0;white-space:nowrap}#dq-overview .dq-agent-state>span{display:inline-flex;white-space:nowrap}#dq-overview .dq-agent-state{display:flex;flex-wrap:wrap;gap:4px 10px}#dq-overview .dq-agent-row>svg{grid-column:2;grid-row:1 / span 2}#dq-overview .dq-agent-events li{grid-template-columns:60px minmax(0,1fr)}}
+@media(pointer:coarse){#dq-overview .dq-timebar{height:44px}#dq-overview .dq-person{min-height:44px}}
+</style>
+<div data-page="agents" hidden>
+ <div class="dq-titlebar"><h1>Agents</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-inline dq-small"><span class="dq-warning"><i data-lucide="circle-pause" aria-hidden="true" style="width:16px;height:16px;vertical-align:-3px"></i> 1 answer needed</span><span class="dq-muted">Example attempts · source coverage required</span></div>
+ <div class="dq-agent-layout"><div class="dq-agent-list" data-agent-detail aria-label="Agent activity"></div><div class="dq-agent-panel" data-agent-inspector></div></div>
+ <span class="dq-agent-announcement" data-agent-announcement role="status"></span>
+</div>
+<style>
+#dq-overview .dq-agent-layout .dq-agent-list{margin-top:0}#dq-overview .dq-agent-layout .dq-agent-panel{border-top:0;border-left:1px solid var(--dq-line);margin:0;padding:0 0 0 24px;min-width:0}#dq-overview .dq-agent-layout .dq-agent-grid{grid-template-columns:1fr;gap:18px}#dq-overview .dq-agent-back{display:none}#dq-overview .dq-agent-layout .dq-agent-row{padding:10px 6px;gap:12px}#dq-overview .dq-agent-layout .dq-phase-detail{min-height:0;margin-bottom:0}
+@container(max-width:760px){#dq-overview .dq-agent-layout{grid-template-columns:1fr}#dq-overview .dq-agent-layout .dq-agent-panel{border-left:0;border-top:1px solid var(--dq-line);padding:18px 0 0}#dq-overview .dq-agent-back{display:inline-flex;margin-bottom:14px}}
+</style>
+
+<style>
+#dq-overview .dq-diagnosis{max-width:850px}#dq-overview .dq-lead{display:flex;gap:12px;align-items:center;margin:22px 0 8px}#dq-overview .dq-lead>svg{width:26px;height:26px;flex-shrink:0;color:var(--dq-warn)}#dq-overview .dq-lead h2{font-size:22px;letter-spacing:-.3px}#dq-overview .dq-lead p{margin:3px 0 0;color:var(--dq-secondary);font-size:.85em}#dq-overview .dq-diag-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:36px;margin-top:24px}#dq-overview .dq-measure{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}#dq-overview .dq-measure strong{font-size:38px;font-weight:500;letter-spacing:-1px;font-variant-numeric:tabular-nums}#dq-overview .dq-track{height:8px;background:var(--dq-soft);border-radius:4px;overflow:hidden;display:flex}#dq-overview .dq-track>span{display:block;height:100%;background:var(--dq-warn)}#dq-overview .dq-track .dq-neutral{background:var(--dq-secondary)}#dq-overview .dq-track .dq-uncertain{background:var(--dq-line)}#dq-overview .dq-labels{display:flex;justify-content:space-between;gap:12px;margin-top:7px;font-size:.85em;color:var(--dq-secondary)}#dq-overview .dq-growth{display:flex;align-items:end;gap:8px;height:88px;margin-top:18px}#dq-overview .dq-growth button{flex:1;min-width:0;height:100%;display:flex;align-items:end;border:0;background:transparent;padding:0;position:relative}#dq-overview .dq-growth span{display:block;width:100%;height:var(--height);background:var(--dq-warn);border-radius:3px 3px 0 0;opacity:.65}#dq-overview .dq-growth button:last-child span{opacity:1}#dq-overview .dq-growth button:focus-visible{outline:2px solid var(--dq-text);outline-offset:3px}#dq-overview .dq-evidence{border-top:1px solid var(--dq-line);margin-top:24px;padding-top:14px}#dq-overview .dq-evidence summary{min-height:36px;align-content:center}#dq-overview .dq-evidence dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:10px 18px;font-size:.85em}#dq-overview .dq-evidence dt{color:var(--dq-secondary)}#dq-overview .dq-evidence dd{margin:0}#dq-overview .dq-check{display:flex;gap:10px;align-items:center;min-height:36px;padding:6px 0}#dq-overview .dq-check>svg{width:18px;height:18px;flex-shrink:0}#dq-overview .dq-check>span{flex:1}#dq-overview .dq-check small{font-size:.85em;color:var(--dq-secondary)}#dq-overview .dq-good{color:var(--dq-good)}#dq-overview .dq-chain{list-style:none;padding:0;margin:18px 0}#dq-overview .dq-chain li{position:relative;display:flex;gap:12px;padding:0 0 20px}#dq-overview .dq-chain li:last-child{padding-bottom:0}#dq-overview .dq-chain li:not(:last-child):before{content:'';position:absolute;left:10px;top:25px;bottom:5px;width:1px;background:var(--dq-line)}#dq-overview .dq-chain svg{width:21px;height:21px;flex-shrink:0}#dq-overview .dq-chain small{display:block;font-size:.85em;color:var(--dq-secondary);margin-top:2px}#dq-overview .dq-next{display:inline-flex;align-items:center;gap:8px;min-height:40px;background:var(--dq-soft);color:var(--dq-text);border:0;border-radius:7px;font:inherit;padding:8px 12px;margin-top:16px}#dq-overview .dq-next svg{width:18px;height:18px}#dq-overview .dq-samples{display:flex;gap:6px;margin:22px 0 9px}#dq-overview .dq-samples span{height:26px;flex:1;min-width:0;background:var(--dq-secondary);border-radius:3px}#dq-overview .dq-samples .dq-missing{background:var(--dq-soft);outline:1px dashed var(--dq-secondary);outline-offset:-1px}#dq-overview .dq-diag-grid h2{margin-bottom:14px}#dq-overview .dq-diag-grid p{margin:8px 0}#dq-overview .dq-growth-readout{min-height:20px;margin-top:10px;font-size:.85em;color:var(--dq-secondary)}
+@container(max-width:680px){#dq-overview .dq-diag-grid{grid-template-columns:1fr;gap:24px}#dq-overview .dq-evidence dl{grid-template-columns:1fr}#dq-overview .dq-evidence dd{margin-bottom:8px}#dq-overview .dq-check{flex-wrap:wrap}#dq-overview .dq-check small{margin-left:28px}#dq-overview .dq-lead h2{font-size:20px}}
+@media(pointer:coarse){#dq-overview .dq-next,#dq-overview .dq-evidence summary{min-height:44px}}
+</style>
+<div data-page="finding" class="dq-diagnosis" hidden>
+ <div class="dq-titlebar"><h1>FRA · Finding</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-lead"><i data-lucide="triangle-alert" aria-hidden="true"></i><div><h2>Review disk capacity</h2><p>ServerQ · disk-headroom · example observed 18m ago</p></div></div>
+ <div class="dq-measure"><strong>8 GiB</strong><span class="dq-muted">available of 100 GiB</span></div>
+ <p class="dq-muted">Below the producer's minimum. No directory or service cause is established.</p>
+ <button class="dq-next" data-finding-request><i data-lucide="messages-square" aria-hidden="true"></i>Ask PM to investigate</button>
+ <div class="dq-block"><h2>Context</h2><button class="dq-action" data-route="disk"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>Host resource history <small class="dq-muted">· separate source</small></span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button><p class="dq-small dq-muted">The filesystem mapping is not established; history is context, not a finding match.</p></div>
+ <details class="dq-evidence"><summary>Finding evidence</summary><dl><dt>Identity</dt><dd>demo-serverq / disk-headroom / observed episode</dd><dt>Producer reason</dt><dd>below-minimum</dd><dt>Evidence</dt><dd>Available and total capacity; no paths, logs or unit names</dd><dt>Operations</dt><dd>Inspection and PM request preparation only. No cleanup or server change.</dd></dl></details>
+</div>
+<div data-page="disk" class="dq-diagnosis" hidden>
+ <div class="dq-titlebar"><h1>FRA · Disk</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-lead"><i data-lucide="hard-drive" aria-hidden="true"></i><div><h2>Low free capacity</h2><p>Example resource history · observed 12s ago</p></div></div>
+ <div class="dq-diag-grid">
+  <section aria-label="Disk usage and change">
+   <div class="dq-measure"><strong>8 GiB</strong><span class="dq-muted">free of 100 GiB</span></div>
+   <div class="dq-track" role="meter" aria-label="Disk used" aria-valuenow="92" aria-valuemin="0" aria-valuemax="100" aria-valuetext="92 GiB used of 100 GiB"><span style="width:92%"></span></div>
+   <div class="dq-labels"><span>92% used</span><span>Last 30 minutes</span></div>
+   <div class="dq-growth" data-disk-history aria-label="Disk used, 0–100 GiB scale; seven samples over 30 minutes"></div>
+   <div class="dq-labels"><span>30m ago · 42 GiB</span><span>Now · 92 GiB</span></div>
+   <div class="dq-growth-readout" data-growth-readout aria-live="polite">+50 GiB used in 30 minutes</div>
+  </section>
+  <section aria-labelledby="dq-growth-title"><h2 id="dq-growth-title">Where it grew</h2>
+   <div class="dq-check dq-muted"><i data-lucide="circle-help" aria-hidden="true"></i><span>Attribution unavailable</span></div>
+   <p class="dq-small dq-muted">Filesystem samples show the change, not which service caused it.</p>
+   <button class="dq-next" data-inspect-growth><i data-lucide="scan-search" aria-hidden="true"></i>Inspect measurements</button>
+  </section>
+ </div>
+ <section class="dq-block"><div class="dq-section-title"><h2>Service checks</h2><span class="dq-context">Separate source</span></div><button class="dq-action" data-route="system"><i data-lucide="list-checks" aria-hidden="true"></i><span>Open checks &amp; findings</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button><p class="dq-small dq-muted">No service impact is inferred from disk utilization.</p></section>
+ <details class="dq-evidence" data-growth-evidence><summary>Evidence &amp; source</summary><dl><dt>Source</dt><dd>AgentQ resource samples · example filesystem</dd><dt>Disk history</dt><dd>7 example timestamps · 30-minute window; expected sample count not established</dd><dt>Growth attribution</dt><dd>Unknown; no directory scans or diagnostic text collected</dd><dt>Finding</dt><dd>Separate ServerQ finding with its own observation time; no automatic filesystem join</dd><dt>Operation</dt><dd>No cleanup is connected or performed</dd></dl></details>
+</div>
+<div data-page="queue" class="dq-diagnosis" hidden>
+ <div class="dq-titlebar"><h1>AgentQ · Queue</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-lead"><i data-lucide="pause" aria-hidden="true"></i><div><h2>Why is this task waiting?</h2><p>Assignment and host evidence · example state</p></div></div>
+ <div class="dq-diag-grid">
+  <section aria-labelledby="dq-route-title"><h2 id="dq-route-title">Where it stops</h2><ol class="dq-chain">
+   <li><i data-lucide="circle-check" class="dq-good" aria-hidden="true"></i><span>Ready<small>Task #201 · ready age unavailable</small></span></li>
+   <li><i data-lucide="monitor" aria-hidden="true"></i><span>Assigned to Desktop<small>Explicit queue assignment</small></span></li>
+   <li><i data-lucide="cloud-off" class="dq-warning" aria-hidden="true"></i><span>TaskQ heartbeat expired<small>Last seen 26m ago · producer-scoped service state</small></span></li>
+   <li><i data-lucide="circle-help" aria-hidden="true"></i><span>No current start decision<small>Cause not confirmed by the scheduler</small></span></li>
+  </ol></section>
+  <section aria-labelledby="dq-queue-next"><h2 id="dq-queue-next">Check the host connection</h2><p class="dq-muted">Current login and capacity are unknown.</p><p class="dq-small dq-muted">A silent host is not confirmed offline.</p><button class="dq-next" data-queue-evidence><i data-lucide="plug" aria-hidden="true"></i>Connection evidence</button><div class="dq-block"><button class="dq-action" data-open-ready><i data-lucide="list-todo" aria-hidden="true"></i><span>Open task #201</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button></div></section>
+ </div>
+ <details class="dq-evidence" data-admission-evidence><summary>Evidence &amp; source</summary><dl><dt>Board state</dt><dd>AgentQ #201 · Ready · example revision 1</dd><dt>Assignment</dt><dd>Explicit host-desktop task label; only the assigned host is eligible</dd><dt>TaskQ presence</dt><dd>Desktop heartbeat expired; TaskQ service offline by its producer policy</dd><dt>Not established</dt><dd>Physical host state, current login/capacity and a current scheduler decision</dd><dt>Scope</dt><dd>Derived explanation from separately timed facts; no global admission event</dd></dl></details>
+</div>
+<div data-page="telemetry" class="dq-diagnosis" hidden>
+ <div class="dq-titlebar"><h1>Telemetry</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-context"><i data-lucide="clock-3" aria-hidden="true"></i>Illustrative coverage · example window</div>
+ <div class="dq-diag-grid">
+  <section aria-labelledby="dq-coverage-title"><h2 id="dq-coverage-title">Resource history</h2><div class="dq-measure"><strong>1 / 3</strong><span class="dq-muted">example host rows have resource history</span></div><div class="dq-samples" role="img" aria-label="One resource history source for three example host rows"><span></span><span class="dq-missing"></span><span class="dq-missing"></span></div><p class="dq-small dq-muted">Sample completeness requires a producer cadence.</p><button class="dq-control dq-small" data-route="system">Inspect connections<i data-lucide="arrow-up-right" aria-hidden="true"></i></button></section>
+  <section aria-labelledby="dq-delivery-title"><h2 id="dq-delivery-title">Delivery evidence</h2><ol class="dq-chain">
+   <li><i data-lucide="activity" aria-hidden="true"></i><span>Local capture status · example<small>Producer health and bounded event export</small></span></li>
+   <li><i data-lucide="circle-pause" aria-hidden="true"></i><span>Sync state · example unavailable<small>Conformance required before enabling</small></span></li>
+   <li><i data-lucide="circle-help" aria-hidden="true"></i><span>Detailed reports not connected<small>Block storage is not an analysis query</small></span></li>
+   <li><i data-lucide="unplug" class="dq-muted" aria-hidden="true"></i><span>Export not configured<small>Destination readback unavailable</small></span></li>
+  </ol></section>
+ </div>
+ <section class="dq-block"><div class="dq-check"><i data-lucide="circle-help" aria-hidden="true"></i><span>All-event coverage</span><span class="dq-warning" style="flex:0 0 auto;white-space:nowrap">Unknown</span></div><p class="dq-small dq-muted">Producer event totals are unavailable. A receipt proves one delivery, not the complete interval.</p></section>
+ <details class="dq-evidence"><summary>Evidence &amp; collection requirements</summary><dl><dt>Fixture</dt><dd>Illustrative coverage, not a fleet inventory</dd><dt>Correlation</dt><dd>Producer, event, sequence, task/attempt/session and receipt identity</dd><dt>Coverage</dt><dd>Scope, retained window, watermark, known gaps and query caps</dd><dt>Collection boundary</dt><dd>Events and metrics only; no worker-line content, diagnostic excerpts or conversations</dd></dl></details>
+</div>
+
+<style>
+#dq-overview .dq-report-scope{display:flex;align-items:center;gap:7px;color:var(--dq-secondary);font-size:.85em;flex-wrap:wrap}#dq-overview .dq-report-scope svg{width:16px;height:16px}#dq-overview .dq-report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:36px;margin-top:26px}#dq-overview .dq-report-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}#dq-overview .dq-report-heading h2{display:flex;align-items:center;gap:8px}#dq-overview .dq-report-heading svg{width:18px;height:18px}#dq-overview .dq-report-number{font-size:32px;letter-spacing:-.6px;line-height:1.2;font-weight:500;font-variant-numeric:tabular-nums}#dq-overview .dq-report-unit{font-size:16px;font-weight:400;letter-spacing:0;color:var(--dq-secondary);margin-left:7px}#dq-overview .dq-report-note{color:var(--dq-secondary);font-size:.85em;margin:7px 0 0}#dq-overview .dq-report-bar{display:flex;gap:2px;height:26px;margin:18px 0 14px}#dq-overview .dq-report-bar button{padding:0;border:0;border-radius:3px;min-width:0;flex-basis:0;background:var(--dq-secondary);height:100%}#dq-overview .dq-report-bar button[data-report-detail=wait]{background:var(--dq-warn)}#dq-overview .dq-report-bar button[data-report-detail=unknown]{background:repeating-linear-gradient(135deg,var(--dq-line) 0,var(--dq-line) 2px,var(--dq-bg) 2px,var(--dq-bg) 6px)}#dq-overview .dq-report-bar button:focus-visible{outline:2px solid var(--dq-text);outline-offset:3px}#dq-overview .dq-report-labels{display:flex;flex-wrap:wrap;gap:8px 18px}#dq-overview .dq-report-labels button{display:inline-flex;align-items:center;gap:6px;padding:4px 0;border:0;background:transparent;color:inherit;font:inherit;font-size:.85em;min-height:28px}#dq-overview .dq-report-key{width:9px;height:9px;background:var(--dq-secondary);border-radius:2px}#dq-overview .dq-report-key.dq-wait{background:var(--dq-warn)}#dq-overview .dq-report-key.dq-unknown{background:repeating-linear-gradient(135deg,var(--dq-line) 0,var(--dq-line) 2px,var(--dq-bg) 2px,var(--dq-bg) 4px)}#dq-overview .dq-report-opportunities{border-top:1px solid var(--dq-line);margin-top:24px;padding-top:18px}#dq-overview .dq-report-opportunity{display:grid;grid-template-columns:20px minmax(0,1fr) auto 18px;gap:10px;align-items:center;width:100%;padding:11px 0;font:inherit;text-align:left;color:inherit;border:0;border-bottom:1px solid var(--dq-line);background:transparent;box-sizing:border-box}#dq-overview .dq-report-opportunity:hover{background:var(--dq-soft)}#dq-overview .dq-report-opportunity>svg{width:18px;height:18px}#dq-overview .dq-report-opportunity small{display:block;color:var(--dq-secondary);font-size:.85em;margin-top:3px}#dq-overview .dq-report-value{font-variant-numeric:tabular-nums;white-space:nowrap}#dq-overview .dq-report-inspector{margin-top:22px;border-top:1px solid var(--dq-line);padding-top:18px}#dq-overview .dq-report-inspector h2{margin:0}#dq-overview .dq-report-list{margin:12px 0}#dq-overview .dq-report-record{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;border-bottom:1px solid var(--dq-line);padding:9px 0;font-size:.85em}#dq-overview .dq-report-record small{display:block;color:var(--dq-secondary);font-size:1em;margin-top:3px}#dq-overview .dq-report-record .dq-control{font-size:1em}#dq-overview .dq-report-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px;font-size:.85em;color:var(--dq-secondary)}
+@container(max-width:680px){#dq-overview .dq-report-grid{grid-template-columns:1fr;gap:28px}#dq-overview .dq-report-opportunity{grid-template-columns:20px minmax(0,1fr) 18px}#dq-overview .dq-report-opportunity .dq-report-value{grid-row:2;grid-column:2}#dq-overview .dq-report-opportunity>svg:last-child{grid-column:3;grid-row:1 / span 2}#dq-overview .dq-report-record{gap:10px}}
+@media(pointer:coarse){#dq-overview .dq-report-bar{height:44px}#dq-overview .dq-report-labels button{min-height:44px}}
+#dq-overview .dq-report-facts .dq-report-record{grid-template-columns:minmax(0,.7fr) minmax(0,2fr)}#dq-overview .dq-report-facts dd{margin:0}
+@container(max-width:420px){#dq-overview .dq-report-facts .dq-report-record{grid-template-columns:1fr}}
+</style>
+<div data-page="reports" hidden>
+ <div class="dq-titlebar"><h1>Reports</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-report-scope"><i data-lucide="clock-3" aria-hidden="true"></i>Last 30 minutes<span aria-hidden="true">·</span>Mac<span aria-hidden="true">·</span>TaskQ example attempts</div>
+ <div class="dq-report-grid">
+  <section aria-labelledby="dq-report-time"><div class="dq-report-heading"><h2 id="dq-report-time"><i data-lucide="timer" aria-hidden="true"></i>Agent time</h2></div><div class="dq-report-number">60<span class="dq-report-unit">agent-min</span></div><p class="dq-report-note">2 attempts · example time allocation</p><div data-report-time-chart></div><p class="dq-report-note">Time report not connected; example shown.</p></section>
+  <section aria-labelledby="dq-report-cost"><div class="dq-report-heading"><h2 id="dq-report-cost"><i data-lucide="banknote" aria-hidden="true"></i>Money</h2></div><div class="dq-report-record"><span>Actual expenses<small>API charges, subscriptions, infrastructure</small></span><span class="dq-report-number">—</span></div><div class="dq-report-record"><span>API-equivalent estimate<small>TaskQ model usage not connected</small></span><span class="dq-report-number">—</span></div><button class="dq-control dq-small" data-report-detail="coverage">Sources &amp; cost basis<i data-lucide="chevron-right" aria-hidden="true"></i></button><p class="dq-report-note">Separate measures. Missing prices stay unknown.</p></section>
+ </div>
+ <section class="dq-report-opportunities" aria-labelledby="dq-report-improve"><div class="dq-section-title" style="margin-top:0"><h2 id="dq-report-improve">Where to look first</h2></div>
+  <button class="dq-report-opportunity" data-open-question><i data-lucide="circle-pause" aria-hidden="true"></i><span>Answer the pending question<small>TaskQ ask stage · waiting for your answer</small></span><span class="dq-report-value">8m</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button>
+  <button class="dq-report-opportunity" data-route="queue"><i data-lucide="list-todo" aria-hidden="true"></i><span>Why is ready work waiting?<small>Assignment, dependencies and host evidence</small></span><span></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+  <button class="dq-report-opportunity" data-route="telemetry"><i data-lucide="radio" aria-hidden="true"></i><span>Connect the missing evidence<small>Attempt time and native model accounting</small></span><span></span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+ </section>
+ <div class="dq-report-footer"><span>No waste or savings inferred</span><button class="dq-control dq-small" data-report-detail="coverage"><i data-lucide="info" aria-hidden="true"></i>Scope &amp; evidence</button></div>
+ <section class="dq-report-inspector" data-report-inspector hidden aria-label="Report detail"><div class="dq-report-heading"><h2 data-report-detail-title></h2><button class="dq-control dq-small" data-report-close aria-label="Close report detail"><i data-lucide="x" aria-hidden="true"></i></button></div><div data-report-detail-body></div><p class="dq-agent-announcement" data-report-announcement role="status"></p></section>
+</div>
+
+<div data-page="pm" hidden>
+ <div class="dq-titlebar"><h1>Project Manager</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <form data-pm-form class="dq-block" style="max-width:620px">
+  <label for="dq-pm-project">Project</label><select id="dq-pm-project" class="dq-control"><option>TaskQ</option><option>AgentQ</option><option>DashQ</option></select>
+  <label for="dq-pm-request" style="display:block;margin:18px 0 8px">Request for Project Manager</label>
+  <textarea id="dq-pm-request" rows="4" style="width:100%;box-sizing:border-box;font:inherit;color:inherit;background:var(--dq-bg);border:1px solid var(--dq-line);border-radius:8px;padding:12px" placeholder="What should PM investigate or plan?"></textarea>
+  <div class="dq-inline" style="margin-top:12px"><button class="dq-next" type="button" data-pm-review-trigger>Review request<i data-lucide="arrow-right" aria-hidden="true"></i></button><span class="dq-small dq-muted">Continue in the native session</span></div>
+  <div data-pm-review hidden class="dq-block" role="status"><h2>Ready for TaskQ</h2><p data-pm-summary></p><p class="dq-small dq-muted">The native session opens after TaskQ accepts the request.</p><button class="dq-control" type="button" disabled>Send · not connected in preview</button></div>
+ </form>
+</div>
+<div data-page="system" hidden>
+ <div class="dq-titlebar"><h1>System</h1><button class="dq-control dq-small" data-route="overview"><i data-lucide="arrow-left" aria-hidden="true"></i>Overview</button></div>
+ <div class="dq-bottom"><section><h2>Infrastructure</h2><button class="dq-action" data-system="Services"><i data-lucide="server-cog" aria-hidden="true"></i><span>Services</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Checks & findings"><i data-lucide="list-checks" aria-hidden="true"></i><span>Checks &amp; findings</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Versions & updates"><i data-lucide="package" aria-hidden="true"></i><span>Versions &amp; updates</span><i data-lucide="chevron-right" aria-hidden="true"></i></button></section><section><h2>Connections &amp; controls</h2><button class="dq-action" data-system="Integrations & enrollment"><i data-lucide="plug" aria-hidden="true"></i><span>Integrations &amp; enrollment</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Resources & configuration"><i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>Resources &amp; configuration</span><i data-lucide="chevron-right" aria-hidden="true"></i></button><button class="dq-action" data-system="Optimization & stage totals"><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i><span>Optimization &amp; stage totals</span><i data-lucide="chevron-right" aria-hidden="true"></i></button></section></div>
+ <section class="dq-block" data-system-detail hidden><h2 data-system-title></h2><p data-system-description class="dq-muted"></p><p class="dq-small dq-muted">Existing destination retained. Detailed layouts and live operations require their own qualification.</p></section>
+ <button class="dq-control dq-small" data-route="telemetry"><i data-lucide="radio" aria-hidden="true"></i>Source status &amp; telemetry</button>
+</div>
+<script>
+"use strict";
+var TaskqProjectBlocks = (() => {
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __commonJS = (cb, mod) => function __require() {
+    try {
+      return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+    } catch (e) {
+      throw mod = 0, e;
+    }
+  };
+
+  // node_modules/@taskq/coreq/src/telemetry/runtime.js
+  var require_runtime = __commonJS({
+    "node_modules/@taskq/coreq/src/telemetry/runtime.js"(exports, module) {
+      (function(root) {
+        "use strict";
+        function create({ emit, id, clock = () => performance.now(), now = () => Date.now(), schedule = setTimeout, cancel = clearTimeout, autoFlush = false }) {
+          const run = id(), metrics = /* @__PURE__ */ new Map();
+          let current = null, serial = 0, lost = 0, diagnostic = null, pending = 0, flushTimer = null;
+          if (!/^[a-f0-9]{32}$/.test(run)) throw Error("invalid telemetry run");
+          const code = (name) => typeof name === "string" && name.length > 0 && name.length <= 128 && /^[a-zA-Z0-9._:-]+$/.test(name);
+          const publish = (row) => {
+            try {
+              if (emit(row) !== false) return true;
+            } catch (_) {
+            }
+            lost++;
+            return false;
+          };
+          const scope = () => ({ trace: current?.trace || run + "." + ++serial, span: run + "." + ++serial, parent: current?.span || null });
+          function invoke(name, fn, receiver, args, action2 = false) {
+            const metric = metrics.get(name);
+            if (metric) {
+              metric.calls++;
+              if (autoFlush && flushTimer === null) flushTimer = schedule(() => {
+                flushTimer = null;
+                flush();
+              }, 2e3);
+            }
+            const selected = !action2 && diagnostic && diagnostic.remaining > 0 && (diagnostic.selector === "*" || name === diagnostic.selector || name.startsWith(diagnostic.selector + ".")) && clock() < diagnostic.until;
+            if (selected) diagnostic.remaining--;
+            const start = action2 || selected ? clock() : null, at = start === null ? null : now(), previous = current;
+            const context = action2 || selected ? scope() : current;
+            if (context) current = context;
+            if (action2) publish({ kind: "ui.start", operation: name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            let failed = false, unknown = false;
+            try {
+              const result = Reflect.apply(fn, receiver, args);
+              unknown = result instanceof Promise;
+              if (unknown) {
+                if (metric) metric.unknown++;
+                lost++;
+              }
+              return result;
+            } catch (error) {
+              failed = true;
+              if (metric) metric.failed++;
+              throw error;
+            } finally {
+              if (metric) metric.finished++;
+              if (action2 || selected) publish({ kind: action2 ? "ui" : "method", source: action2 ? "action" : "diagnostic", operation: name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - start) * 1e3)), outcome: failed ? "failed" : unknown ? "unknown" : "ok", error: failed ? "javascript-error" : unknown ? "unowned-async" : "none" });
+              current = previous;
+            }
+          }
+          function module2(name, methods) {
+            if (!code(name)) throw Error("invalid telemetry module");
+            const wrapped = {};
+            for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(methods))) {
+              if (typeof descriptor.value !== "function" || descriptor.value.constructor.name === "AsyncFunction") throw Error("module methods must be functions");
+              const operation = "js." + name + "." + key;
+              if (!code(operation)) throw Error("invalid telemetry method");
+              if (!metrics.has(operation)) {
+                if (metrics.size >= 256) throw Error("telemetry method limit");
+                metrics.set(operation, { calls: 0, finished: 0, failed: 0, unknown: 0 });
+              }
+              Object.defineProperty(wrapped, key, { ...descriptor, value: function(...args) {
+                return invoke(operation, descriptor.value, this, args);
+              } });
+            }
+            return Object.freeze(wrapped);
+          }
+          function action(name, fn) {
+            if (!code("js." + name)) throw Error("invalid telemetry action");
+            return function(...args) {
+              return invoke("js." + name, fn, this, args, true);
+            };
+          }
+          function effect(name, start, receive) {
+            if (!code("js." + name) || typeof start !== "function" || typeof receive !== "function" || receive.constructor.name === "AsyncFunction" || pending >= 64) throw Error("async effect unavailable");
+            const previous = current, context = scope(), at = now(), began = clock();
+            let waiting = true;
+            pending++;
+            publish({ kind: "effect.start", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            const timer = schedule(() => {
+              if (waiting) {
+                publish({ kind: "effect.wait", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "completion-timeout" });
+                deliver({ ok: false, unknown: true });
+              }
+            }, 3e4);
+            let result;
+            current = context;
+            try {
+              result = start();
+            } catch (error) {
+              settle(false, error);
+              return;
+            } finally {
+              current = previous;
+            }
+            Promise.resolve(result).then((value) => settle(true, value), (error) => settle(false, error));
+            function deliver(result2) {
+              const outer = current;
+              current = context;
+              try {
+                invoke("js." + name + ".result", receive, void 0, [result2], true);
+              } catch (error) {
+                if (typeof root.reportError === "function") root.reportError(error);
+              } finally {
+                current = outer;
+              }
+            }
+            function settle(ok, value) {
+              if (!waiting) return;
+              waiting = false;
+              pending--;
+              cancel(timer);
+              publish({ kind: "effect", operation: "js." + name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - began) * 1e3)), outcome: ok ? "ok" : "failed", error: ok ? "none" : "javascript-error" });
+              deliver({ ok, value });
+            }
+          }
+          function bind(callback) {
+            const context = current;
+            return function(...args) {
+              const previous = current;
+              current = context;
+              try {
+                return Reflect.apply(callback, this, args);
+              } finally {
+                current = previous;
+              }
+            };
+          }
+          function diagnose(selector, milliseconds, limit) {
+            if (selector !== "*" && !code(selector) || !Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > 6e4 || !Number.isInteger(limit) || limit < 1 || limit > 256) throw Error("invalid diagnostic selection");
+            selector = selector === "*" ? selector : selector.replace(/\.+$/, "");
+            if (!selector) throw Error("invalid diagnostic selection");
+            diagnostic = { selector, until: clock() + milliseconds, remaining: limit };
+            publish({ kind: "diagnostic", operation: "js.collector.diagnostic", source: selector, started_ms: now(), duration_us: milliseconds * 1e3, counts: { calls: limit }, outcome: "ok", error: "none" });
+          }
+          function flush() {
+            if (flushTimer !== null) {
+              cancel(flushTimer);
+              flushTimer = null;
+            }
+            for (const [operation, counts] of metrics) {
+              if (counts.calls && publish({ kind: "method.aggregate", operation, started_ms: now(), counts: { ...counts }, outcome: counts.failed ? "failed" : counts.unknown ? "unknown" : "ok", error: counts.failed ? "javascript-error" : counts.unknown ? "unowned-async" : "none" })) for (const key of Object.keys(counts)) counts[key] = 0;
+            }
+            if (autoFlush) publish({ kind: "collection", operation: "js.collector.health", started_ms: now(), counts: { lost, pending }, outcome: lost ? "unknown" : "ok", error: lost ? "collection-incomplete" : "none" });
+          }
+          return Object.freeze({ module: module2, action, effect, bind, diagnose, flush, context: () => current && { ...current }, health: () => ({ lost, pending, methods: metrics.size, diagnostic: diagnostic ? { selector: diagnostic.selector, remaining: diagnostic.remaining, active: clock() < diagnostic.until && diagnostic.remaining > 0 } : null }) });
+        }
+        function shared() {
+          if (!root.__coreqExecution) {
+            root.__coreqExecution = create({
+              autoFlush: true,
+              emit: (row) => root.__coreqExecutionEmit ? root.__coreqExecutionEmit(row) : false,
+              id: () => Array.from(root.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("")
+            });
+          }
+          return root.__coreqExecution;
+        }
+        function connect(emit) {
+          if (typeof emit !== "function") throw Error("invalid telemetry transport");
+          root.__coreqExecutionEmit = emit;
+          return shared();
+        }
+        const api = { create, shared, connect };
+        if (typeof module === "object" && module.exports) module.exports = api;
+        else root.CoreqExecution = api;
+      })(typeof globalThis === "object" ? globalThis : exports);
+    }
+  });
+
+  // src/ui-runtime.js
+  var require_ui_runtime = __commonJS({
+    "src/ui-runtime.js"(exports, module) {
+      "use strict";
+      var core = require_runtime();
+      var execution = core.shared();
+      var events = /* @__PURE__ */ new WeakMap();
+      var frequent = /* @__PURE__ */ new Set(["scroll", "pointermove", "input"]);
+      function send(message) {
+        const context = execution.context();
+        globalThis.ipc?.postMessage(JSON.stringify({ ...message, ...context ? { context: "1 " + context.trace + " " + context.span } : {} }));
+      }
+      function connect() {
+        core.connect((row) => {
+          if (!globalThis.ipc) return false;
+          globalThis.ipc.postMessage(JSON.stringify({ a: "web-observation", row }));
+          return true;
+        });
+      }
+      function listen(target, type, callback, options) {
+        const method = execution.module("ui.events", { [type]: callback })[type];
+        const handler = execution.action("ui." + type, function(event) {
+          if (event && typeof event === "object") events.set(event, execution.bind((fn) => fn()));
+          return Reflect.apply(method, this, [event]);
+        });
+        const receive = function(event) {
+          const inherited = event && events.get(event);
+          return inherited ? inherited(() => Reflect.apply(method, this, [event])) : frequent.has(type) ? Reflect.apply(method, this, [event]) : Reflect.apply(handler, this, [event]);
+        };
+        target.addEventListener(type, receive, options);
+        return () => target.removeEventListener(type, receive, options);
+      }
+      function defer(callback, delay = 0) {
+        return setTimeout(execution.bind(execution.action("ui.timer", callback)), delay);
+      }
+      function repeat(callback, delay) {
+        return setTimeout(callback, delay);
+      }
+      function cancel(timer) {
+        clearTimeout(timer);
+      }
+      function effect(name, start, receive) {
+        execution.effect(name, () => Promise.resolve().then(execution.bind(start)), (result) => receive(result.ok ? result.value : { state: "unknown", reason: result.unknown ? "Completion unknown" : String(result.value?.message || result.value) }));
+      }
+      module.exports = { execution, connect, send, listen, defer, repeat, cancel, effect };
+    }
+  });
+
+  // src/project-blocks.js
+  var require_project_blocks = __commonJS({
+    "src/project-blocks.js"(exports, module) {
+      var ui = require_ui_runtime();
+      var execution = ui.execution;
+      var { link, observation, counters, summary, aggregate, age, task, handle } = execution.module("project-blocks", {
+        link: function(href, text, label, session = false) {
+          const target = url(href, session);
+          return target ? '<a href="' + target + '" data-url="' + target + '"' + (label ? ' aria-label="' + esc(label) + '" title="' + esc(label) + '"' : "") + ">" + text + "</a>" : text;
+        },
+        observation: function(projects) {
+          const rows = /* @__PURE__ */ new Map(), partial = /* @__PURE__ */ new Set();
+          for (const p of projects) {
+            const board = boardKey(p);
+            if (!board || p.complete !== true) partial.add(p.name);
+            for (const row of p.tasks || []) {
+              const key = board + "/" + row.n, prev = rows.get(key);
+              if (prev && (prev.state !== row.state || prev.revision !== row.revision)) partial.add(p.name);
+              rows.set(key, row);
+            }
+          }
+          const counts = Object.fromEntries(states.map(([s]) => [s, 0]));
+          for (const row of rows.values()) if (row.state in counts) counts[row.state]++;
+          if (partial.size) for (const s of Object.keys(counts)) counts[s] = null;
+          return { counts, partial: [...partial], open: partial.size ? null : [...rows.values()].filter((row) => row.state !== "closed").length };
+        },
+        counters: function(counts, project = "", label = "All projects", partial = [], selected = null, open = null) {
+          const total = Number.isSafeInteger(open) && open >= 0 ? open : "?";
+          const items = states.map(([state, name, mark, kind]) => {
+            const n = counts[state];
+            if (n === 0 && selected === null) return "";
+            const value = Number.isSafeInteger(n) && n >= 0 ? n : "?";
+            const title = label + " \xB7 " + name + ": " + (value === "?" ? "unknown" : value);
+            return '<button type="button" class="' + kind + '" data-tqp="tasks" data-project="' + esc(project) + '" data-state="' + state + '"' + (selected === null ? "" : ' aria-pressed="' + selected.includes(state) + '"') + ' aria-label="' + esc(title) + '" title="' + esc(title) + '">' + icon(mark) + (n === 0 ? "" : '<span class="tqp-count">' + value + "</span>") + "</button>";
+          }).join("");
+          return (partial.length ? '<small class="tqp-partial" title="' + esc(partial.join(", ")) + '">Partial: ' + esc(partial.join(", ")) + "</small>" : "") + (items ? '<div class="tqp-counts" aria-label="' + esc(label) + ' counters">' + items + (selected === null ? "" : '<button type="button" data-a="all-tasks" aria-pressed="' + !selected.length + '" aria-label="All tasks: ' + (total === "?" ? "unknown" : total) + ' open" title="All projects \xB7 open tasks">All tasks ' + total + "</button>") + "</div>" : "");
+        },
+        summary: function(p, selected = null, open = null) {
+          const o = observation([p]);
+          return '<section class="tqp tqp-project" aria-label="' + esc(p.name) + '"><div class="tqp-identity"><button type="button" data-tqp="project" data-project="' + esc(p.id) + '">' + icon(p.pinned ? "pin" : "folder") + " " + esc(p.name) + "</button>" + link(p.board.url, icon(p.board.kind) + " Board", "Open " + p.name + " Board") + "</div>" + counters(o.counts, p.id, p.name, o.partial, selected, open) + "</section>";
+        },
+        aggregate: function(projects, selected = null) {
+          const o = observation(projects);
+          return '<section class="tqp" aria-label="All projects">' + counters(o.counts, "", "All projects", o.partial, selected, o.open) + "</section>";
+        },
+        // Short age since the last logged state change (taskq.md § 4 Tray): 5m, 2h, 3d.
+        age: function(s) {
+          s = Math.max(0, s);
+          return s < 60 ? "<1m" : s < 3600 ? Math.floor(s / 60) + "m" : s < 86400 ? Math.floor(s / 3600) + "h" : Math.floor(s / 86400) + "d";
+        },
+        task: function(p, row, global = false) {
+          const st = states.find((s) => s[0] === row.state), name = st ? st[1] : row.state === "closed" ? "Closed" : row.state, mark = st ? st[2] : "circle", kind = st ? st[3] : "";
+          const rt = row.runtime, brand = rt === "claude" ? "claude" : ["codex", "codex-app"].includes(rt) ? "openai" : "";
+          const remote = row.host && !row.local_session;
+          const marks = (remote ? '<span title="Remote host" aria-label="Remote host">' + icon("network") + "</span> " : "") + (rt ? icon(brand) + " " + esc(rt) : "");
+          const target = url(row.session_url, !!row.local_session);
+          const session = target ? link(row.session_url, icon("terminal"), "Open " + (rt || "agent") + " session", true) : row.host ? "<small" + (row.session_reason ? ' title="' + esc(row.session_reason) + '"' : "") + ">" + (remote ? "Session unavailable" : "Session starting or unavailable") + "</small>" : "";
+          const since = !("since" in row) ? "" : row.since == null ? '<small class="tqp-age" title="Age unknown: no logged state change">age ?</small>' : '<small class="tqp-age" data-since="' + Number(row.since) + '" title="Since the last state change">' + age((p.now ?? Date.now() / 1e3) - row.since) + "</small>";
+          const metadata = [since, global ? esc(p.name) : "", row.host ? esc(row.host) : "", marks].filter(Boolean).join(" \xB7 ");
+          const wait = row.wait ? '<small class="tqp-execution-wait" role="status">' + esc(row.wait) + "</small>" : "";
+          return '<div class="tqp tqp-task"><div class="tqp-task-head"><span class="' + kind + '" title="' + esc(name) + '" aria-label="' + esc(name) + '">' + icon(mark) + "</span> " + link(row.url, icon(p.board.kind) + " #" + esc(row.n), "Open task #" + row.n) + ' <span class="tqp-meta">' + metadata + "</span> " + session + " " + wait + '</div><div class="tqp-task-title">' + esc(row.title) + "</div></div>";
+        },
+        handle: function(event, adapter) {
+          const el = event.target.closest("[data-tqp],.tqp a[data-url]");
+          if (!el) return false;
+          event.preventDefault();
+          if (el.dataset.url) adapter.open(el.getAttribute("href"));
+          else if (el.dataset.tqp === "project") adapter.project(el.dataset.project);
+          else adapter.tasks(el.dataset.project, el.dataset.state);
+          return true;
+        }
+      });
+      var assets = { "circle-x": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="m15 9-6 6" />\n  <path d="m9 9 6 6" />\n</svg>\n', "clock": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-clock"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M12 6v6l4 2" />\n</svg>\n', "folder": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-folder"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />\n</svg>\n', "circle-pause": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-pause"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="10" x2="10" y1="15" y2="9" />\n  <line x1="14" x2="14" y1="15" y2="9" />\n</svg>\n', "gitlab": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitLab</title><path d="m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"/></svg>', "git-pull-request": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-pull-request"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M13 6h3a2 2 0 0 1 2 2v7" />\n  <line x1="6" x2="6" y1="9" y2="21" />\n</svg>\n', "openai": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>OpenAI</title><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>', "play": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-play"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />\n</svg>\n', "terminal": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-terminal"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 19h8" />\n  <path d="m4 17 6-6-6-6" />\n</svg>\n', "message-circle-question": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-message-circle-question"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" />\n  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />\n  <path d="M12 17h.01" />\n</svg>\n', "github": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>', "circle": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n</svg>\n', "pin": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />\n</svg>\n', "link": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-link"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />\n  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />\n</svg>\n', "network": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-network"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect x="16" y="16" width="6" height="6" rx="1" />\n  <rect x="2" y="16" width="6" height="6" rx="1" />\n  <rect x="9" y="2" width="6" height="6" rx="1" />\n  <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />\n  <path d="M12 12V8" />\n</svg>\n', "claude": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>' };
+      var states = [
+        ["doing", "Doing", "play", "good"],
+        ["review", "Review", "git-pull-request", ""],
+        ["ask", "Ask", "message-circle-question", "ask"],
+        ["failed", "Failed", "circle-x", "danger"],
+        ["ready", "Ready", "circle", ""],
+        ["waiting", "Blocked", "link", ""],
+        ["later", "Later", "clock", ""],
+        ["held", "Held", "circle-pause", ""]
+      ];
+      var { esc } = execution.module("project-blocks", { esc: (x) => String(x ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]) });
+      var { icon } = execution.module("project-blocks", { icon: (name) => (assets[name] || "").replace("<svg", '<svg aria-hidden="true" focusable="false" data-icon="' + name + '"') });
+      var { url } = execution.module("project-blocks", { url: (s, session = false) => /^(https?:\/\/|codex:\/\/threads\/)/i.test(s || "") && (session || /^https?:\/\//i.test(s)) ? esc(s) : "" });
+      var { boardKey } = execution.module("project-blocks", { boardKey: (p) => String(p.board.url || "").replace(/\/$/, "") });
+      var api = { states, assets, observation, counters, summary, aggregate, age, task, handle };
+      module.exports = api;
+    }
+  });
+  return require_project_blocks();
+})();
+"use strict";
+var TaskqAnswerCard = (() => {
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __commonJS = (cb, mod) => function __require() {
+    try {
+      return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+    } catch (e) {
+      throw mod = 0, e;
+    }
+  };
+
+  // node_modules/@taskq/coreq/src/telemetry/runtime.js
+  var require_runtime = __commonJS({
+    "node_modules/@taskq/coreq/src/telemetry/runtime.js"(exports, module) {
+      (function(root) {
+        "use strict";
+        function create({ emit, id, clock = () => performance.now(), now = () => Date.now(), schedule = setTimeout, cancel = clearTimeout, autoFlush = false }) {
+          const run = id(), metrics = /* @__PURE__ */ new Map();
+          let current = null, serial = 0, lost = 0, diagnostic = null, pending = 0, flushTimer = null;
+          if (!/^[a-f0-9]{32}$/.test(run)) throw Error("invalid telemetry run");
+          const code = (name) => typeof name === "string" && name.length > 0 && name.length <= 128 && /^[a-zA-Z0-9._:-]+$/.test(name);
+          const publish = (row) => {
+            try {
+              if (emit(row) !== false) return true;
+            } catch (_) {
+            }
+            lost++;
+            return false;
+          };
+          const scope = () => ({ trace: current?.trace || run + "." + ++serial, span: run + "." + ++serial, parent: current?.span || null });
+          function invoke(name, fn, receiver, args, action2 = false) {
+            const metric = metrics.get(name);
+            if (metric) {
+              metric.calls++;
+              if (autoFlush && flushTimer === null) flushTimer = schedule(() => {
+                flushTimer = null;
+                flush();
+              }, 2e3);
+            }
+            const selected = !action2 && diagnostic && diagnostic.remaining > 0 && (diagnostic.selector === "*" || name === diagnostic.selector || name.startsWith(diagnostic.selector + ".")) && clock() < diagnostic.until;
+            if (selected) diagnostic.remaining--;
+            const start = action2 || selected ? clock() : null, at = start === null ? null : now(), previous = current;
+            const context = action2 || selected ? scope() : current;
+            if (context) current = context;
+            if (action2) publish({ kind: "ui.start", operation: name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            let failed = false, unknown = false;
+            try {
+              const result = Reflect.apply(fn, receiver, args);
+              unknown = result instanceof Promise;
+              if (unknown) {
+                if (metric) metric.unknown++;
+                lost++;
+              }
+              return result;
+            } catch (error) {
+              failed = true;
+              if (metric) metric.failed++;
+              throw error;
+            } finally {
+              if (metric) metric.finished++;
+              if (action2 || selected) publish({ kind: action2 ? "ui" : "method", source: action2 ? "action" : "diagnostic", operation: name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - start) * 1e3)), outcome: failed ? "failed" : unknown ? "unknown" : "ok", error: failed ? "javascript-error" : unknown ? "unowned-async" : "none" });
+              current = previous;
+            }
+          }
+          function module2(name, methods) {
+            if (!code(name)) throw Error("invalid telemetry module");
+            const wrapped = {};
+            for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(methods))) {
+              if (typeof descriptor.value !== "function" || descriptor.value.constructor.name === "AsyncFunction") throw Error("module methods must be functions");
+              const operation = "js." + name + "." + key;
+              if (!code(operation)) throw Error("invalid telemetry method");
+              if (!metrics.has(operation)) {
+                if (metrics.size >= 256) throw Error("telemetry method limit");
+                metrics.set(operation, { calls: 0, finished: 0, failed: 0, unknown: 0 });
+              }
+              Object.defineProperty(wrapped, key, { ...descriptor, value: function(...args) {
+                return invoke(operation, descriptor.value, this, args);
+              } });
+            }
+            return Object.freeze(wrapped);
+          }
+          function action(name, fn) {
+            if (!code("js." + name)) throw Error("invalid telemetry action");
+            return function(...args) {
+              return invoke("js." + name, fn, this, args, true);
+            };
+          }
+          function effect(name, start, receive) {
+            if (!code("js." + name) || typeof start !== "function" || typeof receive !== "function" || receive.constructor.name === "AsyncFunction" || pending >= 64) throw Error("async effect unavailable");
+            const previous = current, context = scope(), at = now(), began = clock();
+            let waiting = true;
+            pending++;
+            publish({ kind: "effect.start", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            const timer = schedule(() => {
+              if (waiting) {
+                publish({ kind: "effect.wait", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "completion-timeout" });
+                deliver({ ok: false, unknown: true });
+              }
+            }, 3e4);
+            let result;
+            current = context;
+            try {
+              result = start();
+            } catch (error) {
+              settle(false, error);
+              return;
+            } finally {
+              current = previous;
+            }
+            Promise.resolve(result).then((value) => settle(true, value), (error) => settle(false, error));
+            function deliver(result2) {
+              const outer = current;
+              current = context;
+              try {
+                invoke("js." + name + ".result", receive, void 0, [result2], true);
+              } catch (error) {
+                if (typeof root.reportError === "function") root.reportError(error);
+              } finally {
+                current = outer;
+              }
+            }
+            function settle(ok, value) {
+              if (!waiting) return;
+              waiting = false;
+              pending--;
+              cancel(timer);
+              publish({ kind: "effect", operation: "js." + name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - began) * 1e3)), outcome: ok ? "ok" : "failed", error: ok ? "none" : "javascript-error" });
+              deliver({ ok, value });
+            }
+          }
+          function bind(callback) {
+            const context = current;
+            return function(...args) {
+              const previous = current;
+              current = context;
+              try {
+                return Reflect.apply(callback, this, args);
+              } finally {
+                current = previous;
+              }
+            };
+          }
+          function diagnose(selector, milliseconds, limit) {
+            if (selector !== "*" && !code(selector) || !Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > 6e4 || !Number.isInteger(limit) || limit < 1 || limit > 256) throw Error("invalid diagnostic selection");
+            selector = selector === "*" ? selector : selector.replace(/\.+$/, "");
+            if (!selector) throw Error("invalid diagnostic selection");
+            diagnostic = { selector, until: clock() + milliseconds, remaining: limit };
+            publish({ kind: "diagnostic", operation: "js.collector.diagnostic", source: selector, started_ms: now(), duration_us: milliseconds * 1e3, counts: { calls: limit }, outcome: "ok", error: "none" });
+          }
+          function flush() {
+            if (flushTimer !== null) {
+              cancel(flushTimer);
+              flushTimer = null;
+            }
+            for (const [operation, counts] of metrics) {
+              if (counts.calls && publish({ kind: "method.aggregate", operation, started_ms: now(), counts: { ...counts }, outcome: counts.failed ? "failed" : counts.unknown ? "unknown" : "ok", error: counts.failed ? "javascript-error" : counts.unknown ? "unowned-async" : "none" })) for (const key of Object.keys(counts)) counts[key] = 0;
+            }
+            if (autoFlush) publish({ kind: "collection", operation: "js.collector.health", started_ms: now(), counts: { lost, pending }, outcome: lost ? "unknown" : "ok", error: lost ? "collection-incomplete" : "none" });
+          }
+          return Object.freeze({ module: module2, action, effect, bind, diagnose, flush, context: () => current && { ...current }, health: () => ({ lost, pending, methods: metrics.size, diagnostic: diagnostic ? { selector: diagnostic.selector, remaining: diagnostic.remaining, active: clock() < diagnostic.until && diagnostic.remaining > 0 } : null }) });
+        }
+        function shared() {
+          if (!root.__coreqExecution) {
+            root.__coreqExecution = create({
+              autoFlush: true,
+              emit: (row) => root.__coreqExecutionEmit ? root.__coreqExecutionEmit(row) : false,
+              id: () => Array.from(root.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("")
+            });
+          }
+          return root.__coreqExecution;
+        }
+        function connect(emit) {
+          if (typeof emit !== "function") throw Error("invalid telemetry transport");
+          root.__coreqExecutionEmit = emit;
+          return shared();
+        }
+        const api = { create, shared, connect };
+        if (typeof module === "object" && module.exports) module.exports = api;
+        else root.CoreqExecution = api;
+      })(typeof globalThis === "object" ? globalThis : exports);
+    }
+  });
+
+  // src/ui-runtime.js
+  var require_ui_runtime = __commonJS({
+    "src/ui-runtime.js"(exports, module) {
+      "use strict";
+      var core = require_runtime();
+      var execution = core.shared();
+      var events = /* @__PURE__ */ new WeakMap();
+      var frequent = /* @__PURE__ */ new Set(["scroll", "pointermove", "input"]);
+      function send(message) {
+        const context = execution.context();
+        globalThis.ipc?.postMessage(JSON.stringify({ ...message, ...context ? { context: "1 " + context.trace + " " + context.span } : {} }));
+      }
+      function connect() {
+        core.connect((row) => {
+          if (!globalThis.ipc) return false;
+          globalThis.ipc.postMessage(JSON.stringify({ a: "web-observation", row }));
+          return true;
+        });
+      }
+      function listen(target, type, callback, options) {
+        const method = execution.module("ui.events", { [type]: callback })[type];
+        const handler = execution.action("ui." + type, function(event) {
+          if (event && typeof event === "object") events.set(event, execution.bind((fn) => fn()));
+          return Reflect.apply(method, this, [event]);
+        });
+        const receive = function(event) {
+          const inherited = event && events.get(event);
+          return inherited ? inherited(() => Reflect.apply(method, this, [event])) : frequent.has(type) ? Reflect.apply(method, this, [event]) : Reflect.apply(handler, this, [event]);
+        };
+        target.addEventListener(type, receive, options);
+        return () => target.removeEventListener(type, receive, options);
+      }
+      function defer(callback, delay = 0) {
+        return setTimeout(execution.bind(execution.action("ui.timer", callback)), delay);
+      }
+      function repeat(callback, delay) {
+        return setTimeout(callback, delay);
+      }
+      function cancel(timer) {
+        clearTimeout(timer);
+      }
+      function effect(name, start, receive) {
+        execution.effect(name, () => Promise.resolve().then(execution.bind(start)), (result) => receive(result.ok ? result.value : { state: "unknown", reason: result.unknown ? "Completion unknown" : String(result.value?.message || result.value) }));
+      }
+      module.exports = { execution, connect, send, listen, defer, repeat, cancel, effect };
+    }
+  });
+
+  // src/answer-card.js
+  var require_answer_card = __commonJS({
+    "src/answer-card.js"(exports, module) {
+      var ui = require_ui_runtime();
+      var execution = ui.execution;
+      var { fresh, textProblem, status, step, render, receipt, mount, replay } = execution.module("answer-card", {
+        fresh: function(row) {
+          return { draft: "", bound: row.revision, op: null, receipt: null };
+        },
+        textProblem: function(q, text) {
+          const lines = text.split("\n").filter((l) => l.trim());
+          if (!lines.length) return "Type an answer";
+          if (lines.length > q.limits.lines) return "At most " + q.limits.lines + " lines";
+          if (lines.some((l) => [...l].length > q.limits.chars)) return "At most " + q.limits.chars + " characters per line";
+          return null;
+        },
+        status: function(row, local, cap) {
+          const q = row.question;
+          if (local.op && local.receipt && (["sending", "unknown"].includes(local.receipt.state) || local.op.revision === row.revision || !q)) return local.receipt.state;
+          if (!manageable(row, cap) && (!q || !q.parsed || !cap || !cap.answer || !["ask", "review"].includes(row.state))) return "read-only";
+          if (local.bound !== row.revision && (local.draft.trim() || local.op || local.confirmClose)) return "stale";
+          return "actionable";
+        },
+        step: function(row, local, cap, ev, newId) {
+          const st = status(row, local, cap), l = { ...local };
+          const { start } = execution.module("answer-card.step", { start: (payload) => {
+            l.confirmClose = false;
+            l.op = { id: newId(), task: row.n, revision: row.revision, ...payload };
+            l.bound = row.revision;
+            l.receipt = { state: "sending" };
+            return { local: l, send: l.op };
+          } });
+          switch (ev.type) {
+            case "input":
+              if (st !== "stale") l.bound = row.revision;
+              l.draft = ev.text;
+              return { local: l, send: null };
+            case "choose": {
+              if (!["actionable", "rejected"].includes(st)) return { local, send: null };
+              const c = row.question.choices.find((x) => x.id === ev.id);
+              if (!c || c.consequential) return { local, send: null };
+              return start({ choice: c.id });
+            }
+            case "submit":
+              if (!cap || !cap.answer || !["actionable", "rejected"].includes(st) || textProblem(draftQuestion(row, cap), l.draft)) return { local, send: null };
+              return start(manageable(row, cap) ? { action: "requeue", text: l.draft.trim() } : { text: l.draft.trim() });
+            case "later":
+            case "close":
+            case "confirm-close":
+              if (!manageable(row, cap) || !["actionable", "rejected"].includes(st)) return { local, send: null };
+              if (ev.type === "close") return { local: { ...l, bound: row.revision, confirmClose: true }, send: null };
+              if (ev.type === "confirm-close" && !l.confirmClose) return { local, send: null };
+              return start(ev.type === "later" ? { action: "later" } : { action: "close", confirmed: true });
+            case "cancel-close":
+              return { local: { ...l, confirmClose: false }, send: null };
+            case "review":
+              if (st === "stale") {
+                l.bound = row.revision;
+                l.op = null;
+                l.receipt = null;
+                l.confirmClose = false;
+              }
+              return { local: l, send: null };
+            case "receipt":
+              if (!l.op || ev.opId !== l.op.id) return { local, send: null };
+              l.receipt = { state: ["accepted", "rejected", "stale", "unknown"].includes(ev.state) ? ev.state : "unknown", reason: ev.reason, next: ev.next };
+              if (ev.state === "accepted" && l.op.text) l.draft = "";
+              return { local: l, send: null };
+            case "retry":
+              return st === "unknown" ? { local: { ...l, receipt: { state: "sending" } }, send: l.op } : { local, send: null };
+            default:
+              return { local, send: null };
+          }
+        },
+        render: function(board, row, local, cap) {
+          const q = row.question || { text: row.card || "", parsed: false, choices: [], evidence: [] }, st = status(row, local, cap);
+          const id = "qac-" + String(board).replace(/[^\w-]/g, "_") + "-" + row.n, live = st === "actionable" || st === "rejected";
+          let h = '<section class="qac" data-qac-state="' + st + '" aria-labelledby="' + id + '-t">';
+          h += '<p class="qac-head" id="' + id + '-t"><span class="qac-mark" aria-hidden="true">?</span> <a href="' + href(row.url) + '" target="_blank" rel="noopener">#' + esc(row.n) + "</a> " + esc(row.title) + "</p>";
+          if (manageable(row, cap)) {
+            h += '<pre class="qac-text">' + esc(q.text || row.card || "No question text supplied") + "</pre>";
+            h += '<form class="qac-text-form" data-qac="submit"><textarea data-qac="input" rows="1" aria-label="Requeue reason" placeholder="Reason to requeue"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !textProblem(draftQuestion(row, cap), local.draft) ? "" : " disabled") + ">Requeue</button>" + hint(id, live && textProblem(draftQuestion(row, cap), local.draft)) + "</form>";
+            h += '<div class="qac-choices"><button type="button" data-qac="later"' + (live ? "" : " disabled") + '>Later</button><button type="button" data-qac="close"' + (live ? "" : " disabled") + ">Close\u2026</button></div>";
+            if (local.confirmClose && live) h += "<p>Cancel #" + esc(row.n) + ' without publication? Running work will stop. The task is parked before closing.</p><div class="qac-choices"><button type="button" data-qac="confirm-close">Close without publishing</button><button type="button" data-qac="cancel-close">Keep task</button></div>';
+            h += receipt(st, local.receipt && local.receipt.reason, row.url, id, local.receipt && local.receipt.next, true);
+            if (st === "stale") h += '<button type="button" data-qac="review">I read the new question</button>';
+            if (st === "unknown") h += '<button type="button" data-qac="retry">Check delivery</button>';
+            return h + "</section>";
+          }
+          if (!q.parsed) return h + '<pre class="qac-text">' + esc(q.text) + "</pre>" + receipt(st, st === "read-only" ? "This card has no answer form here" : local.receipt && local.receipt.reason, row.url, id) + (st === "unknown" ? '<button type="button" data-qac="retry">Check delivery</button>' : "") + "</section>";
+          h += '<p class="qac-problem">' + linked(q.problem) + "</p>";
+          h += '<div class="qac-choices" role="group" aria-label="Choices">';
+          for (const c of q.choices) {
+            const off = !live || c.consequential, why = c.consequential ? "Answer on the board: this choice closes or publishes the task" : "";
+            h += '<button type="button" data-qac="choose" data-choice="' + c.id + '"' + (off ? " disabled" : "") + (why ? ' aria-describedby="' + id + "-c" + c.id + '"' : "") + '><span class="qac-number">' + c.id + ".</span> <span>" + esc(label(c.text)) + (c.recommended ? ' <span class="qac-star" role="img" aria-label="Recommended">\u2605</span>' : "") + "</span></button>";
+            for (const m of c.text.matchAll(LINK)) h += '<a class="qac-link" href="' + href(m[2]) + '" target="_blank" rel="noopener">' + esc(m[1]) + " \u2197</a>";
+            if (why) h += '<span class="qac-why" id="' + id + "-c" + c.id + '">' + esc(why) + ' <a href="' + href(row.url) + '" target="_blank" rel="noopener">board \u2197</a></span>';
+          }
+          h += "</div>";
+          if (row.pick) h += '<p class="qac-pick"><span class="qac-muted">PM</span> ' + esc(row.n) + "." + esc(row.pick.id) + ": " + esc(row.pick.reason) + "</p>";
+          if (st !== "read-only" || local.draft) {
+            const bad = textProblem(q, local.draft);
+            h += '<details class="qac-other"' + (local.draft ? " open" : "") + '><summary>Other answer</summary><form class="qac-text-form" data-qac="submit"><textarea id="' + id + '-d" data-qac="input" rows="2" aria-label="Your answer" placeholder="Or type an answer"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !bad ? "" : " disabled") + ">Send</button>" + hint(id, live && bad) + "</form></details>";
+          }
+          const reason = st === "read-only" ? cap && cap.reason || "Answering is not available here" : local.receipt && local.receipt.reason;
+          h += receipt(st, reason, row.url, id, local.receipt && local.receipt.next);
+          if (st === "stale") h += '<button type="button" data-qac="review">I read the new question</button>';
+          if (st === "unknown") h += '<button type="button" data-qac="retry">Check delivery</button>';
+          if (q.done || q.evidence.length) h += '<details class="qac-context"><summary>Checked &amp; context</summary>' + (q.done ? '<p class="qac-done"><span class="qac-muted">Done:</span> ' + esc(q.done) + "</p>" : "") + (q.evidence.length ? '<p class="qac-evidence">' + q.evidence.map((e) => '<a href="' + href(e.url) + '" target="_blank" rel="noopener">' + esc(e.label) + "</a>").join(" \xB7 ") + "</p>" : "") + "</details>";
+          return h + "</section>";
+        },
+        receipt: function(st, reason, url, id, next, action) {
+          if (st === "actionable") return '<p class="qac-receipt" id="' + id + '-r" role="status" aria-live="polite"></p>';
+          return '<p class="qac-receipt qac-' + st + '" id="' + id + '-r" role="status" aria-live="polite">' + esc(st === "accepted" && action ? "Action accepted on the board" : LABELS[st]) + (reason ? ": " + esc(reason) : "") + (next ? ". " + esc(next) : "") + (st === "read-only" || st === "unknown" ? ' <a href="' + href(url) + '" target="_blank" rel="noopener">Open on board \u2197</a>' : "") + "</p>";
+        },
+        mount: function(el, adapter) {
+          const { apply, paint, markup } = execution.module("answer-card.mount", {
+            markup: function() {
+              return [...cards].map(([k, c]) => '<div data-qac-key="' + esc(k) + '">' + render(c.board, c.row, locals.get(k), adapter.capability(c.board, c.row)) + "</div>").join("");
+            },
+            apply: function(k, ev) {
+              const { board, row } = cards.get(k), cap = adapter.capability(board, row), r = step(row, locals.get(k), cap, ev, newId);
+              locals.set(k, r.local);
+              adapter.save?.(board, row, r.local);
+              if (ev.type !== "input") paint();
+              if (r.send) ui.effect("answer.send", () => adapter.send(board, r.send), (x) => {
+                if (cards.has(k)) apply(k, { type: "receipt", opId: r.send.id, ...x });
+              });
+              else if (ev.type === "input") {
+                const s = el.querySelector('[data-qac-key="' + CSS.escape(k) + '"] button[type=submit]'), cap2 = adapter.capability(board, row);
+                const live = ["actionable", "rejected"].includes(status(row, r.local, cap2)), bad = textProblem(draftQuestion(row, cap2), r.local.draft);
+                if (s) s.disabled = !!bad || !live;
+                const h = s && s.parentNode.querySelector(".qac-hint");
+                if (h) h.textContent = live && bad || "";
+                painted = markup();
+              }
+            },
+            paint: function() {
+              const a = document.activeElement, focus = a && el.contains(a) ? { k: a.closest("[data-qac-key]")?.dataset.qacKey, sel: a.dataset.qac === "input" ? "textarea" : a.dataset.choice ? '[data-choice="' + a.dataset.choice + '"]' : '[data-qac="' + a.dataset.qac + '"]', s: a.selectionStart, e: a.selectionEnd } : null;
+              const scroll = el.scrollTop, open = new Set([...el.querySelectorAll("details[open]")].map((d) => d.closest("[data-qac-key]")?.dataset.qacKey + " " + d.className));
+              const html = markup();
+              if (html === painted) return;
+              el.innerHTML = painted = html;
+              for (const d of el.querySelectorAll("details")) if (open.has(d.closest("[data-qac-key]").dataset.qacKey + " " + d.className)) d.open = true;
+              el.scrollTop = scroll;
+              for (const [k, local] of locals) if (Array.isArray(local.caret) && local.caret.length === 2) {
+                const input = el.querySelector('[data-qac-key="' + CSS.escape(k) + '"] textarea');
+                input?.setSelectionRange(...local.caret);
+              }
+              const t = focus && focus.k && el.querySelector('[data-qac-key="' + CSS.escape(focus.k) + '"] ' + focus.sel);
+              if (t) {
+                t.focus();
+                if (focus.s != null && t.setSelectionRange) t.setSelectionRange(focus.s, focus.e);
+              }
+            }
+          });
+          const locals = /* @__PURE__ */ new Map(), cards = /* @__PURE__ */ new Map();
+          let painted = null;
+          const newId = adapter.newId || (() => root.crypto && root.crypto.randomUUID ? root.crypto.randomUUID() : "qac-" + Date.now().toString(36) + Math.random().toString(36).slice(2));
+          ui.listen(el, "click", (e) => {
+            const b = e.target.closest("button[data-qac]"), k = b && b.closest("[data-qac-key]")?.dataset.qacKey;
+            if (k && !b.disabled) apply(k, b.dataset.qac === "choose" ? { type: "choose", id: Number(b.dataset.choice) } : { type: b.dataset.qac });
+          });
+          ui.listen(el, "submit", (e) => {
+            e.preventDefault();
+            const k = e.target.closest("[data-qac-key]")?.dataset.qacKey;
+            if (k) apply(k, { type: "submit" });
+          });
+          ui.listen(el, "keydown", (e) => {
+            if (e.target.dataset.qac === "input" && e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+              e.preventDefault();
+              const k = e.target.closest("[data-qac-key]")?.dataset.qacKey;
+              if (k) apply(k, { type: "submit" });
+            }
+          });
+          for (const event of ["select", "keyup", "click"]) ui.listen(el, event, (e) => {
+            const k = e.target.dataset.qac === "input" && e.target.closest("[data-qac-key]")?.dataset.qacKey;
+            if (k && adapter.save) {
+              const c = cards.get(k), local = { ...locals.get(k), caret: [e.target.selectionStart, e.target.selectionEnd] };
+              locals.set(k, local);
+              adapter.save(c.board, c.row, local);
+            }
+          });
+          ui.listen(el, "input", (e) => {
+            const k = e.target.dataset.qac === "input" && e.target.closest("[data-qac-key]")?.dataset.qacKey;
+            if (k) apply(k, { type: "input", text: e.target.value });
+          });
+          return execution.module("answer-card.mount.controller", {
+            receiveReceipt(board, opId, reply) {
+              for (const [k, card] of cards) if (card.board === board && locals.get(k)?.op?.id === opId) {
+                apply(k, { ...reply, type: "receipt", opId });
+              }
+            },
+            // rows: [{board, row}] of open questions; a row that left keeps no state
+            update(rows) {
+              cards.clear();
+              for (const c of rows) {
+                const k = key(c.board, c.row);
+                cards.set(k, c);
+                if (!locals.has(k)) locals.set(k, adapter.load?.(c.board, c.row) || fresh(c.row));
+              }
+              for (const k of [...locals.keys()]) if (!cards.has(k)) locals.delete(k);
+              paint();
+            }
+          });
+        },
+        replay: function(fx, capability) {
+          let row = fx.rows[0], local = fresh(row), n = 0;
+          const sent = [], out = [];
+          for (const ev of fx.events || []) {
+            if (ev.type === "refresh") {
+              row = fx.rows[ev.row];
+              continue;
+            }
+            if (ev.type === "check") {
+              out.push({ status: status(row, local, capability(fx.board, row)), html: render(fx.board, row, local, capability(fx.board, row)), sent: sent.slice(), draft: local.draft });
+              continue;
+            }
+            const r = step(row, local, capability(fx.board, row), ev.type === "receipt" ? { ...ev, opId: sent[sent.length - 1] && sent[sent.length - 1].id } : ev, () => "op-" + ++n);
+            local = r.local;
+            if (r.send) sent.push(r.send);
+          }
+          return out;
+        }
+      });
+      var root = globalThis;
+      var STATES = ["actionable", "sending", "accepted", "stale", "rejected", "unknown", "read-only"];
+      var LABELS = {
+        actionable: "Waiting for your answer",
+        sending: "Sending\u2026",
+        accepted: "Answer accepted on the board",
+        stale: "The question changed: review it before sending",
+        rejected: "Answer not accepted",
+        unknown: "Delivery unknown: check the board",
+        "read-only": "Read only"
+      };
+      var { esc } = execution.module("answer-card", { esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]) });
+      var { key } = execution.module("answer-card", { key: (board, row) => board + "#" + row.n });
+      var { href } = execution.module("answer-card", { href: (u) => /^https?:\/\//i.test(u || "") ? esc(u) : "#" });
+      var LINK = /\[([^\]]*)\]\(([^)\s]*)\)/g;
+      var { label } = execution.module("answer-card", { label: (s) => String(s == null ? "" : s).replace(LINK, "$1") });
+      var { linked } = execution.module("answer-card", { linked: (s) => {
+        const p = String(s == null ? "" : s).split(LINK);
+        let h = esc(p[0]);
+        for (let i = 1; i < p.length; i += 3) h += '<a href="' + href(p[i + 1]) + '" target="_blank" rel="noopener">' + esc(p[i]) + "</a>" + esc(p[i + 2]);
+        return h;
+      } });
+      var { manageable } = execution.module("answer-card", { manageable: (row, cap) => row.state === "ask" && cap && cap.answer && cap.manage && !(row.question && row.question.choices && row.question.choices.length) });
+      var { hint } = execution.module("answer-card", { hint: (id, why) => '<span class="qac-hint" id="' + id + '-h" aria-live="polite">' + esc(why || "") + "</span>" });
+      var { draftQuestion } = execution.module("answer-card", { draftQuestion: (row, cap) => manageable(row, cap) ? { limits: { lines: 1, chars: 232 } } : row.question });
+      var api = { STATES, status, step, render, mount, replay, textProblem };
+      module.exports = api;
+    }
+  });
+  return require_answer_card();
+})();
+"use strict";
+var TaskqTaskControls = (() => {
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __commonJS = (cb, mod) => function __require() {
+    try {
+      return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+    } catch (e) {
+      throw mod = 0, e;
+    }
+  };
+
+  // node_modules/@taskq/coreq/src/telemetry/runtime.js
+  var require_runtime = __commonJS({
+    "node_modules/@taskq/coreq/src/telemetry/runtime.js"(exports, module) {
+      (function(root) {
+        "use strict";
+        function create({ emit, id, clock = () => performance.now(), now = () => Date.now(), schedule = setTimeout, cancel = clearTimeout, autoFlush = false }) {
+          const run = id(), metrics = /* @__PURE__ */ new Map();
+          let current = null, serial = 0, lost = 0, diagnostic = null, pending = 0, flushTimer = null;
+          if (!/^[a-f0-9]{32}$/.test(run)) throw Error("invalid telemetry run");
+          const code = (name) => typeof name === "string" && name.length > 0 && name.length <= 128 && /^[a-zA-Z0-9._:-]+$/.test(name);
+          const publish = (row) => {
+            try {
+              if (emit(row) !== false) return true;
+            } catch (_) {
+            }
+            lost++;
+            return false;
+          };
+          const scope = () => ({ trace: current?.trace || run + "." + ++serial, span: run + "." + ++serial, parent: current?.span || null });
+          function invoke(name, fn, receiver, args, action2 = false) {
+            const metric = metrics.get(name);
+            if (metric) {
+              metric.calls++;
+              if (autoFlush && flushTimer === null) flushTimer = schedule(() => {
+                flushTimer = null;
+                flush();
+              }, 2e3);
+            }
+            const selected = !action2 && diagnostic && diagnostic.remaining > 0 && (diagnostic.selector === "*" || name === diagnostic.selector || name.startsWith(diagnostic.selector + ".")) && clock() < diagnostic.until;
+            if (selected) diagnostic.remaining--;
+            const start = action2 || selected ? clock() : null, at = start === null ? null : now(), previous = current;
+            const context = action2 || selected ? scope() : current;
+            if (context) current = context;
+            if (action2) publish({ kind: "ui.start", operation: name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            let failed = false, unknown = false;
+            try {
+              const result = Reflect.apply(fn, receiver, args);
+              unknown = result instanceof Promise;
+              if (unknown) {
+                if (metric) metric.unknown++;
+                lost++;
+              }
+              return result;
+            } catch (error) {
+              failed = true;
+              if (metric) metric.failed++;
+              throw error;
+            } finally {
+              if (metric) metric.finished++;
+              if (action2 || selected) publish({ kind: action2 ? "ui" : "method", source: action2 ? "action" : "diagnostic", operation: name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - start) * 1e3)), outcome: failed ? "failed" : unknown ? "unknown" : "ok", error: failed ? "javascript-error" : unknown ? "unowned-async" : "none" });
+              current = previous;
+            }
+          }
+          function module2(name, methods) {
+            if (!code(name)) throw Error("invalid telemetry module");
+            const wrapped = {};
+            for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(methods))) {
+              if (typeof descriptor.value !== "function" || descriptor.value.constructor.name === "AsyncFunction") throw Error("module methods must be functions");
+              const operation = "js." + name + "." + key;
+              if (!code(operation)) throw Error("invalid telemetry method");
+              if (!metrics.has(operation)) {
+                if (metrics.size >= 256) throw Error("telemetry method limit");
+                metrics.set(operation, { calls: 0, finished: 0, failed: 0, unknown: 0 });
+              }
+              Object.defineProperty(wrapped, key, { ...descriptor, value: function(...args) {
+                return invoke(operation, descriptor.value, this, args);
+              } });
+            }
+            return Object.freeze(wrapped);
+          }
+          function action(name, fn) {
+            if (!code("js." + name)) throw Error("invalid telemetry action");
+            return function(...args) {
+              return invoke("js." + name, fn, this, args, true);
+            };
+          }
+          function effect(name, start, receive) {
+            if (!code("js." + name) || typeof start !== "function" || typeof receive !== "function" || receive.constructor.name === "AsyncFunction" || pending >= 64) throw Error("async effect unavailable");
+            const previous = current, context = scope(), at = now(), began = clock();
+            let waiting = true;
+            pending++;
+            publish({ kind: "effect.start", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "none" });
+            const timer = schedule(() => {
+              if (waiting) {
+                publish({ kind: "effect.wait", operation: "js." + name, ...context, started_ms: at, outcome: "unknown", error: "completion-timeout" });
+                deliver({ ok: false, unknown: true });
+              }
+            }, 3e4);
+            let result;
+            current = context;
+            try {
+              result = start();
+            } catch (error) {
+              settle(false, error);
+              return;
+            } finally {
+              current = previous;
+            }
+            Promise.resolve(result).then((value) => settle(true, value), (error) => settle(false, error));
+            function deliver(result2) {
+              const outer = current;
+              current = context;
+              try {
+                invoke("js." + name + ".result", receive, void 0, [result2], true);
+              } catch (error) {
+                if (typeof root.reportError === "function") root.reportError(error);
+              } finally {
+                current = outer;
+              }
+            }
+            function settle(ok, value) {
+              if (!waiting) return;
+              waiting = false;
+              pending--;
+              cancel(timer);
+              publish({ kind: "effect", operation: "js." + name, ...context, started_ms: at, duration_us: Math.max(0, Math.round((clock() - began) * 1e3)), outcome: ok ? "ok" : "failed", error: ok ? "none" : "javascript-error" });
+              deliver({ ok, value });
+            }
+          }
+          function bind(callback) {
+            const context = current;
+            return function(...args) {
+              const previous = current;
+              current = context;
+              try {
+                return Reflect.apply(callback, this, args);
+              } finally {
+                current = previous;
+              }
+            };
+          }
+          function diagnose(selector, milliseconds, limit) {
+            if (selector !== "*" && !code(selector) || !Number.isInteger(milliseconds) || milliseconds < 1 || milliseconds > 6e4 || !Number.isInteger(limit) || limit < 1 || limit > 256) throw Error("invalid diagnostic selection");
+            selector = selector === "*" ? selector : selector.replace(/\.+$/, "");
+            if (!selector) throw Error("invalid diagnostic selection");
+            diagnostic = { selector, until: clock() + milliseconds, remaining: limit };
+            publish({ kind: "diagnostic", operation: "js.collector.diagnostic", source: selector, started_ms: now(), duration_us: milliseconds * 1e3, counts: { calls: limit }, outcome: "ok", error: "none" });
+          }
+          function flush() {
+            if (flushTimer !== null) {
+              cancel(flushTimer);
+              flushTimer = null;
+            }
+            for (const [operation, counts] of metrics) {
+              if (counts.calls && publish({ kind: "method.aggregate", operation, started_ms: now(), counts: { ...counts }, outcome: counts.failed ? "failed" : counts.unknown ? "unknown" : "ok", error: counts.failed ? "javascript-error" : counts.unknown ? "unowned-async" : "none" })) for (const key of Object.keys(counts)) counts[key] = 0;
+            }
+            if (autoFlush) publish({ kind: "collection", operation: "js.collector.health", started_ms: now(), counts: { lost, pending }, outcome: lost ? "unknown" : "ok", error: lost ? "collection-incomplete" : "none" });
+          }
+          return Object.freeze({ module: module2, action, effect, bind, diagnose, flush, context: () => current && { ...current }, health: () => ({ lost, pending, methods: metrics.size, diagnostic: diagnostic ? { selector: diagnostic.selector, remaining: diagnostic.remaining, active: clock() < diagnostic.until && diagnostic.remaining > 0 } : null }) });
+        }
+        function shared() {
+          if (!root.__coreqExecution) {
+            root.__coreqExecution = create({
+              autoFlush: true,
+              emit: (row) => root.__coreqExecutionEmit ? root.__coreqExecutionEmit(row) : false,
+              id: () => Array.from(root.crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("")
+            });
+          }
+          return root.__coreqExecution;
+        }
+        function connect(emit) {
+          if (typeof emit !== "function") throw Error("invalid telemetry transport");
+          root.__coreqExecutionEmit = emit;
+          return shared();
+        }
+        const api = { create, shared, connect };
+        if (typeof module === "object" && module.exports) module.exports = api;
+        else root.CoreqExecution = api;
+      })(typeof globalThis === "object" ? globalThis : exports);
+    }
+  });
+
+  // src/ui-runtime.js
+  var require_ui_runtime = __commonJS({
+    "src/ui-runtime.js"(exports, module) {
+      "use strict";
+      var core = require_runtime();
+      var execution = core.shared();
+      var events = /* @__PURE__ */ new WeakMap();
+      var frequent = /* @__PURE__ */ new Set(["scroll", "pointermove", "input"]);
+      function send(message) {
+        const context = execution.context();
+        globalThis.ipc?.postMessage(JSON.stringify({ ...message, ...context ? { context: "1 " + context.trace + " " + context.span } : {} }));
+      }
+      function connect() {
+        core.connect((row) => {
+          if (!globalThis.ipc) return false;
+          globalThis.ipc.postMessage(JSON.stringify({ a: "web-observation", row }));
+          return true;
+        });
+      }
+      function listen(target, type, callback, options) {
+        const method = execution.module("ui.events", { [type]: callback })[type];
+        const handler = execution.action("ui." + type, function(event) {
+          if (event && typeof event === "object") events.set(event, execution.bind((fn) => fn()));
+          return Reflect.apply(method, this, [event]);
+        });
+        const receive = function(event) {
+          const inherited = event && events.get(event);
+          return inherited ? inherited(() => Reflect.apply(method, this, [event])) : frequent.has(type) ? Reflect.apply(method, this, [event]) : Reflect.apply(handler, this, [event]);
+        };
+        target.addEventListener(type, receive, options);
+        return () => target.removeEventListener(type, receive, options);
+      }
+      function defer(callback, delay = 0) {
+        return setTimeout(execution.bind(execution.action("ui.timer", callback)), delay);
+      }
+      function repeat(callback, delay) {
+        return setTimeout(callback, delay);
+      }
+      function cancel(timer) {
+        clearTimeout(timer);
+      }
+      function effect(name, start, receive) {
+        execution.effect(name, () => Promise.resolve().then(execution.bind(start)), (result) => receive(result.ok ? result.value : { state: "unknown", reason: result.unknown ? "Completion unknown" : String(result.value?.message || result.value) }));
+      }
+      module.exports = { execution, connect, send, listen, defer, repeat, cancel, effect };
+    }
+  });
+
+  // src/task-controls.js
+  var require_task_controls = __commonJS({
+    "src/task-controls.js"(exports, module) {
+      var { execution } = require_ui_runtime();
+      var LABELS = { start: "Start", stop: "Stop", later: "Later", retry: "Retry" };
+      var { op, render, esc } = execution.module("task-controls", {
+        esc: function(s) {
+          return String(s).replace(/[&<>"']/g, (c) => "&#" + c.charCodeAt(0) + ";");
+        },
+        op: function(row, action, prefix) {
+          return { id: prefix + "." + action + "." + row.n + "." + row.revision, task: row.n, revision: row.revision, action };
+        },
+        render: function(row, { key = "", url = "", except = [] } = {}) {
+          const buttons = (row.controls || []).filter((a) => LABELS[a] && !except.includes(a)).map((a) => '<button data-a="control" data-control="' + a + '" data-key="' + esc(key) + '" aria-label="' + LABELS[a] + " #" + row.n + '">' + LABELS[a] + "</button>");
+          if (url) buttons.push('<a href="' + esc(url) + '" data-url="' + esc(url) + '" aria-label="Close #' + row.n + ' on the board">Close on board \u2197</a>');
+          return buttons.length ? '<span class="row task-controls">' + buttons.join("") + "</span>" : "";
+        }
+      });
+      module.exports = { VERSION: "taskq.task-controls/1", LABELS, op, render };
+    }
+  });
+  return require_task_controls();
+})();
+
+</script>
+<script>
+{
+ const root=document.getElementById('dq-overview');
+ const mark=name=>`<i data-lucide="${name}" aria-hidden="true"></i>`;
+ const diskSamples=[42,48,57,67,78,86,92];
+ root.querySelector('[data-disk-history]').innerHTML=diskSamples.map((value,index)=>`<button aria-label="${index===6?'Now':(30-index*5)+' minutes ago'}: ${value} GiB used" data-growth-index="${index}"><span style="--height:${value}%"></span></button>`).join('');
+ const question={n:103,state:'ask',revision:1,title:'Choose rollout scope',url:'https://example.invalid/taskq/103',question:{parsed:true,text:'Choose the rollout scope.',done:'The candidate passed review.',problem:'Which hosts should receive the candidate first?',evidence:[],choices:[{id:1,text:'One host first',recommended:true,consequential:false},{id:2,text:'All hosts',recommended:false,consequential:false}],limits:{lines:4,chars:240}}};
+ const taskControlStates={"held": ["start"], "ready": ["stop", "later"], "waiting": ["stop", "later"], "doing": ["stop", "later"], "review": ["stop", "later"], "ask": ["stop", "later"], "later": ["retry"], "failed": ["retry"], "closed": []};
+ const projects=[
+  {id:'taskq',name:'TaskQ',board:{kind:'github',url:'https://github.com/taskqorg/taskq/issues'},complete:true,closed:0,tasks:[{n:101,state:'doing',revision:1,title:'Prepare the operator workspace',url:'https://example.invalid/taskq/101'},{n:102,state:'review',revision:1,title:'Verify telemetry delivery',url:'https://example.invalid/taskq/102'},question]},
+  {id:'agentq',name:'AgentQ',board:{kind:'github',url:'https://github.com/taskqorg/agentq/issues'},complete:true,closed:0,tasks:[{n:201,state:'ready',revision:1,title:'Qualify client probes',url:'https://example.invalid/agentq/201'},{n:202,state:'waiting',revision:1,title:'Wait for resource history',url:'https://example.invalid/agentq/202'}]}
+ ];
+  const agents=[
+  {id:'claude-mac',name:'Claude',brand:'claude',host:'Mac',state:'Answer needed',icon:'circle-pause',tone:'dq-warning',age:'Asked 8m ago',task:'TaskQ #103 · attempt 1 · Ask',taskId:103,headline:'Waiting for your answer',observed:'Example attempt · log updated 12s ago',next:'Open question',reason:'TaskQ has an open question. Answer it in the same shared task view.',events:[['8m ago','Question opened','TaskQ ask stage requests an owner answer.'],['8m ago','Ask stage began','Explicit TaskQ ask stage, not inferred from silence.'],['12s ago','Attempt state observed','Still waiting; observation is fresh.']],segments:[['unknown',6,'History unavailable','Missing interval evidence in this attempt window.'],['work',5,'Build','Exclusive TaskQ build interval.'],['work',11,'Review','Includes nested model calls; counted once.'],['wait',8,'Ask','Explicit TaskQ ask interval; still open.']]},
+  {id:'codex-mac',name:'Codex',brand:'openai',host:'Mac',state:'Checks stage',icon:'play',tone:'',age:'Log updated 12s ago',task:'TaskQ #101 · attempt 1 · Checks',taskId:101,headline:'Checks stage observed',observed:'Example attempt · log updated 12s ago',next:'Inspect attempt',reason:'The attempt log was updated recently. A log update alone does not prove useful progress.',events:[['26m ago','Build began','Attempt identity joined to TaskQ #101.'],['9m ago','Checks began','After 14m build and 3m with missing stage evidence.'],['12s ago','Attempt log updated','Recent activity; useful progress is not established.']],segments:[['unknown',4,'History unavailable','Missing interval evidence in this attempt window.'],['work',14,'Build','Exclusive top-level build interval.'],['unknown',3,'Unobserved transition','No complete stage boundary evidence.'],['work',9,'Checks','Elapsed TaskQ checks interval; nested calls are not added.']]},
+  {id:'hermes-fra',name:'Hermes',brand:'',host:'FRA',state:'Activity observed',icon:'activity',tone:'',age:'Model calls in selected period',task:'Client · not a TaskQ attempt',headline:'Model activity observed',observed:'Langfuse client activity',next:'Inspect state',reason:'Model activity is available. Task assignment and elapsed-time allocation are not established for this client.',events:[['Selected period','Model activity observed','No TaskQ task or idle state is inferred.']],segments:null},
+  {id:'codex-desktop',name:'Codex',brand:'openai',host:'Desktop',state:'No recent data',icon:'cloud-off',tone:'dq-muted',age:'Last seen 26m ago',task:'Current work unknown',headline:'Current activity unavailable',observed:'Last observation 26m ago',next:'Connection evidence',reason:'Host observations expired. Current work, login and progress are unknown.',events:[['26m ago','Last session observation','No fresh runtime or host state; offline is not established.']],segments:null}
+ ];
+ function agentRows(detail=false){return agents.map(a=>detail?`<button class="dq-agent-row" data-agent-select="${a.id}" aria-pressed="false"><span class="dq-agent-who"><span class="dq-brand" aria-hidden="true">${a.brand?TaskqProjectBlocks.assets[a.brand]:mark('bot')}</span><span><span class="dq-agent-name">${a.name}</span><span class="dq-muted"> · ${a.host}</span><span class="dq-agent-task">${a.task}</span></span></span><span class="dq-agent-state"><span class="${a.tone}">${mark(a.icon)}${a.state}</span><small>${a.age}</small></span>${mark('chevron-right')}</button>`:`<button class="dq-person" data-agent-select="${a.id}" aria-label="${a.name} on ${a.host}: ${a.state}"><span class="dq-brand" aria-hidden="true">${a.brand?TaskqProjectBlocks.assets[a.brand]:mark('bot')}</span><span>${a.name}<span class="dq-small dq-muted"> · ${a.host}</span></span><span class="dq-status ${a.tone}">${a.state}</span></button>`).join('');}
+ let selectedAgent='claude-mac';
+ function selectAgent(id){
+  const a=agents.find(a=>a.id===id);if(!a)return;
+  selectedAgent=id;
+  for(const button of root.querySelectorAll('.dq-agent-row'))button.setAttribute('aria-pressed',String(button.dataset.agentSelect===id));
+  const totals={work:0,wait:0,unknown:0};for(const [kind,minutes] of a.segments||[])totals[kind]+=minutes;
+  const task=a.taskId?TaskqProjectBlocks.task(projects[0],projects[0].tasks.find(t=>t.n===a.taskId),true):'';
+  root.querySelector('[data-agent-inspector]').innerHTML=`<button class="dq-control dq-small dq-agent-back" data-agent-list-back>${mark('arrow-up')}Agents</button><div class="dq-agent-heading"><h2 class="${a.tone}">${a.headline}</h2><span class="dq-context">${mark('clock-3')}Last 30 minutes</span></div><p class="dq-agent-context">${a.name} · ${a.host} · ${a.observed}</p>${task}<div class="dq-agent-grid"><section aria-label="Elapsed time allocation"><h3>Where time went</h3>${a.segments?`<div class="dq-timebar" aria-label="${a.name}, last 30 minutes: work ${totals.work} minutes, waiting ${totals.wait} minutes, unknown ${totals.unknown} minutes">${a.segments.map(([kind,minutes,label],index)=>`<button data-agent-phase="${index}" data-kind="${kind}" style="flex-grow:${minutes}" aria-label="${label}: ${minutes} minutes" aria-pressed="false" data-tooltip="${label} · ${minutes}m"></button>`).join('')}</div><div class="dq-labels"><span>30m ago</span><span>Now</span></div><div class="dq-time-legend"><span><i class="dq-time-key" aria-hidden="true"></i>Work ${totals.work}m</span><span><i class="dq-time-key dq-wait" aria-hidden="true"></i>Wait ${totals.wait}m</span><span><i class="dq-time-key dq-unknown" aria-hidden="true"></i>Unknown ${totals.unknown}m</span></div><div class="dq-phase-detail" data-agent-phase-detail role="status" hidden></div>`:'<p>Time history unavailable</p><p>Current state does not establish the preceding 30 minutes.</p>'}</section><section><h3>${a.id==='claude-mac'?'Your answer is needed':a.id==='codex-mac'?'Inspect activity':a.id==='hermes-fra'?'No intervention requested':'Check the connection'}</h3><p>${a.reason}</p><button class="dq-next" ${a.id==='claude-mac'?'data-open-question':'data-agent-evidence'}>${mark(a.id==='codex-desktop'?'plug':'scan-search')}${a.next}</button></section></div><details class="dq-evidence" data-agent-events><summary>Events &amp; evidence</summary><ol class="dq-agent-events">${a.events.map(([time,event,detail])=>`<li><time>${time}</time><span>${event}<small>${detail}</small></span></li>`).join('')}</ol><dl><dt>Identity</dt><dd>Demo installation ${a.id} · ${a.taskId?'attempt demo-'+a.taskId:'no current attempt established'}</dd><dt>Source</dt><dd>${a.taskId?'TaskQ attempt lifecycle and exclusive interval projection':'Client activity or scoped connection observation'} · synthetic fixture</dd><dt>Time basis</dt><dd>One task attempt; current attempt elapsed and 30-minute window are separate scopes. ${a.segments?'Unknown time is retained. No sum across parallel agents or nested spans.':'No duration inferred from a current snapshot.'}</dd><dt>Still unknown</dt><dd>${a.id==='claude-mac'?'Next stage and final outcome after the owner answers.':a.id==='codex-desktop'?'Connection loss cause, current task, login and host state.':'Usage/cost coverage and unobserved historical intervals.'}</dd><dt>Operations</dt><dd>Inspection only. No retry, stop, login or task operation is sent.</dd></dl></details>`;
+  if(globalThis.lucide)lucide.createIcons({attrs:{width:18,height:18}});
+ }
+ root.addEventListener('click',event=>{
+  const selected=event.target.closest('[data-agent-select]');if(selected){show('agents');selectAgent(selected.dataset.agentSelect);root.querySelector('[data-agent-announcement]').textContent=`Selected ${agents.find(a=>a.id===selectedAgent).name} on ${agents.find(a=>a.id===selectedAgent).host}`;if(selected.closest('[data-page="overview"]'))root.querySelector(`.dq-agent-row[data-agent-select="${selectedAgent}"]`).focus({preventScroll:true});if(root.clientWidth<=800)requestAnimationFrame(()=>requestAnimationFrame(()=>{root.querySelector('[data-agent-list-back]').focus({preventScroll:true});root.querySelector('[data-agent-inspector]').scrollIntoView({block:'start'});}));saveAgentSelection();return;}
+  const phase=event.target.closest('[data-agent-phase]');if(phase){const a=agents.find(a=>a.id===selectedAgent);const segment=a.segments?.[Number(phase.dataset.agentPhase)];if(!segment)return;for(const button of root.querySelectorAll('[data-agent-phase]'))button.setAttribute('aria-pressed',String(button===phase));root.querySelector('[data-agent-phase-detail]').hidden=false;root.querySelector('[data-agent-phase-detail]').textContent=`${segment[2]} · ${segment[1]}m · ${segment[3]}`;return;}
+  if(event.target.closest('[data-agent-list-back]')){const row=root.querySelector(`.dq-agent-row[data-agent-select="${selectedAgent}"]`);row.focus({preventScroll:true});row.scrollIntoView({block:'center'});return;}
+  if(event.target.closest('[data-agent-evidence]')){const evidence=root.querySelector('[data-agent-events]');evidence.open=true;evidence.querySelector('summary').focus({preventScroll:true});evidence.scrollIntoView({block:'nearest'});}
+ });
+ function saveAgentSelection(){window.openai?.setWidgetState({modelContent:{agent:selectedAgent},privateContent:{...(window.openai?.widgetState?.privateContent||{}),agentStudy:{v:1,selected:selectedAgent}}})?.catch(()=>{});}
+ window.addEventListener('openai:set_globals',event=>{const saved=event.detail?.globals?.widgetState?.privateContent?.agentStudy;if(saved?.v===1&&agents.some(a=>a.id===saved.selected)&&saved.selected!==selectedAgent)selectAgent(saved.selected);});
+ for(const a of agents)if(a.segments)console.assert(a.segments.reduce((n,s)=>n+s[1],0)===30&&a.segments.every(s=>['work','wait','unknown'].includes(s[0])&&s[1]>0),'Each displayed lane partitions 30 minutes without overlap');
+ console.assert(agents.find(a=>a.id==='hermes-fra').segments===null&&agents.find(a=>a.id==='codex-desktop').segments===null,'Missing history cannot become idle or zero');
+
+ console.assert(agents.filter(a=>a.taskId).every(a=>projects[0].tasks.some(t=>t.n===a.taskId)),'Agent task references must resolve to the shared TaskQ fixture');
+
+  const reportLanes=agents.filter(a=>a.host==='Mac'&&a.segments);
+ const reportTime={work:0,wait:0,unknown:0};
+ for(const attempt of reportLanes)for(const [kind,minutes] of attempt.segments)reportTime[kind]+=minutes;
+ const timeNames={work:'Work',wait:'Wait',unknown:'Unknown'};
+ root.querySelector('[data-report-time-chart]').innerHTML=`<div class="dq-report-bar" aria-label="Example: 60 agent-minutes, work ${reportTime.work}, waiting ${reportTime.wait}, unknown ${reportTime.unknown}">${Object.entries(reportTime).map(([kind,minutes])=>`<button data-report-detail="${kind}" style="flex-grow:${minutes}" aria-label="${timeNames[kind]}: ${minutes} agent-minutes" data-tooltip="${timeNames[kind]} · ${minutes} agent-min"></button>`).join('')}</div><div class="dq-report-labels">${Object.entries(reportTime).map(([kind,minutes])=>`<button data-report-detail="${kind}"><i class="dq-report-key ${kind==='wait'?'dq-wait':kind==='unknown'?'dq-unknown':''}" aria-hidden="true"></i>${timeNames[kind]} ${minutes}m</button>`).join('')}</div>`;
+ let reportSelection=null,reportOrigin=null;
+ const reportKeys=['work','wait','unknown','coverage'];
+ function reportDetail(key){
+  if(!reportKeys.includes(key))return;
+  reportSelection=key;
+  root.querySelector('[data-report-inspector]').hidden=false;
+  root.querySelector('[data-report-detail-title]').textContent=timeNames[key]?timeNames[key]+' · '+reportTime[key]+' agent-min':'Sources & cost basis';
+  let body='';
+  if(timeNames[key]){
+   body=`<p class="dq-report-note">Example attempt intervals, not a live time report. ${key==='unknown'?'Unobserved intervals remain unknown.':'Explicit stage boundaries; parallel attempts are summed and nested spans counted once.'}</p><div class="dq-report-list">${reportLanes.map(a=>`<div class="dq-report-record"><span>${a.name} · TaskQ #${a.taskId} · attempt 1<small>${a.segments.filter(s=>s[0]===key).map(s=>s[2]+' '+s[1]+'m').join(' · ')}</small></span><button class="dq-control" data-agent-select="${a.id}">${a.segments.filter(s=>s[0]===key).reduce((n,s)=>n+s[1],0)}m ${mark('arrow-up-right')}</button></div>`).join('')}</div>`;
+  }else{
+   body='<dl class="dq-report-list dq-report-facts"><div class="dq-report-record"><dt>Actual expenses</dt><dd>Billing source not connected.<small>API charges, subscriptions and infrastructure remain separate.</small></dd></div><div class="dq-report-record"><dt>API estimates</dt><dd>TaskQ attempt accounting not connected.<small>Price version, currency, model and known/of required.</small></dd></div><div class="dq-report-record"><dt>Existing evidence</dt><dd>Owner-private accounting audit.<small>Operational counts and amounts are withheld. Require verified currency, price basis and field coverage before a cost claim.</small></dd></div><div class="dq-report-record"><dt>Time</dt><dd>Example: 39 work +8 wait +13 unknown =60 agent-min.<small>Two attempt windows, not 60 minutes of wall time. Requires qualified stage/transition projection.</small></dd></div><div class="dq-report-record"><dt>Savings</dt><dd>Unknown.<small>Repeat identity and paired outcome evidence not established.</small></dd></div></dl>';
+  }
+  root.querySelector('[data-report-detail-body]').innerHTML=body;
+  root.querySelector('[data-report-announcement]').textContent='Opened '+root.querySelector('[data-report-detail-title]').textContent;
+  if(globalThis.lucide)lucide.createIcons({attrs:{width:18,height:18}});
+ }
+ function saveReport(){window.openai?.setWidgetState({modelContent:{reportDetail:reportSelection},privateContent:{...(window.openai?.widgetState?.privateContent||{}),reportStudy:{v:2,detail:reportSelection}}})?.catch(()=>{});}
+ root.addEventListener('click',event=>{
+  const trigger=event.target.closest('[data-report-detail]');
+  if(trigger){reportOrigin=trigger;reportDetail(trigger.dataset.reportDetail);root.querySelector('[data-report-close]').focus({preventScroll:true});requestAnimationFrame(()=>requestAnimationFrame(()=>root.querySelector('[data-report-inspector]').scrollIntoView({block:'nearest'})));saveReport();return;}
+  if(event.target.closest('[data-report-close]')){root.querySelector('[data-report-inspector]').hidden=true;const origin=reportOrigin||root.querySelector(`[data-report-detail="${reportSelection}"]`);reportSelection=null;origin?.focus({preventScroll:true});origin?.scrollIntoView({block:'nearest'});saveReport();}
+ });
+ const savedReport=window.openai?.widgetState?.privateContent?.reportStudy;
+ if(savedReport?.v===2&&reportKeys.includes(savedReport.detail))reportDetail(savedReport.detail);
+ window.addEventListener('openai:set_globals',event=>{const next=event.detail?.globals?.widgetState?.privateContent?.reportStudy;if(next?.v!==2||next.detail===reportSelection)return;if(reportKeys.includes(next.detail))reportDetail(next.detail);else if(next.detail===null){reportSelection=null;root.querySelector('[data-report-inspector]').hidden=true;}});
+ console.assert(Object.values(reportTime).reduce((a,b)=>a+b,0)===60&&reportTime.wait===8&&reportTime.unknown===13,'Attempt time and unknown intervals must reconcile');
+ console.assert(!root.querySelector('[data-report-cost-total]')&&!root.querySelector('[data-report-repeat-cost]'),'No unsupported cost attribution or repeat subtotal');
+
+ root.querySelector('[data-project-summary]').innerHTML=projects.map(p=>TaskqProjectBlocks.summary(p)).join('');
+ root.querySelector('[data-task-projects]').innerHTML=projects.map(p=>TaskqProjectBlocks.summary(p)).join('');
+ root.querySelector('[data-agent-summary]').innerHTML=agentRows();
+ root.querySelector('[data-agent-detail]').innerHTML=agentRows(true);
+ const savedAgent=window.openai?.widgetState?.privateContent?.agentStudy;
+ selectAgent(savedAgent?.v===1&&agents.some(a=>a.id===savedAgent.selected)?savedAgent.selected:'claude-mac');
+ let overviewReturn=null;
+ function show(route){
+  if(!['overview','tasks','agents','reports','telemetry','pm','disk','queue','system','finding'].includes(route))return;
+  const previous=root.querySelector('[data-page]:not([hidden])');
+  const moveFocus=previous&&previous.dataset.page!==route&&previous.contains(document.activeElement);
+  if(previous?.dataset.page==='overview'&&moveFocus)overviewReturn=document.activeElement;
+  for(const page of root.querySelectorAll('[data-page]'))page.hidden=page.dataset.page!==route;
+  for(const button of root.querySelectorAll('.dq-nav [data-route]')){if(button.dataset.route===route)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
+  if(moveFocus)(root.querySelector(`.dq-nav [data-route="${route}"]`)||root.querySelector(`[data-page="${route}"] button`))?.focus({preventScroll:true});
+  if(previous&&previous.dataset.page!==route){
+   if(route==='overview'&&overviewReturn?.isConnected){
+    const target=overviewReturn;target.focus({preventScroll:true});
+    // Let the containing preview resize after the longer overview becomes visible.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(!target.closest('[data-page]').hidden)target.scrollIntoView({block:'center'});}));
+   }
+   else root.scrollIntoView({block:'start'});
+  }
+ }
+ function tasks(project='',state='',number=null){
+  show('tasks');const selected=projects.filter(p=>!project||p.id===project);
+  root.querySelector('[data-task-scope]').textContent=(project?selected[0]?.name||'All projects':'All projects')+(state?' · '+(TaskqProjectBlocks.states.find(s=>s[0]===state)?.[1]||state):'');
+  root.querySelector('[data-task-rows]').innerHTML=selected.map(p=>p.tasks.filter(t=>(!state||t.state===state)&&(!number||t.n===number)).map(t=>TaskqProjectBlocks.task(p,t,!project)).join('')).join('');
+  const hasQuestion=selected.some(p=>p.tasks.some(t=>t.n===103&&(!state||t.state===state)&&(!number||t.n===number)));
+  root.querySelector('[data-task-detail]').innerHTML=hasQuestion?TaskqAnswerCard.render('demo/taskq',question,{draft:'',bound:1,op:null,receipt:null},{answer:false,reason:'Preview only; no answer is sent'}):'';
+  const chosen=number?selected.flatMap(p=>p.tasks).find(t=>t.n===number):null;
+  if(chosen)root.querySelector('[data-task-detail]').insertAdjacentHTML('beforeend','<fieldset disabled aria-label="Task controls disabled in preview" style="border:0;padding:0;margin:12px 0">'+TaskqTaskControls.render({...chosen,controls:taskControlStates[chosen.state]||[]},{key:'demo'})+'</fieldset>');
+  root.querySelector('[data-task-notice]').textContent=chosen?'Preview only · no task operation is sent.':'';
+ }
+ function fixtureLink(url){const match=/example\.invalid\/(taskq|agentq)\/(\d+)/.exec(url);if(match)tasks(match[1],'',Number(match[2]));}
+ root.addEventListener('click',event=>{
+  const system=event.target.closest('[data-system]');if(system){const descriptions={'Services':'Service observations with their own source and observation time.','Checks & findings':'Current findings, observation gaps, manual checks and incident history remain distinct.','Versions & updates':'Installed, running, selected and latest versions, with updater state.','Integrations & enrollment':'Connection, consent, last accepted snapshot, gaps and revocation.','Resources & configuration':'Existing TaskQ resource controls and AgentQ review/apply, gated by actor capability.','Optimization & stage totals':'Paired experiment evidence and existing D21 stage aggregates retain their separate meaning.'};root.querySelector('[data-system-detail]').hidden=false;root.querySelector('[data-system-title]').textContent=system.dataset.system;root.querySelector('[data-system-description]').textContent=descriptions[system.dataset.system];return;}
+  if(event.target.closest('[data-scenario="warning"] button[data-view="disk"]')){event.stopPropagation();show('disk');}
+ },true);
+ root.addEventListener('click',event=>{
+  const route=event.target.closest('[data-route]');if(route){if(route.hasAttribute('data-all-tasks'))tasks();else show(route.dataset.route);return;}
+  if(event.target.closest('[data-open-question]')){tasks('taskq','ask',103);return;}
+  if(event.target.closest('[data-open-finding]')){show('finding');return;}
+  if(event.target.closest('[data-finding-request]')){show('pm');root.querySelector('[data-pm-review]').hidden=true;root.querySelector('#dq-pm-project').value='DashQ';root.querySelector('#dq-pm-request').value='Investigate the ServerQ disk-headroom finding for FRA (demo episode). Review its structured evidence and prepare a plan.';root.querySelector('#dq-pm-request').focus();return;}
+  if(event.target.closest('[data-open-disk]')){show('disk');return;}
+  if(event.target.closest('[data-open-ready]')){tasks('agentq','ready',201);return;}
+  const evidence=event.target.closest('[data-inspect-growth],[data-queue-evidence]');if(evidence){const detail=root.querySelector(evidence.hasAttribute('data-inspect-growth')?'[data-growth-evidence]':'[data-admission-evidence]');detail.open=true;detail.querySelector('summary').focus({preventScroll:true});detail.scrollIntoView({block:'nearest'});return;}
+  const growth=event.target.closest('[data-growth-index]');if(growth){const index=Number(growth.dataset.growthIndex);root.querySelector('[data-growth-readout]').textContent=`${index===6?'Now':(30-index*5)+'m ago'} · ${diskSamples[index]} GiB used`;return;}
+  if(TaskqProjectBlocks.handle(event,{project:id=>tasks(id),tasks:(id,state)=>tasks(id,state),open:url=>{if(url.includes('example.invalid'))fixtureLink(url);else window.open(url,'_blank','noopener');}}))return;
+  const answerLink=event.target.closest('.qac a');if(answerLink){event.preventDefault();fixtureLink(answerLink.href);}
+ });
+ root.querySelector('[data-pm-form]').addEventListener('input',()=>{root.querySelector('[data-pm-review]').hidden=true;});
+ root.querySelector('[data-pm-review-trigger]').addEventListener('click',event=>{event.preventDefault();const text=root.querySelector('#dq-pm-request').value.trim();if(!text){root.querySelector('#dq-pm-request').focus();return;}root.querySelector('[data-pm-review]').hidden=false;root.querySelector('[data-pm-summary]').textContent=root.querySelector('#dq-pm-project').value+' · '+text;});
+ tasks();show('overview');
+ console.assert(root.querySelectorAll('[data-project-summary] .tqp-project').length===2,'Overview must use the two shared TaskQ project blocks');
+ console.assert(root.querySelector('[data-task-detail] .qac')?.dataset.qacState==='read-only','Example answers must stay read-only');
+ console.assert(diskSamples.length===7&&diskSamples[6]-diskSamples[0]===50,'Disk growth and scheduled history must agree');
+ console.assert(root.querySelectorAll('[data-page="telemetry"]').length===1&&root.querySelectorAll('[data-page="queue"]').length===1,'Diagnostic destinations must be unique');
+ if(globalThis.lucide)lucide.createIcons({attrs:{width:18,height:18}});
+}
+</script>
+</section>

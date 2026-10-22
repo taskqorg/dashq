@@ -1,0 +1,14 @@
+{
+  "release": "v4.6.30",
+  "source": "https://github.com/taskqorg/taskq/releases/tag/v4.6.30",
+  "files": {
+    "answer-card.js": "c4b9c515bfb85d4daf1c96fd61642d5b495551d42b844d3c82447b9e8d049d49",
+    "task-controls-fixtures.json": "365233d01a50eb7ef515051a32ee8f6a8d09d41f6b72ba744d14aa4d25003ecb",
+    "project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+    "project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0",
+    "answer-card.css": "8a9bf9e08bd73795f02021809a008a210d0ac61569c0e365107c77e6cca38bcc",
+    "project-blocks.js": "cbc2498e57b16a1350c7819939f1a65563270f53424443e5e1ec98bfe5f618f7",
+    "task-controls.js": "5185c668dea13d217d3a4f95452d647b04b9b2f049c624530a96d8d7e25b1a80"
+  },
+  "verification": "Release SHA256SUMS checked for JS/CSS/fixtures; license fetched from same release"
+}
