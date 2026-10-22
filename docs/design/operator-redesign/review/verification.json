@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "owner_accepted_date": "2026-10-22",
+  "accepted_private_mock_sha256": "8a39efd555cc9317f8ca6454a4e7e6b0241370ccc8fb2c03cd8c893840188dfb",
+  "private_packet_manifest_sha256": "d209d6ac2729649f088440eaaebef63124bcafbae30090d61ab6d8cc38419a63",
+  "public_reference_sha256": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "checks": [
+    "supplier hashes checked by builder",
+    "composed scripts parse with Node",
+    "relative document links and JSON checked",
+    "public-safe content scan; no private packet or raw audit files staged",
+    "wide dark synthetic Telemetry rendering inspected"
+  ],
+  "scope": "documentation and planning package only; production Rust unchanged",
+  "limits": [
+    "full TaskQ workspace/style/native PM integration unqualified",
+    "no production action, deployment or enrollment proof",
+    "public reference is a privacy derivative, not the exact accepted private mock"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-22",
+  "status": "owner accepted design target and authorized PM planning/decomposition task",
+  "accepted_mock_sha256": "8a39efd555cc9317f8ca6454a4e7e6b0241370ccc8fb2c03cd8c893840188dfb",
+  "choices": [
+    "actual expenses and model-use estimates separately",
+    "events and metrics only; no diagnostic excerpts or session.line content",
+    "PM request from DashQ with native-session continuation"
+  ],
+  "boundaries": [
+    "planning and review only",
+    "implementation children held pending owner plan acceptance",
+    "no deployment, enrollment or service change authorized"
+  ],
+  "pm_task": "https://github.com/taskqorg/dashq/issues/177",
+  "private_packet_manifest_sha256": "d209d6ac2729649f088440eaaebef63124bcafbae30090d61ab6d8cc38419a63",
+  "public_reference": "synthetic derivative; private operational counts/amounts removed; not byte-identical to accepted input",
+  "public_reference_sha256": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee"
+}

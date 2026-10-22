@@ -1,1 +1,4 @@
 target/
+
+# Owner-private design inputs are never published.
+/docs/design/approved/
