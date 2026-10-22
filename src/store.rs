@@ -29,8 +29,9 @@ CREATE TABLE IF NOT EXISTS resource_grants(grant_id TEXT PRIMARY KEY, actor_id T
 CREATE TABLE IF NOT EXISTS resource_ops(op_id TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, actor_id TEXT NOT NULL, grant_id TEXT NOT NULL, submit TEXT NOT NULL, expires_at INTEGER NOT NULL, delivered INTEGER NOT NULL, cancel INTEGER NOT NULL, state TEXT NOT NULL, receipt TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS operations(operation TEXT PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, capability TEXT NOT NULL, workspace TEXT NOT NULL, actor TEXT NOT NULL, apply INTEGER NOT NULL, digest TEXT NOT NULL, expires_at INTEGER NOT NULL, op TEXT NOT NULL, queued INTEGER NOT NULL, delivered INTEGER NOT NULL, result TEXT, result_at INTEGER);
 CREATE INDEX IF NOT EXISTS operations_by_installation ON operations(installation, generation);
-CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, status TEXT, payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, status TEXT, payload TEXT NOT NULL, first_seq INTEGER, last_seq INTEGER, rows INTEGER);
 CREATE INDEX IF NOT EXISTS telemetry_by_installation ON telemetry(installation, workspace, observed);
+CREATE TABLE IF NOT EXISTS telemetry_pruned(installation TEXT NOT NULL, workspace TEXT NOT NULL, cause TEXT NOT NULL, blocks INTEGER NOT NULL, rows INTEGER NOT NULL, through_seq INTEGER, at INTEGER NOT NULL, PRIMARY KEY (installation, workspace, cause));
 CREATE TABLE IF NOT EXISTS resources(installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (installation, workspace));
 ";
 
@@ -43,7 +44,8 @@ pub struct Limits {
     pub reserve_bytes: u64,
     pub outbox_bytes: u64,
     pub history_secs: i64,
-    /// `taskq-telemetry/1` blocks (D11 #161): kept this long after receipt, and at most this many payload bytes.
+    /// `taskq-telemetry/1` blocks (D11 #161): kept this long after receipt, and at most this many payload bytes per
+    /// installation and workspace (#181).
     pub telemetry_secs: i64,
     pub telemetry_bytes: u64,
     pub receipt_secs: i64,
@@ -61,7 +63,8 @@ pub const LIMITS: Limits = Limits {
     outbox_bytes: 1 << 30,
     history_secs: 7 * 86400,
     telemetry_secs: 7 * 86400,
-    telemetry_bytes: 256 << 20,
+    // #181 A4: a measured TaskQ host sends 10.6 MiB of blocks a day, 75 MiB in 7 days; twice that per installation
+    telemetry_bytes: 160 << 20,
     receipt_secs: 8 * 86400,
     outbox_secs: 7 * 86400,
     future_secs: 300,
@@ -181,11 +184,48 @@ pub struct Row {
     pub scopes: String,
     pub board: Option<String>,
     pub capabilities: Option<String>,
-    /// Stored `taskq-telemetry/1` blocks of this installation and workspace, the newest receipt time and the
-    /// newest block's `status` JSON (`None`: not reported).
-    pub telemetry: (i64, Option<i64>, Option<String>),
+    /// Stored `taskq-telemetry/1` blocks of this installation and workspace and their coverage.
+    pub telemetry: Telemetry,
     /// Payload of the newest `taskq-resources/1` record of this installation and workspace and its generation.
     pub resources: Option<(i64, String)>,
+}
+
+/// Retained `taskq-telemetry/1` blocks of one installation and workspace (#181 A3): counts, the seq range from the
+/// oldest to the newest block in receipt order, receipt times, the newest block's sender `status` JSON (`None`: not
+/// reported), DashQ's own removals and the seq ranges no stored block covers.
+#[derive(Debug, Default, PartialEq)]
+pub struct Telemetry {
+    pub blocks: i64,
+    pub rows: i64,
+    pub bytes: i64,
+    pub first_seq: Option<i64>,
+    pub last_seq: Option<i64>,
+    pub oldest: Option<i64>,
+    pub newest: Option<i64>,
+    pub status: Option<String>,
+    /// `(cause, blocks, rows, highest seq)` removed by DashQ: `capacity` or `retention`.
+    pub pruned: Vec<(String, i64, i64, Option<i64>)>,
+    /// Inclusive seq ranges between stored blocks, at most [`HOLES`]; `holes_total` and `hole_rows` count all.
+    pub holes: Vec<(i64, i64)>,
+    pub holes_total: usize,
+    pub hole_rows: i64,
+    /// Blocks whose seq went back: the sender's store was replaced and counts again from 1.
+    pub restarts: i64,
+}
+
+/// One stored block read back by event ID (#181 A6).
+#[derive(Debug, PartialEq)]
+pub struct Block {
+    pub installation: String,
+    pub workspace: String,
+    pub generation: i64,
+    pub event_id: String,
+    pub observed: i64,
+    pub received: i64,
+    /// Receipt outcome `accepted`/`projected`; `None` once the receipt was pruned.
+    pub receipt: Option<String>,
+    pub payload: String,
+    pub coverage: Telemetry,
 }
 
 /// A pairing session as the approval page shows it.
@@ -396,6 +436,61 @@ fn expire(tx: &Transaction, now: i64) -> Result<(), Error> {
     Ok(())
 }
 
+/// Removes the telemetry blocks `ids` and adds them to the known loss of their installation and workspace by
+/// `cause` (`capacity` or `retention`), which outlives the blocks (#181 A4).
+fn drop_blocks(tx: &Transaction, ids: &[i64], cause: &str, now: i64) -> Result<(), Error> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let ids = serde_json::to_string(ids).unwrap_or_default();
+    tx.execute(
+        "INSERT INTO telemetry_pruned SELECT installation, workspace, ?2, COUNT(*), COALESCE(SUM(rows), 0), MAX(last_seq), ?3 FROM telemetry
+         WHERE id IN (SELECT value FROM json_each(?1)) GROUP BY installation, workspace
+         ON CONFLICT (installation, workspace, cause) DO UPDATE SET blocks = blocks + excluded.blocks, rows = rows + excluded.rows,
+           through_seq = MAX(COALESCE(through_seq, excluded.through_seq), COALESCE(excluded.through_seq, through_seq)), at = excluded.at",
+        params![ids, cause, now],
+    )?;
+    tx.execute("DELETE FROM telemetry WHERE id IN (SELECT value FROM json_each(?1))", [ids])?;
+    Ok(())
+}
+
+/// Seq ranges listed per installation; the rest are counted.
+const HOLES: usize = 32;
+
+/// What DashQ holds of one installation's telemetry and what it knows is missing (#181 A3).
+fn coverage(c: &Connection, installation: &str, workspace: &str) -> Result<Telemetry, Error> {
+    let mut t = Telemetry::default();
+    let mut q = c.prepare_cached("SELECT first_seq, last_seq, rows, length(payload), received, status FROM telemetry WHERE installation = ?1 AND workspace = ?2 ORDER BY id")?;
+    let mut rows = q.query(params![installation, workspace])?;
+    let mut prev: Option<i64> = None;
+    while let Some(r) = rows.next()? {
+        let (first, last): (Option<i64>, Option<i64>) = (r.get(0)?, r.get(1)?);
+        t.blocks += 1;
+        t.rows += r.get::<_, Option<i64>>(2)?.unwrap_or(0);
+        t.bytes += r.get::<_, i64>(3)?;
+        t.oldest.get_or_insert(r.get(4)?);
+        t.newest = r.get(4)?;
+        t.status = r.get(5)?;
+        t.first_seq = t.first_seq.or(first);
+        t.last_seq = last.or(t.last_seq);
+        // receipt order: a seq that does not continue the previous block is a hole, one that goes back a restart
+        match (prev, first) {
+            (Some(p), Some(f)) if f > p + 1 => {
+                t.hole_rows += f - p - 1;
+                t.holes.push((p + 1, f - 1));
+            }
+            (Some(p), Some(f)) if f <= p => t.restarts += 1,
+            _ => {}
+        }
+        prev = last.or(prev);
+    }
+    t.holes_total = t.holes.len();
+    t.holes.truncate(HOLES);
+    let mut q = c.prepare_cached("SELECT cause, blocks, rows, through_seq FROM telemetry_pruned WHERE installation = ?1 AND workspace = ?2 ORDER BY cause")?;
+    t.pruned = q.query_map(params![installation, workspace], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
+    Ok(t)
+}
+
 fn credential(c: &Connection, verifier: &[u8]) -> Result<Option<Credential>, Error> {
     Ok(c.query_row(
         "SELECT installation, generation, workspace, account, scopes, board, capabilities,
@@ -446,6 +541,18 @@ impl Store {
         if c.query_row("SELECT COUNT(*) FROM pragma_table_info('resource_grants') WHERE name = 'project_limits'", [], |r| r.get::<_, i64>(0))? == 0 {
             c.execute_batch("ALTER TABLE resource_grants ADD COLUMN project_limits INTEGER NOT NULL DEFAULT 0")?;
         }
+        // additive (#181): block coverage columns; blocks stored before them, or by a rolled-back binary that never
+        // writes them, are filled from their own payload, so every stored block stays readable
+        for col in ["first_seq", "last_seq", "rows"] {
+            if c.query_row(&format!("SELECT COUNT(*) FROM pragma_table_info('telemetry') WHERE name = '{col}'"), [], |r| r.get::<_, i64>(0))? == 0 {
+                c.execute_batch(&format!("ALTER TABLE telemetry ADD COLUMN {col} INTEGER"))?;
+            }
+        }
+        c.execute_batch(
+            "UPDATE telemetry SET first_seq = COALESCE(json_extract(payload, '$.first.seq'), json_extract(payload, '$.first')),
+               last_seq = COALESCE(json_extract(payload, '$.last.seq'), json_extract(payload, '$.last')), rows = json_extract(payload, '$.rows')
+             WHERE rows IS NULL AND json_valid(payload)",
+        )?;
         Ok(Store { conn: Mutex::new(c), waiting: AtomicUsize::new(0), limits })
     }
 
@@ -900,11 +1007,17 @@ impl Store {
                     None if e.kind == Kind::Telemetry && e.payload.len() as u64 > l.telemetry_bytes => Outcome::Rejected("payload"),
                     None => {
                         if e.kind == Kind::Telemetry {
-                            let status = serde_json::from_str::<serde_json::Value>(e.payload).ok().and_then(|p| p.get("status").map(|x| x.to_string()));
-                            tx.execute("INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, status, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                                params![g.installation, g.workspace, g.generation, e.id, e.observed, now, status, e.payload])?;
-                            // ponytail: one global byte cap, oldest blocks leave first; per-installation shares if one host crowds out the rest
-                            tx.execute("DELETE FROM telemetry WHERE id IN (SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry) WHERE total > ?1)", [l.telemetry_bytes as i64])?;
+                            let p = serde_json::from_str::<serde_json::Value>(e.payload).unwrap_or_default();
+                            let seq = |k: &str| p[k]["seq"].as_i64().or(p[k].as_i64());
+                            tx.execute("INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, status, payload, first_seq, last_seq, rows) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                params![g.installation, g.workspace, g.generation, e.id, e.observed, now, p.get("status").map(|x| x.to_string()), e.payload, seq("first"), seq("last"), p["rows"].as_i64()])?;
+                            // one budget per installation and workspace: a busy host never evicts another's blocks;
+                            // the oldest leave first and their loss stays counted
+                            let over: Vec<i64> = tx
+                                .prepare("SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry WHERE installation = ?1 AND workspace = ?2) WHERE total > ?3")?
+                                .query_map(params![g.installation, g.workspace, l.telemetry_bytes as i64], |r| r.get(0))?
+                                .collect::<Result<_, _>>()?;
+                            drop_blocks(tx, &over, "capacity", now)?;
                         } else if e.kind == Kind::Resources {
                             // the newest projection replaces the last one whole: a project taskq stops listing leaves;
                             // a new generation's first record always replaces the old generation's
@@ -951,6 +1064,36 @@ impl Store {
         Ok(o.map(|(s, o)| (s, outcome(&o))))
     }
 
+    /// Stored telemetry blocks named `event_id` among the `(installation, workspace)` pairs the caller may read, and
+    /// the receipt times of accepted ones that are no longer stored (#181 A6).
+    pub fn telemetry_block(&self, event_id: &str, pairs: &[(String, String)]) -> Result<(Vec<Block>, Vec<(String, String, i64)>), Error> {
+        let c = self.lock()?;
+        let mut q = c.prepare(
+            "SELECT t.installation, t.workspace, t.generation, t.event_id, t.observed, t.received, r.outcome, t.payload FROM telemetry t
+             LEFT JOIN receipts r ON r.installation = t.installation AND r.generation = t.generation AND r.event_id = t.event_id
+             WHERE t.event_id = ?1 ORDER BY t.id",
+        )?;
+        let mut blocks: Vec<Block> = q
+            .query_map([event_id], |r| {
+                Ok(Block { installation: r.get(0)?, workspace: r.get(1)?, generation: r.get(2)?, event_id: r.get(3)?, observed: r.get(4)?, received: r.get(5)?, receipt: r.get(6)?, payload: r.get(7)?, coverage: Telemetry::default() })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        blocks.retain(|b| pairs.iter().any(|(i, w)| *i == b.installation && *w == b.workspace));
+        for b in &mut blocks {
+            b.coverage = coverage(&c, &b.installation, &b.workspace)?;
+        }
+        let mut q = c.prepare(
+            "SELECT r.installation, g.workspace, r.at FROM receipts r JOIN grants g ON g.installation = r.installation AND g.generation = r.generation
+             WHERE r.event_id = ?1 AND r.schema = 'taskq-telemetry/1'
+               AND NOT EXISTS (SELECT 1 FROM telemetry t WHERE t.installation = r.installation AND t.generation = r.generation AND t.event_id = r.event_id)",
+        )?;
+        let gone = q
+            .query_map([event_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?
+            .filter(|x| x.as_ref().map_or(true, |(i, w, _)| pairs.iter().any(|p| p.0 == *i && p.1 == *w)))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((blocks, gone))
+    }
+
     /// The newest current snapshot of an installation in any workspace.
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
@@ -979,9 +1122,6 @@ impl Store {
                    (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
                    (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
                    (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
-                   (SELECT COUNT(*) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
-                   (SELECT MAX(received) FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace),
-                   (SELECT status FROM telemetry t WHERE t.installation = g.installation AND t.workspace = g.workspace ORDER BY observed DESC, id DESC LIMIT 1),
                    (SELECT generation FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace),
                    (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace)
                  FROM grants g JOIN installations i ON i.id = g.installation
@@ -990,7 +1130,7 @@ impl Store {
                    AND (?1 IS NULL OR EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?1 AND (m.role = 'admin' OR g.account = ?1)))
                  ORDER BY i.label, i.id, g.workspace",
             )?;
-            let rows: Vec<Row> = q
+            let mut rows: Vec<Row> = q
                 .query_map([subject], |r| {
                     let (revoked, active): (bool, bool) = (r.get(6)?, r.get(7)?);
                     let snapshot = match r.get::<_, Option<String>>(8)? {
@@ -1012,13 +1152,16 @@ impl Store {
                         scopes: r.get(17)?,
                         board: r.get(18)?,
                         capabilities: r.get(19)?,
-                        telemetry: (r.get(20)?, r.get(21)?, r.get(22)?),
-                        resources: r.get::<_, Option<i64>>(23)?.zip(r.get::<_, Option<String>>(24)?),
+                        telemetry: Telemetry::default(),
+                        resources: r.get::<_, Option<i64>>(20)?.zip(r.get::<_, Option<String>>(21)?),
                     };
                     Ok(row)
                 })?
                 .collect::<Result<_, _>>()?;
             drop(q);
+            for row in &mut rows {
+                row.telemetry = coverage(tx, &row.installation, &row.workspace)?;
+            }
             for row in &rows {
                 if let Some(s) = row.snapshot.as_ref().filter(|s| renders(&row.product, s)) {
                     tx.execute(
@@ -1135,7 +1278,8 @@ impl Store {
             tx.execute("DELETE FROM outbox WHERE queued < ?1", [cut])?;
             tx.execute("DELETE FROM export_gaps WHERE at < ?1", [now - l.history_secs])?;
             tx.execute("DELETE FROM history WHERE observed < ?1", [now - l.history_secs])?;
-            tx.execute("DELETE FROM telemetry WHERE received < ?1", [now - l.telemetry_secs])?;
+            let old: Vec<i64> = tx.prepare("SELECT id FROM telemetry WHERE received < ?1")?.query_map([now - l.telemetry_secs], |r| r.get(0))?.collect::<Result<_, _>>()?;
+            drop_blocks(tx, &old, "retention", now)?;
             tx.execute("DELETE FROM receipts WHERE at < ?1", [now - l.receipt_secs])?;
             // resolved operations (a result, revoked generation, or expired never delivered) keep the newest per installation; unresolved stay
             tx.execute(
@@ -1357,6 +1501,91 @@ mod tests {
         assert_eq!(ids(&s), ["t3", "t4"], "at the retention edge nothing older leaves early");
         s.prune(NOW + 86401).unwrap();
         assert_eq!(ids(&s), ["t4"]);
+    }
+
+    /// A store-level block over seqs `first..=last` (the store reads only the cursors and `rows`).
+    fn tblock(first: i64, last: i64) -> String {
+        format!(r#"{{"schema":1,"first":{{"seq":{first},"id":"a{first}"}},"last":{{"seq":{last},"id":"a{last}"}},"rows":{},"bytes":1,"gzip":"{}"}}"#, last - first + 1, "x".repeat(40))
+    }
+
+    fn tel(id: &str, payload: &str) -> Event<'static> {
+        Event { id: Box::leak(id.to_string().into_boxed_str()), schema: "taskq-telemetry/1", observed: NOW, kind: Kind::Telemetry, payload: Box::leak(payload.to_string().into_boxed_str()) }
+    }
+
+    fn cover(s: &Store, inst: &str) -> Telemetry {
+        s.project(Scope::All, |_, _| true).unwrap().into_iter().find(|r| r.installation == inst).unwrap().telemetry
+    }
+
+    // Chain: two hosts send -> one exceeds its budget -> eviction -> retention prune -> projection.
+    // Risk (#181 A4): a busy host evicting another's blocks, or an eviction that leaves no trace of the lost rows.
+    #[test]
+    fn telemetry_budget_is_per_installation_and_loss_stays_known() {
+        let one = tblock(1, 1).len() as u64;
+        let s = Store::open(&dir("tbudget").join("dashq.db"), Limits { telemetry_bytes: 2 * one + 10, telemetry_secs: 86400, ..LIMITS }).unwrap();
+        let (a, b) = (Installation { id: "tq-a", product: "taskq", runtime: "native", label: "a" }, Installation { id: "tq-b", product: "taskq", runtime: "native", label: "b" });
+        s.grant(&a, "w", "x", r#"["taskq-telemetry/1"]"#, b"va", NOW).unwrap();
+        s.grant(&b, "w", "x", r#"["taskq-telemetry/1"]"#, b"vb", NOW).unwrap();
+        s.accept(b"vb", &[tel("b1", &tblock(1, 4))], NOW).unwrap();
+        for (i, (f, l)) in [(1, 3), (4, 6), (7, 9), (12, 12)].iter().enumerate() {
+            assert_eq!(s.accept(b"va", &[tel(&format!("a{i}"), &tblock(*f, *l))], NOW).unwrap(), [Outcome::Accepted]);
+        }
+        let t = cover(&s, "tq-a");
+        assert_eq!((t.blocks, t.rows, t.first_seq, t.last_seq), (2, 4, Some(7), Some(12)), "the two newest blocks fit the budget");
+        assert_eq!(t.pruned, [("capacity".to_string(), 2, 6, Some(6))], "evicted rows stay counted with their highest seq");
+        assert_eq!((t.holes.clone(), t.hole_rows, t.holes_total), (vec![(10, 11)], 2, 1), "rows 10–11 never arrived");
+        assert_eq!((cover(&s, "tq-b").blocks, cover(&s, "tq-b").pruned.len()), (1, 0), "the other host keeps its block");
+        s.prune(NOW + 86401).unwrap();
+        let t = cover(&s, "tq-a");
+        assert_eq!((t.blocks, t.pruned.clone()), (0, vec![("capacity".to_string(), 2, 6, Some(6)), ("retention".to_string(), 2, 4, Some(12))]));
+        // a full store acknowledges nothing: the sender keeps its backlog, so no loss is invented
+        let full = Store::open(&dir("tfull").join("dashq.db"), Limits { store_bytes: 1 << 20, reserve_bytes: 1 << 20, ..LIMITS }).unwrap();
+        full.grant(&a, "w", "x", r#"["taskq-telemetry/1"]"#, b"va", NOW).unwrap();
+        assert_eq!(full.accept(b"va", &[tel("f1", &tblock(1, 1))], NOW).unwrap(), [Outcome::Rejected("store_full")]);
+        assert_eq!(full.receipt(b"va", "f1").unwrap(), None);
+        assert_eq!(cover(&full, "tq-a"), Telemetry::default());
+    }
+
+    // Chain: blocks stored by an older format or a rolled-back binary -> reopen; backup -> more blocks -> restore.
+    // Risk (#181 A5): a migration or rollback leaving blocks unreadable, or a restore hiding the rows it lost.
+    #[test]
+    fn telemetry_survives_migration_rollback_and_restore() {
+        let d = dir("tmigrate");
+        let p = d.join("dashq.db");
+        {
+            let s = Store::open(&p, LIMITS).unwrap();
+            let tq = Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" };
+            s.grant(&tq, "w", "x", r#"["taskq-telemetry/1"]"#, b"v1", NOW).unwrap();
+        }
+        // the #161 table without coverage columns, holding a numeric-cursor block
+        let c = Connection::open(&p).unwrap();
+        c.execute_batch(&format!(
+            "DROP TABLE telemetry; CREATE TABLE telemetry(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, status TEXT, payload TEXT NOT NULL);
+             INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, payload) VALUES ('tq-1', 'w', 1, 'old', {NOW}, {NOW}, '{{\"schema\":1,\"first\":1,\"last\":2,\"rows\":2}}');"
+        ))
+        .unwrap();
+        drop(c);
+        let s = Store::open(&p, LIMITS).unwrap();
+        s.accept(b"v1", &[tel("t2", &tblock(3, 5))], NOW).unwrap();
+        drop(s);
+        // a rolled-back binary writes the #161 columns only; the next open fills the rest from the payload
+        Connection::open(&p).unwrap().execute(&format!("INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, status, payload) VALUES ('tq-1', 'w', 1, 'rb', {NOW}, {NOW}, NULL, ?1)"), [tblock(6, 6)]).unwrap();
+        let s = Store::open(&p, LIMITS).unwrap();
+        let t = cover(&s, "tq-1");
+        assert_eq!((t.blocks, t.rows, t.first_seq, t.last_seq, t.hole_rows), (3, 6, Some(1), Some(6), 0), "{t:?}");
+        let pairs = [("tq-1".to_string(), "w".to_string())];
+        assert_eq!(s.telemetry_block("old", &pairs).unwrap().0.len(), 1);
+        // restore from a backup taken before t3: the sender's cursor is past it, so its rows read as not received
+        s.backup(&d.join("backup.db")).unwrap();
+        s.accept(b"v1", &[tel("t3", &tblock(7, 9))], NOW).unwrap();
+        drop(s);
+        let r = Store::restore(&d.join("backup.db"), &d.join("restored.db"), LIMITS).unwrap();
+        r.accept(b"v1", &[tel("t4", &tblock(10, 10))], NOW).unwrap();
+        let t = cover(&r, "tq-1");
+        assert_eq!((t.holes.clone(), t.hole_rows, t.last_seq), (vec![(7, 9)], 3, Some(10)));
+        assert!(r.telemetry_block("t3", &pairs).unwrap().0.is_empty());
+        // a replaced sender store counts from 1 again: a restart, not a hole
+        r.accept(b"v1", &[tel("t5", &tblock(1, 2))], NOW).unwrap();
+        assert_eq!((cover(&r, "tq-1").restarts, cover(&r, "tq-1").hole_rows), (1, 3));
     }
 
     #[test]

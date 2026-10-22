@@ -30,7 +30,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -58,7 +58,7 @@ struct Config {
     agentq_configure: bool,
     /// `taskq_logs` `{host: absolute taskq.log path}`: attempt stage records for Agent work (D21); empty: not configured.
     taskq_logs: Vec<(String, String)>,
-    /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks (D11 #161).
+    /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
     limits: store::Limits,
 }
 
@@ -275,6 +275,10 @@ impl App {
         }));
         profile::step("build", t0);
         let mut doc = doc;
+        // the same block by event id for the page's caller and `dashq report` alike, inside the projected rows' scope (#181 A6)
+        if let Some(id) = doc["filters"]["block"].as_str().map(String::from) {
+            doc["telemetry_block"] = enroll::telemetry_block(&self.enroll, projection.as_ref().map_or(&Value::Null, |p| &p["rows"]), &id);
+        }
         // the page offers review/apply only where the route is on (D16)
         doc["controls"] = json!({"agentq_configure": c.agentq_configure});
         // outbox counts span every workspace: host-local readers only (D11)
@@ -283,6 +287,12 @@ impl App {
         }
         doc
     }
+}
+
+/// `dashq report --k=v..` (D2): the period and filters of a `/data` request with the same parameters.
+fn report_query(args: &[&str]) -> Result<(u64, Value), String> {
+    let q: Vec<&str> = args.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).ok_or(USAGE)).collect::<Result<_, _>>()?;
+    data::query(&q.join("&"))
 }
 
 fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) {
@@ -635,8 +645,7 @@ fn main() {
         ["serve"] => serve(&t, false),
         ["service", "run"] => serve(&t, true),
         ["report", rest @ ..] => {
-            let q: Vec<String> = rest.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).map(String::from).unwrap_or_else(|| t.die(USAGE))).collect();
-            let (period, filters) = data::query(&q.join("&")).unwrap_or_else(|e| t.die(&e));
+            let (period, filters) = report_query(rest).unwrap_or_else(|e| t.die(&e));
             let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
             // the host administrator's local report sees every installation (D11), like a loopback page request
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -837,6 +846,33 @@ mod tests {
         assert_eq!(route(&app, "GET", "/app.js", "", None).0, "200 OK");
     }
 
+    // Chain: stored block -> `/data?block=` and `dashq report --block=` -> one document builder.
+    // Risk (#181 A6): the page's caller and the host report reading different blocks, receipts or coverage, or a
+    // caller without a subject reading a block by guessing its id.
+    #[test]
+    fn telemetry_block_reads_back_alike_through_data_and_report() {
+        let d = std::env::temp_dir().join(format!("dashq-block-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        enroll::Enroll::admin(&d, "ws", "github|1").unwrap();
+        let e = enroll::Enroll::open(&d, "dash.example.com");
+        let now = source::now() as i64;
+        let s = e.as_ref().unwrap().store();
+        s.grant(&store::Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" }, "ws", "github|1", r#"["taskq-telemetry/1"]"#, b"v1", now).unwrap();
+        let payload = r#"{"schema":1,"first":{"seq":1,"id":"a"},"last":{"seq":2,"id":"b"},"rows":2,"bytes":1,"gzip":"x"}"#;
+        s.accept(b"v1", &[store::Event { id: "t-1", schema: "taskq-telemetry/1", observed: now, kind: store::Kind::Telemetry, payload }], now).unwrap();
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let (_, _, body) = route(&app, "GET", "/data", "block=t-1", Some(store::Scope::All));
+        let data: Value = serde_json::from_slice(&body).unwrap();
+        let (period, filters) = report_query(&["--block=t-1"]).unwrap();
+        let report = app.doc(period, filters, Some(store::Scope::All));
+        let b = &data["telemetry_block"];
+        assert_eq!(b, &report["telemetry_block"]);
+        assert_eq!((&b["state"], &b["blocks"][0]["payload"], &b["blocks"][0]["received_at"], &b["blocks"][0]["coverage"]["retained"]["last_seq"]), (&json!("ok"), &serde_json::from_str::<Value>(payload).unwrap(), &json!(now), &json!(2)));
+        assert_eq!(app.doc(1800, json!({"block": "t-1"}), None)["telemetry_block"]["blocks"], json!([]), "no subject: no block");
+        assert!(report_query(&["--block=a b"]).is_err() && report_query(&["block=t-1"]).is_err());
+    }
+
     fn load_config_fixture() -> Config {
         Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
@@ -895,7 +931,7 @@ mod tests {
         let e = load_config(&p).err().unwrap();
         assert_eq!(e, "config: bad key langfuse.secret_key");
         // #161 A3: telemetry bounds come from config, within limits, and name the bad key
-        assert_eq!((c.limits.telemetry_secs, c.limits.telemetry_bytes), (7 * 86400, 256 << 20));
+        assert_eq!((c.limits.telemetry_secs, c.limits.telemetry_bytes), (7 * 86400, 160 << 20));
         let mut t = good.clone();
         t["telemetry"] = json!({"retention_days": 30, "max_mib": 64});
         write(&t);

@@ -599,10 +599,19 @@ pub const TELEMETRY: &str = "taskq-telemetry/1";
 const TELEMETRY_GZIP: usize = 512 << 10;
 const TELEMETRY_BYTES: u64 = MAX_BODY as u64;
 
+/// A block cursor: TaskQ sends `{seq, id}` (taskq v4.6.30 `telemetry_sync`); a bare seq number stays accepted.
+pub fn cursor(v: &Value) -> Option<(u64, Option<&str>)> {
+    match v {
+        Value::Object(o) if o.len() == 2 => Some((o.get("seq")?.as_u64()?, Some(o.get("id")?.as_str().filter(|x| id(x, 128))?))),
+        _ => Some((v.as_u64()?, None)),
+    }
+}
+
 /// A `taskq-telemetry/1` payload `{schema: 1, first, last, rows, bytes, gzip, status?}`: `gzip` is the base64 gzip of
 /// `bytes` bytes holding `rows` JSON lines of `taskq profile export`, each one metadata (C4) like any snapshot, so
-/// nothing outside the allowlist hides inside the block. `status` carries the sender's `connection.telemetry`
-/// counters `backlog_rows`, `backlog_bytes`, `gap_rows` (numbers or null).
+/// nothing outside the allowlist hides inside the block. `first`/`last` are [`cursor`]s; a `{seq, id}` cursor must
+/// name the first and last line, whose seqs rise. `status` carries the sender's `connection.telemetry` counters
+/// `backlog_rows`, `backlog_bytes`, `gap_rows` (numbers or null).
 fn telemetry(p: &Value) -> bool {
     use std::io::Read;
     let Some(o) = p.as_object() else { return false };
@@ -610,8 +619,9 @@ fn telemetry(p: &Value) -> bool {
     let status = o.get("status").is_none_or(|s| {
         s.as_object().is_some_and(|s| s.iter().all(|(k, v)| ["backlog_rows", "backlog_bytes", "gap_rows"].contains(&k.as_str()) && (v.is_null() || v.is_u64())))
     });
-    let (Some(first), Some(last), Some(rows), Some(bytes), Some(gzip)) = (n("first"), n("last"), n("rows"), n("bytes"), o.get("gzip").and_then(Value::as_str)) else { return false };
-    if p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first > last || rows == 0 || bytes > TELEMETRY_BYTES {
+    let (Some(first), Some(last)) = (cursor(&p["first"]), cursor(&p["last"])) else { return false };
+    let (Some(rows), Some(bytes), Some(gzip)) = (n("rows"), n("bytes"), o.get("gzip").and_then(Value::as_str)) else { return false };
+    if p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first.0 > last.0 || rows == 0 || bytes > TELEMETRY_BYTES {
         return false;
     }
     let Some(z) = unbase64(gzip).filter(|z| z.len() <= TELEMETRY_GZIP) else { return false };
@@ -620,8 +630,14 @@ fn telemetry(p: &Value) -> bool {
         return false;
     }
     let Ok(plain) = String::from_utf8(plain) else { return false };
-    let lines: Vec<&str> = plain.lines().collect();
-    lines.len() as u64 == rows && lines.iter().all(|l| serde_json::from_str::<Value>(l).is_ok_and(|v| v.is_object() && metadata(&v, 0)))
+    let Some(lines) = plain.lines().map(|l| serde_json::from_str::<Value>(l).ok().filter(|v| v.is_object() && metadata(v, 0))).collect::<Option<Vec<Value>>>() else { return false };
+    if lines.len() as u64 != rows {
+        return false;
+    }
+    // coverage is read from the cursors (D11): an identified cursor must be the block's own first and last row
+    let named = |c: (u64, Option<&str>), l: &Value| c.1.is_none_or(|i| l["seq"] == c.0 && l["id"] == i);
+    named(first, &lines[0]) && named(last, &lines[lines.len() - 1])
+        && (first.1.is_none() || lines.windows(2).all(|w| w[0]["seq"].as_u64().zip(w[1]["seq"].as_u64()).is_some_and(|(a, b)| a < b)))
 }
 
 /// TaskQ's allowlisted resource projection (taskq shared-resource-controls.md, Project overlay: Enrollment record).
@@ -829,18 +845,10 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             } else {
                 json!({"gap_events": 0, "state": if r.product == "agentq" { "unknown" } else { "not_applicable" }, "reason": if r.product == "agentq" { "export forwarding not qualified" } else { "no Langfuse export required" }})
             };
-            // sync state from taskq's own status counters, carried by its newest block (A4); dashq never infers them
-            let (blocks, synced, status) = &r.telemetry;
-            let status = status.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null);
-            let count = |k: &str| status.get(k).cloned().unwrap_or(Value::Null);
             let telemetry = if !serde_json::from_str::<Vec<String>>(&r.scopes).unwrap_or_default().iter().any(|s| s == TELEMETRY) {
                 json!({"state": "off", "reason": "telemetry not in grant"})
-            } else if *blocks == 0 {
-                json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet"})
             } else {
-                let missing = ["backlog_rows", "backlog_bytes", "gap_rows"].iter().any(|k| count(k).is_null());
-                json!({"state": "ok", "blocks": blocks, "last_synced": synced, "backlog_rows": count("backlog_rows"), "backlog_bytes": count("backlog_bytes"), "gap_rows": count("gap_rows"),
-                    "reason": if missing { json!("status not reported by taskq") } else { Value::Null }})
+                telemetry_json(&r.telemetry)
             };
             json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry,
                 "project_limits": if r.product == "taskq" { project_limits(&r, now) } else { Value::Null },
@@ -852,6 +860,61 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
         })
         .collect();
     Some(json!({"source": src("ok", None), "rows": rows}))
+}
+
+/// An installation row's `telemetry` (D11 #161, #181 A3): DashQ's retained range and its known loss, and the
+/// sender's own counters from its newest block. DashQ never infers the sender's counters; missing ones are unknown.
+fn telemetry_json(t: &store::Telemetry) -> Value {
+    if t.blocks == 0 && t.pruned.is_empty() {
+        return json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet",
+            "sender": {"state": "unknown", "reason": "no telemetry block yet"}, "retained": null, "pruned": [], "holes": [], "holes_total": 0, "hole_rows": 0, "restarts": 0});
+    }
+    let status = t.status.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null);
+    let count = |k: &str| status.get(k).cloned().unwrap_or(Value::Null);
+    let missing = ["backlog_rows", "backlog_bytes", "gap_rows"].iter().any(|k| count(k).is_null());
+    let why = missing.then_some("status not reported by taskq");
+    let sender = if status.is_null() {
+        json!({"state": "unknown", "reason": "status not reported by taskq"})
+    } else {
+        json!({"state": if missing { "unknown" } else { "ok" }, "backlog_rows": count("backlog_rows"), "backlog_bytes": count("backlog_bytes"), "gap_rows": count("gap_rows"), "reason": why})
+    };
+    let retained = (t.blocks > 0).then(|| json!({"blocks": t.blocks, "rows": t.rows, "bytes": t.bytes, "first_seq": t.first_seq, "last_seq": t.last_seq, "oldest_received": t.oldest, "newest_received": t.newest}));
+    json!({"state": if t.blocks > 0 { "ok" } else { "unknown" }, "blocks": t.blocks, "last_synced": t.newest,
+        "backlog_rows": count("backlog_rows"), "backlog_bytes": count("backlog_bytes"), "gap_rows": count("gap_rows"),
+        "reason": if t.blocks == 0 { json!("every stored block was pruned") } else { json!(why) }, "sender": sender, "retained": retained,
+        "pruned": t.pruned.iter().map(|(cause, blocks, rows, through)| json!({"cause": cause, "blocks": blocks, "rows": rows, "through_seq": through})).collect::<Vec<_>>(),
+        "holes": t.holes.iter().map(|(a, b)| json!({"from_seq": a, "to_seq": b, "rows": b - a + 1})).collect::<Vec<_>>(),
+        "holes_total": t.holes_total, "hole_rows": t.hole_rows, "restarts": t.restarts})
+}
+
+/// `/data.telemetry_block` for `block=ID` (#181 A6): the stored block named `id` among the projected installation
+/// rows, byte for byte as accepted, with its receipt and its installation's coverage; an accepted block no longer
+/// stored, or none at all, is `unknown` with the reason.
+pub fn telemetry_block(e: &Result<Enroll, String>, rows: &Value, id: &str) -> Value {
+    let unknown = |why: &str| json!({"event_id": id, "state": "unknown", "reason": why, "blocks": []});
+    let Ok(e) = e else { return unknown("enrollment not set up") };
+    let pairs: Vec<(String, String)> = rows.as_array().into_iter().flatten().filter_map(|r| Some((r["installation"].as_str()?.into(), r["workspace"].as_str()?.into()))).collect();
+    let (blocks, gone) = match e.store.telemetry_block(id, &pairs) {
+        Ok(x) => x,
+        Err(_) => return unknown("read failed (store unavailable)"),
+    };
+    if blocks.is_empty() {
+        return match gone.first() {
+            Some((_, _, at)) => json!({"event_id": id, "state": "unknown", "reason": "accepted, no longer retained", "received_at": at, "blocks": []}),
+            None => unknown("no stored block with this event id"),
+        };
+    }
+    let blocks: Vec<Value> = blocks
+        .iter()
+        .map(|b| {
+            let payload = serde_json::from_str::<Value>(&b.payload).unwrap_or(Value::Null);
+            json!({"installation": b.installation, "workspace": b.workspace, "generation": b.generation, "event_id": b.event_id, "schema": TELEMETRY,
+                "observed_at": b.observed, "received_at": b.received, "receipt": b.receipt.as_deref().unwrap_or("unknown"),
+                "first": payload["first"], "last": payload["last"], "rows": payload["rows"], "bytes": payload["bytes"],
+                "payload": payload, "coverage": telemetry_json(&b.coverage)})
+        })
+        .collect();
+    json!({"event_id": id, "state": "ok", "reason": null, "blocks": blocks})
 }
 
 /// D15 retained episode evidence: bounded, workspace-scoped, independent of the activity period.
@@ -1323,6 +1386,52 @@ mod tests {
         p
     }
 
+    /// The `/ingest` records taskq v4.6.30's own `telemetry_sync` posted (generator: fixture/taskq-telemetry/generate.rs).
+    const TASKQ_BLOCKS: &str = include_str!("../fixture/taskq-telemetry/telemetry-sync-v4.6.30.json");
+
+    // Chain: taskq's wire records -> /machine/ingest -> replay -> changed replay -> forged cursor -> grant without
+    // telemetry -> projection -> readback by event id.
+    // Risk (#181 A1-A3, A6): every real block refused for its `{seq, id}` cursors, a replay stored twice, a cursor
+    // that misnames its rows accepted, rows the sender never counted as a gap left invisible, or a readback that
+    // differs from what was accepted.
+    #[test]
+    fn taskq_v4_6_30_blocks_conform() {
+        let f: Value = serde_json::from_str(TASKQ_BLOCKS).unwrap();
+        let recs = f["records"].as_array().unwrap().clone();
+        let now = recs[2]["observed_at"].as_i64().unwrap() + 60;
+        let (_d, e) = setup("tq-wire");
+        let mut w = Wire { e: &e, now, code: None, calls: vec![], tick: false };
+        let pair = |w: &mut Wire, label: &str, schemas: &[&str]| {
+            let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: label, schemas, scope: None, capabilities: &[] };
+            coreq::enroll::pair(&dir(label), "https://dash.example.com/machine", &req, w).unwrap()
+        };
+        let a = pair(&mut w, "tq-wire-host", &[TELEMETRY]);
+        let cred = a["credential"].as_str().unwrap();
+        let (code, got) = ingest(&e, cred, recs.clone(), now);
+        assert_eq!((code, states(&got)), (200, vec!["accepted".to_string(); 3]), "{got}");
+        assert_eq!(states(&ingest(&e, cred, recs.clone(), now + 1).1), ["accepted"; 3], "a replay returns the stored receipts");
+        let mut changed = recs[0].clone();
+        changed["payload"] = recs[1]["payload"].clone();
+        let mut forged = recs[1].clone();
+        forged["event_id"] = json!("t-forged");
+        forged["payload"]["first"]["id"] = json!("0".repeat(32));
+        assert_eq!(states(&ingest(&e, cred, vec![changed, forged], now + 2).1), ["rejected:replay_mismatch", "rejected:payload"]);
+        let off = pair(&mut w, "tq-wire-off", &["taskq-board/1"]);
+        assert_eq!(states(&ingest(&e, off["credential"].as_str().unwrap(), vec![recs[0].clone()], now).1), ["rejected:scope"]);
+        let p = projection(&e, Some(Scope::All), None, now as u64 + 3).unwrap();
+        let t = p["rows"].as_array().unwrap().iter().find(|r| r["installation"] == a["installation"]).unwrap()["telemetry"].clone();
+        assert_eq!((&t["state"], &t["retained"]["first_seq"], &t["retained"]["last_seq"], &t["retained"]["rows"], &t["retained"]["blocks"]), (&json!("ok"), &json!(1), &json!(9), &json!(7), &json!(3)));
+        // taskq pruned seq 6-7 after its cursor yet reported gap 0: only DashQ's hole shows them
+        assert_eq!((&t["holes"], &t["hole_rows"], &f["status_after"][2]["gap_rows"]), (&json!([{"from_seq": 6, "to_seq": 7, "rows": 2}]), &json!(2), &json!(0)));
+        assert_eq!((&t["sender"]["state"], &t["sender"]["reason"]), (&json!("unknown"), &json!("status not reported by taskq")), "v4.6.30 sends no status");
+        let id = recs[2]["event_id"].as_str().unwrap();
+        let b = telemetry_block(&e, &p["rows"], id);
+        assert_eq!((&b["state"], &b["blocks"][0]["payload"], &b["blocks"][0]["received_at"], &b["blocks"][0]["receipt"]), (&json!("ok"), &recs[2]["payload"], &json!(now), &json!("accepted")));
+        assert_eq!(b["blocks"][0]["coverage"], t);
+        assert_eq!(telemetry_block(&e, &json!([]), id)["state"], "unknown", "outside the caller's rows nothing is returned");
+        assert_eq!(telemetry_block(&e, &p["rows"], "t-none")["reason"], "no stored block with this event id");
+    }
+
     /// The coreq client whose next `lose` replies are lost after the server committed them.
     struct Lossy<'a, 'b> {
         w: &'b mut Wire<'a>,
@@ -1361,7 +1470,8 @@ mod tests {
         let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
         let inst = a["installation"].as_str().unwrap().to_string();
         let row = |e: &Result<Enroll, String>| projection(e, Some(Scope::All), None, T0 as u64 + 100).unwrap()["rows"].as_array().unwrap().iter().find(|r| r["installation"] == inst.as_str()).unwrap()["telemetry"].clone();
-        assert_eq!(row(&e), json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet"}));
+        let t = row(&e);
+        assert_eq!((&t["state"], &t["blocks"], &t["backlog_rows"], &t["reason"], &t["sender"]["state"], &t["retained"]), (&json!("unknown"), &json!(0), &Value::Null, &json!("no telemetry block yet"), &json!("unknown"), &Value::Null));
         let stored = |e: &Result<Enroll, String>| e.as_ref().unwrap().store.write(|tx| Ok(tx.query_row("SELECT COUNT(*) FROM telemetry", [], |r| r.get::<_, i64>(0))?)).unwrap();
         let line = |n: u64| json!({"at_ms": n, "op": "service.pass", "ms": 12, "outcome": "ok"});
         let status = json!({"backlog_rows": 5, "backlog_bytes": 900, "gap_rows": 2});

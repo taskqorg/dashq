@@ -1,0 +1,94 @@
+{
+  "source": {
+    "repo": "taskqorg/taskq",
+    "tag": "v4.6.30",
+    "commit": "09cb0d7db35d0de51bef83d9fa3ec803eafad42d",
+    "code": "src/telemetry_sync.rs run(), unmodified",
+    "generator": "fixture/taskq-telemetry/generate.rs"
+  },
+  "records": [
+    {
+      "schema": "taskq-telemetry/1",
+      "event_id": "t-eae8bfd50ea0ad5255fb65a4a87e8593",
+      "observed_at": 1792691239,
+      "payload": {
+        "schema": 1,
+        "first": {
+          "seq": 1,
+          "id": "dd381566fbc1e1bf1f06e353e16e354c"
+        },
+        "last": {
+          "seq": 3,
+          "id": "1eaa69501b8e746ce12d0db8c168bd85"
+        },
+        "rows": 3,
+        "bytes": 762,
+        "gzip": "H4sIAAAAAAAA/92PS46DMBBE93OMWluRG7CxuUzkTyMhFExswwbl7iMSRnOHrLpV1dWqd6DwEwMJTBEDYmwNKa1HH4jJjzRKza1qmc7RBQhkDjztHO+PgoF622hLTWu1sQLJF867q1NaMBxYc4pbqBhQXZmfENg5l7cJusmbhEBaOV8BpBUC87ScTf51gZpd4PMLBMrqztNyrtXl+ldESikQt0/mvr0lgbTVkB5nNs0Q4JxTxoAlLYzX6+f40DcXfa+V8TFYisqornVeGiNHS2Y01Gjm76RvL3pi57RVkrzhvtOBqYkyehNIGx+N+jL6X3htIAT6AgAA"
+      }
+    },
+    {
+      "schema": "taskq-telemetry/1",
+      "event_id": "t-f3183945286c2cd2236c95fdba680c57",
+      "observed_at": 1792691239,
+      "payload": {
+        "schema": 1,
+        "first": {
+          "seq": 4,
+          "id": "eb8f4213d71eb50ac976a2e82d7890a2"
+        },
+        "last": {
+          "seq": 5,
+          "id": "2c82f2f757f39dc6af4e877e6f44b04e"
+        },
+        "rows": 2,
+        "bytes": 508,
+        "gzip": "H4sIAAAAAAAA/92PS47DIBBE9zlGrVEEGJvPZSIMjWRZMQ5gb6zcPXKS0dwhu1Z1v1a9A5UecIphinCg0SQlRRe1oLHnPlg9eElGRm0s9xIMhQJNO8XbvcIJbeVgheys6QVDHiuV3bcpL3AH1pLjFhocmq/zAww7lfpeQlz5lYMhr1S+APIKhnlazib/OUMrPtD5BQx19edpPcfmS/srwjlniNuHuW3viCFvLeT7yeYZDFRKLnBY8kJ4Pi/Hx77/2stgZJJJ9zp1NobBJ0VGaxqSUiNX9GP2L+P9NfH8AQAA"
+      }
+    },
+    {
+      "schema": "taskq-telemetry/1",
+      "event_id": "t-e13a7e71e7573e5aeca37f71ae1a3c84",
+      "observed_at": 1792691239,
+      "payload": {
+        "schema": 1,
+        "first": {
+          "seq": 8,
+          "id": "6303d6117111664fda27ab2b2874ba1d"
+        },
+        "last": {
+          "seq": 9,
+          "id": "dd46f6e58e51d5f263dc64a8e71b9371"
+        },
+        "rows": 2,
+        "bytes": 508,
+        "gzip": "H4sIAAAAAAAA/92PQY6DMAxF93OMv46qOEBCcpkqYCOhqoQmgQ3q3SvajuYOs7O+/az/DhR5IPQKMyPANrphS+SIyNp24mhcHMxgetcOkRgKWUaZd+HrvSCQ88Z6Mo33vldIQ5G8xzqnBeHAmhNvY0VAjeX2gMIuubyXoIu+aCikVfIXQFqhcJuXs8lfrlBzHOX8AoWyxvO0nGONuf4W0Vor8PZhrts7UkhbHdP9ZNMNCpJzyghY0iJ4Pn+Oj73/2jO3drLS9dIRd5OxDY+2jb04Gnzj6J/ZvwApMzJd/AEAAA=="
+      }
+    }
+  ],
+  "status_after": [
+    {
+      "state": "idle",
+      "last_synced": 1792691239,
+      "gap_rows": 0,
+      "last_error": null,
+      "backlog_rows": 0,
+      "backlog_bytes": 0
+    },
+    {
+      "state": "idle",
+      "last_synced": 1792691239,
+      "gap_rows": 0,
+      "last_error": null,
+      "backlog_rows": 0,
+      "backlog_bytes": 0
+    },
+    {
+      "state": "idle",
+      "last_synced": 1792691240,
+      "gap_rows": 0,
+      "last_error": null,
+      "backlog_rows": 0,
+      "backlog_bytes": 0
+    }
+  ]
+}

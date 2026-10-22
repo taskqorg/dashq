@@ -81,7 +81,7 @@ fn agent_name(a: &str) -> Option<&'static str> {
     AGENTS.iter().find(|(k, _)| *k == a).map(|(_, n)| *n)
 }
 
-/// `period=&host=&agent=&session=` (D7): the period and the filters, or `Err` for 400.
+/// `period=&host=&agent=&session=&block=` (D7): the period and the filters, or `Err` for 400.
 pub fn query(q: &str) -> Result<(u64, Value), String> {
     let (mut period, mut f) = (1800, json!({}));
     for pair in q.split('&').filter(|p| !p.is_empty()) {
@@ -95,6 +95,8 @@ pub fn query(q: &str) -> Result<(u64, Value), String> {
             "host" => safe(v.split_once('/').map_or(v.as_str(), |(h, r)| if matches!(r, "native" | "wsl") { h } else { "" }), 64, b"_.-"),
             "agent" => agent_name(&v).is_some(),
             "session" => safe_id(&v),
+            // #181 A6: a telemetry block event id; it adds `telemetry_block` and filters nothing else
+            "block" => crate::enroll::id(&v, 128),
             _ => false,
         };
         if !ok || (k != "period" && f.get(k).is_some()) {
