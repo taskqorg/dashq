@@ -265,12 +265,15 @@ impl App {
         let projection = enroll::projection(&self.enroll, scope, None, now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
         let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
+        // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
+        // started up to a day before the widest window share one decoded set
+        let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
         profile::step("enrollment", t0);
         let t0 = std::time::Instant::now();
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "installations": projection, "agent_work": agent_work, "serverq_samples": findings,
+            "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings,
         }));
         profile::step("build", t0);
         let mut doc = doc;
@@ -875,6 +878,70 @@ mod tests {
         assert_eq!((&b["state"], &b["blocks"][0]["payload"], &b["blocks"][0]["received_at"], &b["blocks"][0]["coverage"]["retained"]["last_seq"]), (&json!("ok"), &serde_json::from_str::<Value>(payload).unwrap(), &json!(now), &json!(2)));
         assert_eq!(app.doc(1800, json!({"block": "t-1"}), None)["telemetry_block"]["blocks"], json!([]), "no subject: no block");
         assert!(report_query(&["--block=a b"]).is_err() && report_query(&["block=t-1"]).is_err());
+    }
+
+    // Chain (#182 A5): stored TaskQ telemetry plus a cutover log -> one document for `/data`, `dashq report` and the
+    // page. Risk: the three disagree on attempts, or the cutover host shows a gap or a duplicate there.
+    #[test]
+    fn agent_work_agrees_across_data_report_and_page() {
+        use std::io::Write as _;
+        let fx: Value = serde_json::from_str(include_str!("../fixture/taskq-telemetry/stages.json")).unwrap();
+        let now = source::now() as i64;
+        // replay the fixture one hour before the current clock
+        let shift = (now - fx["t0"].as_i64().unwrap()) * 1000;
+        let moved = |l: &Value| {
+            let mut l = l.clone();
+            for k in ["/received_ms", "/observation/started_ms", "/at_ms"] {
+                if let Some(v) = l.pointer_mut(k).filter(|v| v.is_i64()) {
+                    *v = json!(v.as_i64().unwrap() + shift);
+                }
+            }
+            l
+        };
+        let d = std::env::temp_dir().join(format!("dashq-stages-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        enroll::Enroll::admin(&d, "ws", "github|1").unwrap();
+        let e = enroll::Enroll::open(&d, "dash.example.com");
+        let s = e.as_ref().unwrap().store();
+        let mut payloads = vec![];
+        for (n, inst) in fx["installations"].as_array().unwrap().iter().enumerate() {
+            let id = format!("tq-{n}");
+            s.grant(&store::Installation { id: &id, product: "taskq", runtime: "native", label: inst["label"].as_str().unwrap() }, "ws", "github|1", r#"["taskq-telemetry/1"]"#, id.as_bytes(), now).unwrap();
+            for (i, b) in inst["blocks"].as_array().unwrap().iter().enumerate() {
+                let lines: Vec<Value> = b.as_array().unwrap().iter().map(moved).collect();
+                let plain: String = lines.iter().map(|l| format!("{l}\n")).collect();
+                let mut z = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                z.write_all(plain.as_bytes()).unwrap();
+                let p = json!({"schema": 1, "first": lines[0]["seq"], "last": lines[lines.len() - 1]["seq"], "rows": lines.len(), "bytes": plain.len(), "gzip": base64(&z.finish().unwrap())});
+                payloads.push((id.clone(), format!("t-{n}-{i}"), p.to_string()));
+            }
+        }
+        for (id, ev, p) in &payloads {
+            s.accept(id.as_bytes(), &[store::Event { id: ev, schema: "taskq-telemetry/1", observed: now, kind: store::Kind::Telemetry, payload: p }], now).unwrap();
+        }
+        let log = d.join("taskq.log");
+        let lines: Vec<String> = fx["log"]["mac"].as_array().unwrap().iter().filter_map(|l| {
+            let r: Value = serde_json::from_str(l.as_str()?.strip_prefix("taskq-stage ")?).ok()?;
+            Some(format!("taskq-stage {}", moved(&r)))
+        }).collect();
+        std::fs::write(&log, lines.join("\n")).unwrap();
+        let mut cfg = load_config_fixture();
+        cfg.projects = vec!["taskqorg/dashq".into()];
+        cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
+        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
+        let data: Value = serde_json::from_slice(&body).unwrap();
+        let (period, filters) = report_query(&["--period=7200"]).unwrap();
+        let report = app.doc(period, filters, Some(store::Scope::All));
+        let (a, r) = (&data["agent_work"], &report["agent_work"]);
+        assert_eq!((&a["attempts"], &a["rows"], &a["hosts"]), (&r["attempts"], &r["rows"], &r["hosts"]));
+        assert_eq!((a["attempts_total"].as_u64(), data["sources"]["agent_work"]["state"].as_str()), (Some(7), Some("incomplete")));
+        let page = String::from_utf8(route(&app, "GET", "/agents", "period=7200", Some(store::Scope::All)).2).unwrap();
+        for t in a["attempts"].as_array().unwrap() {
+            assert!(page.contains(&format!("<td>{}</td>", t["attempt"])), "attempt {} on the page", t["attempt"]);
+        }
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn load_config_fixture() -> Config {
