@@ -1669,7 +1669,7 @@ mod tests {
         let now = t0 as u64 + 60;
         let p = projection(&e, Some(Scope::All), None, now).unwrap();
         let stages = stage_records(&e, &p["rows"], t0 - 2 * 86400);
-        assert_eq!(stages.as_array().unwrap().iter().map(|s| s["records"].as_array().unwrap().len()).sum::<usize>(), 18);
+        assert_eq!(stages.as_array().unwrap().iter().map(|s| s["records"].as_array().unwrap().len()).sum::<usize>(), 19, "18 stages and one queue transition");
         // decoded once: a second read is served from the per-block memo, identical
         assert_eq!(stage_records(&e, &p["rows"], t0 - 2 * 86400), stages);
         let log: Vec<Value> = fx["log"]["mac"].as_array().unwrap().iter().filter_map(|l| serde_json::from_str(l.as_str()?.strip_prefix("taskq-stage ")?).ok()).collect();
@@ -1692,6 +1692,10 @@ mod tests {
         assert_eq!((&t101["link"], &t101["project"], &t101["attempt"]), (&json!("https://github.com/taskqorg/dashq/issues/101"), &json!("taskqorg/dashq"), &json!(1001)));
         assert_eq!((&t401["link"], &t401["project"], &t401["hosts"], &t401["elapsed_ms"]), (&Value::Null, &Value::Null, &json!(["mac"]), &json!(101_000.0)), "no project: unlinked; no host: label");
         assert_eq!(seen(90), ("complete".into(), None, Some(100_000.0)), "the log fills the cutover");
+        // #184 A2: wall time, summed overlapping execution and the queue wait stay apart; a missing wait says why
+        assert_eq!((&t101["execution_ms"], &t101["queue_wait_s"], &t101["queue_wait_reason"]), (&json!(672_000.0), &json!(240), &Value::Null));
+        assert_eq!((&by(102)["execution_ms"], &by(102)["queue_wait_s"], &by(102)["queue_wait_reason"]), (&Value::Null, &Value::Null, &json!("ready transition not retained")));
+        assert_eq!((&t101["models"]["ids"], &t101["output_tokens"]["sum"], &t101["estimate"]["amounts"]), (&json!({"claude-opus-5-5": 1}), &json!(7000), &Value::Null), "stage tokens carry no cache split: no estimate");
         assert_eq!((&t101["tokens"], &by(102)["tokens"]["reasons"]), (&json!({"sum": 900_000, "known": 1, "of": 1, "reasons": []}), &json!(["no-usage"])));
         let row = |host: &str, rt: &str| a["rows"].as_array().unwrap().iter().find(|r| r["host"] == host && r["runtime"] == rt).unwrap().clone();
         let mc = row("mac", "claude");
@@ -2173,7 +2177,7 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
+        let cfg = crate::Config { prices: Value::Null, langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
         crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
     }
 
