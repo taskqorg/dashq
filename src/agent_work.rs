@@ -35,15 +35,20 @@ pub fn read(path: &str) -> Result<(Value, bool), crate::source::Fail> {
 }
 
 /// One telemetry line (coreq export row `{seq, id, received_ms, observation}`) as a `taskq-stage` record, the inverse
-/// of taskq v4.6.31 `telemetry/semantic.rs` field names, plus `host` (else the installation's `label`), `installation`
-/// and `seq` for coverage; `None` for other kinds. Codes are checked later like a log line's.
+/// of taskq v4.6.32 `telemetry/semantic.rs` field names, plus `host` (else the installation's `label`), `installation`
+/// and `seq` for coverage; a queue transition as `{transition, task, entry, from, prev_s}` (#184 queue waits); `None`
+/// for other kinds. Codes are checked later like a log line's.
 pub fn from_telemetry(l: &Value, label: &str, installation: &str) -> Option<Value> {
     let o = &l["observation"];
-    (o["kind"] == "stage" && o["product"] == "taskq").then_some(())?;
+    (o["product"] == "taskq").then_some(())?;
+    if o["kind"] == "transition" {
+        return Some(json!({"transition": true, "task": o["task"], "entry": o["entry"], "from": o["from"], "prev_s": o["previous_seconds"]}));
+    }
+    (o["kind"] == "stage").then_some(())?;
     let mut r = json!({"stage": o["operation"], "task": o["task"], "attempt": o["attempt"], "rt": o["runtime"], "us": o["duration_us"],
         "outcome": o["outcome"], "error": o["error"], "at_ms": o["started_ms"], "project": o["project"],
         "host": o["host"].as_str().unwrap_or(label), "installation": installation, "seq": l["seq"]});
-    for (k, f) in [("open", "open"), ("calls", "calls"), ("tokens", "tokens"), ("unknown", "usage_status")] {
+    for (k, f) in [("open", "open"), ("calls", "calls"), ("tokens", "tokens"), ("model", "model"), ("output_tokens", "output_tokens"), ("unknown", "usage_status")] {
         if !o[f].is_null() {
             r[k] = o[f].clone();
         }
@@ -57,7 +62,8 @@ fn valid(r: &Value) -> bool {
     let at = r["at_ms"].is_u64() || (open(r) && r["at_ms"].is_null());
     is("stage", &STAGES) && is("rt", &RUNTIMES) && is("outcome", &OUTCOMES) && is("error", &ERRORS)
         && (r["unknown"].is_null() || is("unknown", &UNKNOWN)) && r["task"].is_u64() && r["attempt"].is_u64() && at
-        && (r["us"].is_null() || r["us"].is_u64()) && ["calls", "tokens"].iter().all(|k| r[*k].is_null() || r[*k].is_u64())
+        && (r["us"].is_null() || r["us"].is_u64()) && ["calls", "tokens", "output_tokens"].iter().all(|k| r[*k].is_null() || r[*k].is_u64())
+        && (r["model"].is_null() || r["model"].as_str().is_some_and(|m| crate::data::safe(m, 64, b"-._@")))
         && (r["project"].is_null() || r["project"].is_string())
 }
 
@@ -84,6 +90,16 @@ fn usage(v: &[&Value], field: &str) -> Value {
     let reasons: BTreeSet<&str> = v.iter().filter(|r| r[field].is_null()).map(|r| r["unknown"].as_str().unwrap_or("not-reported")).collect();
     json!({"sum": (!known.is_empty()).then(|| known.iter().sum::<u64>()), "known": known.len(), "of": v.len(), "reasons": reasons})
 }
+
+/// Model ids of `v` with their record counts, `known` of `of` and the reasons of the rest (taskq's codes).
+fn models(v: &[&Value]) -> Value {
+    let reasons: BTreeSet<&str> = v.iter().filter(|r| r["model"].is_null()).map(|r| r["unknown"].as_str().unwrap_or("not-reported")).collect();
+    let ids = counts(v.iter().filter_map(|r| r["model"].as_str()));
+    json!({"ids": ids, "known": ids.values().sum::<u64>(), "of": v.len(), "reasons": reasons})
+}
+
+/// Estimates need input split by cache; taskq stage tokens are context tokens with cache included (#184).
+const NO_SPLIT: &str = "context tokens not split by cache";
 
 fn counts<'a>(it: impl Iterator<Item = &'a str>) -> BTreeMap<&'a str, u64> {
     let mut m = BTreeMap::new();
@@ -198,6 +214,8 @@ pub fn build(inp: &Value) -> Value {
         &mut acc[i].1
     }
     let mut holes: BTreeMap<String, Vec<(u64, u64)>> = BTreeMap::new();
+    // time in `ready` before a worker spawn: taskq's spawn entry id is the attempt id (taskq.md § 2)
+    let mut waits: BTreeMap<(u64, u64), u64> = BTreeMap::new();
     let rank = |s: &Value| ["ok", "incomplete", "stale", "unconfirmed", "unknown"].iter().position(|x| s["state"] == *x).unwrap_or(4);
     for t in tele.into_iter().flatten() {
         let tj = &t["telemetry"];
@@ -208,7 +226,12 @@ pub fn build(inp: &Value) -> Value {
             (None, Some("ok")) => crate::data::source(&json!({"value": true, "at": tj["last_synced"]}), now, LIMIT, None),
             _ => json!({"state": "unknown", "at": null, "age_s": null, "reason": tj["reason"].as_str().unwrap_or("no telemetry block yet"), "incomplete": false}),
         };
-        let records = t["records"].as_array().cloned().unwrap_or_default();
+        let (moves, records): (Vec<Value>, Vec<Value>) = t["records"].as_array().cloned().unwrap_or_default().into_iter().partition(|r| r["transition"] == true);
+        for m in moves.iter().filter(|m| m["from"] == "ready") {
+            if let (Some(k), Some(e), Some(s)) = (m["task"].as_u64(), m["entry"].as_u64(), m["prev_s"].as_u64()) {
+                waits.insert((k, e), s);
+            }
+        }
         let mut names: BTreeSet<String> = records.iter().filter_map(|r| r["host"].as_str().map(String::from)).collect();
         if names.is_empty() {
             names.insert(t["label"].as_str().unwrap_or(inst).into());
@@ -293,7 +316,7 @@ pub fn build(inp: &Value) -> Value {
     let mut attempts: Vec<(u64, Value)> = by
         .iter()
         .filter(|(_, v)| v.iter().any(|r| r["at_ms"].as_u64().is_some_and(|m| (from..=now).contains(&(m / 1000)))))
-        .map(|(k, v)| (v.iter().filter_map(|r| r["at_ms"].as_u64()).max().unwrap_or(0), attempt(*k, v, &cov[k], &projects)))
+        .map(|(k, v)| (v.iter().filter_map(|r| r["at_ms"].as_u64()).max().unwrap_or(0), attempt(*k, v, &cov[k], &projects, waits.get(k).copied())))
         .collect();
     attempts.sort_by_key(|a| std::cmp::Reverse(a.0));
     let total = attempts.len();
@@ -316,12 +339,15 @@ pub fn build(inp: &Value) -> Value {
     json!({"source": src, "window_s": period, "from": from, "to": now, "hosts": hosts, "rows": rows, "attempts": attempts, "attempts_total": total})
 }
 
-fn attempt((task, id): (u64, u64), v: &[&Value], (state, why): &(&str, String), projects: &[&str]) -> Value {
+fn attempt((task, id): (u64, u64), v: &[&Value], (state, why): &(&str, String), projects: &[&str], wait: Option<u64>) -> Value {
     let project = v.iter().find_map(|r| r["project"].as_str());
     let closed: Vec<&Value> = v.iter().copied().filter(|r| !open(r)).collect();
     let models: Vec<&Value> = closed.iter().copied().filter(|r| matches!(r["stage"].as_str(), Some("build" | "review"))).collect();
     let outcome = models.iter().max_by_key(|r| r["at_ms"].as_u64()).map(|r| r["outcome"].clone());
     let set = |k: &str| v.iter().filter_map(|r| r[k].as_str()).collect::<BTreeSet<_>>();
+    let complete = *state == "complete";
+    // a reviewer is spawned inside `review`, so its wait is no state transition
+    let wait_why = if v.iter().any(|r| r["stage"] == "review") { "reviewer wait not recorded" } else { "ready transition not retained" };
     json!({
         "project": project, "task": task, "attempt": id,
         // only a configured board names an issue; an attempt without a project stays unlinked
@@ -329,8 +355,12 @@ fn attempt((task, id): (u64, u64), v: &[&Value], (state, why): &(&str, String), 
         "hosts": set("host"), "runtimes": set("rt"),
         "stages": STAGES.iter().filter(|s| closed.iter().any(|r| r["stage"] == **s)).collect::<Vec<_>>(),
         "outcome": outcome, "state": state, "reason": (!why.is_empty()).then_some(why),
-        "elapsed_ms": (*state == "complete").then(|| ms(union_us(&closed))),
-        "tokens": usage(&models, "tokens"), "calls": usage(&models, "calls"),
+        // wall time (overlaps once), summed stage execution (overlaps added) and the queue wait before it (A2)
+        "elapsed_ms": complete.then(|| ms(union_us(&closed))),
+        "execution_ms": complete.then(|| ms(closed.iter().filter_map(|r| r["us"].as_u64()).sum())),
+        "queue_wait_s": wait, "queue_wait_reason": wait.is_none().then_some(wait_why),
+        "tokens": usage(&models, "tokens"), "calls": usage(&models, "calls"), "output_tokens": usage(&models, "output_tokens"), "models": self::models(&models),
+        "estimate": {"amounts": null, "reason": NO_SPLIT},
     })
 }
 
@@ -382,7 +412,7 @@ fn row(host: &str, rt: &str, v: &[&Value], by: &BTreeMap<(u64, u64), Vec<&Value>
         "time_ms": (known > 0).then(|| ms(total)),
         "elapsed": {"known": known, "of": keys.len(), "reasons": reasons},
         "untimed": v.iter().filter(|r| r["us"].is_null()).count(),
-        "tokens": usage(&models, "tokens"), "calls": usage(&models, "calls"),
+        "tokens": usage(&models, "tokens"), "calls": usage(&models, "calls"), "output_tokens": usage(&models, "output_tokens"), "models": self::models(&models),
         "stages": stages,
     })
 }
@@ -424,6 +454,21 @@ fn use_cell(u: &Value) -> String {
     }
 }
 
+fn unknown(why: &str) -> String {
+    format!("<span class=\"unknown\" title=\"unknown: {0}\">—</span> <small>unknown: {0}</small>", esc(why))
+}
+
+/// Model ids with counts; ids not reported read `k of n known` with taskq's reasons.
+fn model_cell(m: &Value) -> String {
+    let reasons: Vec<&str> = m["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    match (m["ids"].as_object().filter(|o| !o.is_empty()), m["known"] == m["of"]) {
+        (None, _) if reasons == ["no-model"] => "none (no model)".into(),
+        (None, _) => unknown(&reasons.join(", ")),
+        (Some(_), true) => map(&m["ids"]),
+        (Some(_), false) => format!("{} <small>({} of {} known; {})</small>", map(&m["ids"]), m["known"], m["of"], esc(&reasons.join(", "))),
+    }
+}
+
 fn map(v: &Value) -> String {
     let m: Vec<String> = v.as_object().into_iter().flatten().map(|(k, n)| format!("{} {n}", esc(k))).collect();
     if m.is_empty() { "—".into() } else { m.join(" · ") }
@@ -435,7 +480,7 @@ pub fn render(w: &mut String, doc: &Value) {
         return;
     }
     let now = doc["generated_at"].as_u64().unwrap_or(0);
-    let _ = writeln!(w, "<section id=\"agentwork\">\n<h2>Agent work</h2>\n<p class=\"note\">taskq attempt stages ended in the period, per host and runtime; slowest stage (p95) first. Time is each complete attempt's elapsed time; nested stages count once. Budgets unknown. Model use counts build and review only.</p>");
+    let _ = writeln!(w, "<section id=\"agentwork\">\n<h2>Agent work</h2>\n<p class=\"note\">taskq attempt stages ended in the period, per host and runtime; slowest stage (p95) first. Wall time is each complete attempt's elapsed time (nested stages count once); summed execution adds overlapping stages; queue wait is the time in ready before the worker started. Budgets unknown. Model use counts build and review only.</p>");
     for h in a["hosts"].as_array().into_iter().flatten() {
         let s = &h["source"];
         let state = s["state"].as_str().unwrap_or("unknown");
@@ -454,8 +499,8 @@ pub fn render(w: &mut String, doc: &Value) {
             None => format!("<span class=\"unknown\" title=\"unknown: {why}\">—</span>"),
         };
         let untimed = if e["known"] == e["of"] { untimed } else { format!("{untimed} <small>({} of {} attempts complete; {why})</small>", e["known"], e["of"]) };
-        let _ = writeln!(w, "<h3>{} · {}</h3>\n<p>{} · {} · outcomes {} · time {}{untimed} · context tokens {} · model calls {}</p>",
-            esc(r["host"].as_str().unwrap_or("")), esc(r["runtime"].as_str().unwrap_or("")), plural(&r["attempts"], "attempt"), plural(&r["tasks"], "task"), map(&r["outcomes"]), time, use_cell(&r["tokens"]), use_cell(&r["calls"]));
+        let _ = writeln!(w, "<h3>{} · {}</h3>\n<p>{} · {} · outcomes {} · time {}{untimed} · context tokens {} · output tokens {} · model calls {} · models {}</p>",
+            esc(r["host"].as_str().unwrap_or("")), esc(r["runtime"].as_str().unwrap_or("")), plural(&r["attempts"], "attempt"), plural(&r["tasks"], "task"), map(&r["outcomes"]), time, use_cell(&r["tokens"]), use_cell(&r["output_tokens"]), use_cell(&r["calls"]), model_cell(&r["models"]));
         let _ = writeln!(w, "<table>\n<tr><th>Stage</th><th>Count</th><th>p50 · p95 · max</th><th>Total time</th><th>Outcomes</th><th>Errors</th><th>Model calls</th><th>Context tokens</th></tr>");
         for s in r["stages"].as_array().into_iter().flatten() {
             let timed = if s["timed"] == s["count"] { String::new() } else { format!(" <small>({} of {} timed)</small>", s["timed"], s["count"]) };
@@ -467,7 +512,7 @@ pub fn render(w: &mut String, doc: &Value) {
     let attempts = a["attempts"].as_array().filter(|x| !x.is_empty());
     if let Some(list) = attempts {
         let more = a["attempts_total"].as_u64().filter(|t| *t > list.len() as u64).map(|t| format!(", newest {} of {t}", list.len())).unwrap_or_default();
-        let _ = writeln!(w, "<h3>Attempts{more}</h3>\n<table>\n<tr><th>Task</th><th>Attempt</th><th>Hosts</th><th>Runtime</th><th>Stages</th><th>Outcome</th><th>Elapsed</th><th>Model calls</th><th>Context tokens</th></tr>");
+        let _ = writeln!(w, "<h3>Attempts{more}</h3>\n<table>\n<tr><th>Task</th><th>Attempt</th><th>Hosts</th><th>Runtime</th><th>Stages</th><th>Outcome</th><th>Wall time</th><th>Summed execution</th><th>Queue wait</th><th>Model calls</th><th>Context tokens</th><th>Output tokens</th><th>Models</th><th>API-equivalent estimate</th></tr>");
         let join = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(esc).collect::<Vec<_>>().join(", ");
         for t in list {
             let name = format!("{}#{}", t["project"].as_str().unwrap_or(""), t["task"]);
@@ -484,8 +529,14 @@ pub fn render(w: &mut String, doc: &Value) {
                     format!("<span class=\"unknown\" title=\"unknown: {0}\">—</span> <small>{0}</small>", esc(&why))
                 }
             };
-            let _ = writeln!(w, "<tr><td>{task}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{elapsed}</td><td>{}</td><td>{}</td></tr>",
-                t["attempt"], join(&t["hosts"]), join(&t["runtimes"]), join(&t["stages"]), esc(t["outcome"].as_str().unwrap_or("—")), use_cell(&t["calls"]), use_cell(&t["tokens"]));
+            let execution = if t["execution_ms"].is_null() { unknown(t["reason"].as_str().or(t["state"].as_str()).unwrap_or("unknown")) } else { n(&t["execution_ms"]) };
+            let wait = match t["queue_wait_s"].as_f64() {
+                Some(s) => n(&json!(s * 1000.0)),
+                None => unknown(t["queue_wait_reason"].as_str().unwrap_or("unknown")),
+            };
+            let _ = writeln!(w, "<tr><td>{task}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{elapsed}</td><td>{execution}</td><td>{wait}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                t["attempt"], join(&t["hosts"]), join(&t["runtimes"]), join(&t["stages"]), esc(t["outcome"].as_str().unwrap_or("—")), use_cell(&t["calls"]), use_cell(&t["tokens"]),
+                use_cell(&t["output_tokens"]), model_cell(&t["models"]), unknown(t["estimate"]["reason"].as_str().unwrap_or("unknown")));
         }
         let _ = writeln!(w, "</table>");
     }

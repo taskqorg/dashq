@@ -195,13 +195,15 @@ pub fn clock(t: u64, now: u64) -> String {
 /// Reads of one period: `{activity, agentq.*, truncated}`. The agentq events key by their span name; `activity` is
 /// every model call (Langfuse `GENERATION` observations), whatever its producer.
 pub fn langfuse(base: &str, auth: &str, now: u64, period: u64) -> Result<(Value, bool), Fail> {
-    let queries: [(&str, (&str, &str), u64); 9] = [
+    let queries: [(&str, (&str, &str), u64); 10] = [
         ("activity", ("type", "GENERATION"), period),
         // fleet, versions, last seen and health: the hourly heartbeat, health window
         ("agentq.installation", ("name", "agentq.installation"), 86400),
         ("agentq.run", ("name", "agentq.run"), period),
         ("agentq.compress", ("name", "agentq.compress"), period),
         ("agentq.retrieval", ("name", "agentq.retrieval"), period),
+        // per-call model use (agentq#161) for API-equivalent estimates (D24)
+        ("agentq.model", ("name", "agentq.model"), period),
         ("agentq.incident", ("name", "agentq.incident"), 86400),
         // resource samples (D4.4): the window is the period
         ("agentq.resource", ("name", "agentq.resource"), period),

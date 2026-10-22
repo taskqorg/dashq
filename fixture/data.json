@@ -1718,6 +1718,24 @@
           "of": 4,
           "reasons": []
         },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 4,
+          "reasons": [
+            "no-usage",
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 4,
+          "reasons": [
+            "no-usage",
+            "not-reported"
+          ]
+        },
         "stages": [
           {
             "stage": "build",
@@ -1843,6 +1861,22 @@
             "app-turn"
           ]
         },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
         "stages": [
           {
             "stage": "review",
@@ -1902,6 +1936,24 @@
         },
         "calls": {
           "sum": null,
+          "known": 0,
+          "of": 3,
+          "reasons": [
+            "adopted",
+            "not-reported"
+          ]
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 3,
+          "reasons": [
+            "adopted",
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
           "known": 0,
           "of": 3,
           "reasons": [
@@ -2080,6 +2132,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 1320000.0,
+        "execution_ms": 1323240.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "ready transition not retained",
         "tokens": {
           "sum": null,
           "known": 0,
@@ -2093,6 +2148,26 @@
           "known": 1,
           "of": 1,
           "reasons": []
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "no-usage"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "no-usage"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2117,6 +2192,9 @@
         "state": "adopted",
         "reason": "adopted",
         "elapsed_ms": null,
+        "execution_ms": null,
+        "queue_wait_s": null,
+        "queue_wait_reason": "reviewer wait not recorded",
         "tokens": {
           "sum": null,
           "known": 0,
@@ -2132,6 +2210,26 @@
           "reasons": [
             "adopted"
           ]
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "adopted"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "adopted"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2152,6 +2250,9 @@
         "state": "partial",
         "reason": "attempt start not retained",
         "elapsed_ms": null,
+        "execution_ms": null,
+        "queue_wait_s": null,
+        "queue_wait_reason": "reviewer wait not recorded",
         "tokens": {
           "sum": null,
           "known": 0,
@@ -2167,6 +2268,26 @@
           "reasons": [
             "app-turn"
           ]
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "app-turn"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2189,6 +2310,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 540000.0,
+        "execution_ms": 543110.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "ready transition not retained",
         "tokens": {
           "sum": 2010000,
           "known": 1,
@@ -2200,6 +2324,26 @@
           "known": 1,
           "of": 1,
           "reasons": []
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2224,6 +2368,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 300000.0,
+        "execution_ms": 784600.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "reviewer wait not recorded",
         "tokens": {
           "sum": 890000,
           "known": 1,
@@ -2237,6 +2384,26 @@
           "reasons": [
             "not-reported"
           ]
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2259,6 +2426,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 1860000.0,
+        "execution_ms": 1862980.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "ready transition not retained",
         "tokens": {
           "sum": 9020000,
           "known": 1,
@@ -2270,6 +2440,26 @@
           "known": 1,
           "of": 1,
           "reasons": []
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2294,6 +2484,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 375000.0,
+        "execution_ms": 784500.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "reviewer wait not recorded",
         "tokens": {
           "sum": 1250000,
           "known": 1,
@@ -2307,6 +2500,26 @@
           "reasons": [
             "not-reported"
           ]
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       },
       {
@@ -2329,6 +2542,9 @@
         "state": "complete",
         "reason": null,
         "elapsed_ms": 840000.0,
+        "execution_ms": 842850.0,
+        "queue_wait_s": null,
+        "queue_wait_reason": "ready transition not retained",
         "tokens": {
           "sum": 4180000,
           "known": 1,
@@ -2340,10 +2556,331 @@
           "known": 1,
           "of": 1,
           "reasons": []
+        },
+        "output_tokens": {
+          "sum": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "models": {
+          "ids": {},
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not-reported"
+          ]
+        },
+        "estimate": {
+          "amounts": null,
+          "reason": "context tokens not split by cache"
         }
       }
     ],
     "attempts_total": 8
+  },
+  "model_use": {
+    "source": {
+      "state": "ok",
+      "at": 1791875130,
+      "age_s": 9,
+      "reason": null,
+      "incomplete": false
+    },
+    "label": "API-equivalent estimate",
+    "prices": {
+      "state": "ok",
+      "reason": null,
+      "entries": [
+        {
+          "model": "claude-opus-5-5",
+          "source": "https://example.com/invented-price-page",
+          "effective": "2026-10-01",
+          "currency": "USD",
+          "input": 5,
+          "output": 25,
+          "cache_read": 0.5,
+          "cache_write": 6.25
+        }
+      ]
+    },
+    "runtimes": [
+      {
+        "runtime": "claude",
+        "status": {
+          "state": "ok",
+          "reason": null
+        },
+        "sources": [
+          {
+            "source": "agentq.model",
+            "calls": 3,
+            "fields": {
+              "cache_creation_tokens": {
+                "sum": 6000,
+                "known": 3,
+                "of": 3,
+                "reasons": []
+              },
+              "cache_read_tokens": {
+                "sum": 450000,
+                "known": 3,
+                "of": 3,
+                "reasons": []
+              },
+              "input_tokens": {
+                "sum": 2500,
+                "known": 3,
+                "of": 3,
+                "reasons": []
+              },
+              "model": {
+                "sum": 3,
+                "known": 3,
+                "of": 3,
+                "reasons": []
+              },
+              "output_tokens": {
+                "sum": 920,
+                "known": 2,
+                "of": 3,
+                "reasons": [
+                  "not in transcript"
+                ]
+              },
+              "price": {
+                "sum": 1,
+                "known": 1,
+                "of": 3,
+                "reasons": [
+                  "no price for claude-sonnet-5-5",
+                  "output_tokens not reported"
+                ]
+              }
+            }
+          },
+          {
+            "source": "taskq stages",
+            "fields": {
+              "model": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "no-usage",
+                  "not-reported"
+                ]
+              },
+              "context_tokens": {
+                "known": 3,
+                "of": 4,
+                "reasons": [
+                  "no-usage"
+                ]
+              },
+              "output_tokens": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "no-usage",
+                  "not-reported"
+                ]
+              },
+              "calls": {
+                "known": 4,
+                "of": 4,
+                "reasons": []
+              },
+              "price": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "context tokens not split by cache"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "runtime": "codex",
+        "status": {
+          "state": "unknown",
+          "reason": "model accounting not qualified (no model id)"
+        },
+        "sources": [
+          {
+            "source": "taskq stages",
+            "fields": {
+              "model": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "adopted",
+                  "app-turn",
+                  "not-reported"
+                ]
+              },
+              "context_tokens": {
+                "known": 2,
+                "of": 4,
+                "reasons": [
+                  "adopted",
+                  "app-turn"
+                ]
+              },
+              "output_tokens": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "adopted",
+                  "app-turn",
+                  "not-reported"
+                ]
+              },
+              "calls": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "adopted",
+                  "app-turn",
+                  "not-reported"
+                ]
+              },
+              "price": {
+                "known": 0,
+                "of": 4,
+                "reasons": [
+                  "context tokens not split by cache"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "runtime": "hermes",
+        "status": {
+          "state": "unknown",
+          "reason": "no model accounting adapter"
+        },
+        "sources": []
+      }
+    ],
+    "rows": [
+      {
+        "host": "fra",
+        "runtime": "claude",
+        "model": "claude-sonnet-5-5",
+        "calls": 1,
+        "tokens": {
+          "cache_creation_tokens": {
+            "sum": 0,
+            "known": 1,
+            "of": 1,
+            "reasons": []
+          },
+          "cache_read_tokens": {
+            "sum": 30000,
+            "known": 1,
+            "of": 1,
+            "reasons": []
+          },
+          "input_tokens": {
+            "sum": 400,
+            "known": 1,
+            "of": 1,
+            "reasons": []
+          },
+          "output_tokens": {
+            "sum": 120,
+            "known": 1,
+            "of": 1,
+            "reasons": []
+          }
+        },
+        "estimate": {
+          "amounts": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "no price for claude-sonnet-5-5"
+          ]
+        },
+        "reported": {
+          "amounts": null,
+          "known": 0,
+          "of": 1,
+          "reasons": [
+            "not reported"
+          ]
+        }
+      },
+      {
+        "host": "mac",
+        "runtime": "claude",
+        "model": "claude-opus-5-5",
+        "calls": 2,
+        "tokens": {
+          "cache_creation_tokens": {
+            "sum": 6000,
+            "known": 2,
+            "of": 2,
+            "reasons": []
+          },
+          "cache_read_tokens": {
+            "sum": 420000,
+            "known": 2,
+            "of": 2,
+            "reasons": []
+          },
+          "input_tokens": {
+            "sum": 2100,
+            "known": 2,
+            "of": 2,
+            "reasons": []
+          },
+          "output_tokens": {
+            "sum": 800,
+            "known": 1,
+            "of": 2,
+            "reasons": [
+              "not in transcript"
+            ]
+          }
+        },
+        "estimate": {
+          "amounts": {
+            "USD": 0.1835
+          },
+          "known": 1,
+          "of": 2,
+          "reasons": [
+            "output_tokens not reported"
+          ]
+        },
+        "reported": {
+          "amounts": null,
+          "known": 0,
+          "of": 2,
+          "reasons": [
+            "not reported"
+          ]
+        }
+      }
+    ],
+    "estimate": {
+      "amounts": {
+        "USD": 0.1835
+      },
+      "known": 1,
+      "of": 3,
+      "reasons": [
+        "no price for claude-sonnet-5-5",
+        "output_tokens not reported"
+      ]
+    }
   },
   "changes": {
     "window_s": 1800,

@@ -5,6 +5,7 @@
   "links": {"traces": "https://langfuse.example.com/project/p1/traces", "dashboards": "https://langfuse.example.com/project/p1/dashboards"},
   "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/dashq"],
   "serverq_host": "fra/native",
+  "prices": [{"model": "claude-opus-5-5", "source": "https://example.com/invented-price-page", "effective": "2026-10-01", "currency": "USD", "input": 5, "output": 25, "cache_read": 0.5, "cache_write": 6.25}],
   "langfuse": {
     "at": 1791875130, "error": null, "incomplete": true,
     "value": {
@@ -52,6 +53,11 @@
          "metadata": {"attributes.agentq.installation": "inst-win", "attributes.host.name": "win-1", "attributes.agentq.runtime": "windows", "attributes.agentq.version": "0.4.0", "attributes.agentq.stage": "update"}},
         {"id": "q7", "traceId": "tr-q6", "startTime": "2026-10-13T05:00:00Z",
          "metadata": {"attributes.agentq.installation": "inst-win", "attributes.host.name": "win-1", "attributes.agentq.runtime": "windows", "attributes.agentq.version": "0.4.0", "attributes.agentq.stage": "update"}}
+      ],
+      "agentq.model": [
+        {"id": "m1", "name": "agentq.model", "startTime": "2026-10-13T06:55:39Z", "metadata": {"attributes.agentq.event_id": "m1", "attributes.host.name": "mac", "attributes.agentq.runtime": "macos", "attributes.agentq.agent": "claude", "attributes.agentq.session": "fixture-session", "attributes.agentq.model.name": "claude-opus-5-5", "attributes.agentq.model.input_tokens": 1200, "attributes.agentq.model.output_tokens": 800, "attributes.agentq.model.cache_read_tokens": 240000, "attributes.agentq.model.cache_creation_tokens": 6000, "attributes.agentq.model.cost_unknown": "not reported"}},
+        {"id": "m2", "name": "agentq.model", "startTime": "2026-10-13T07:00:39Z", "metadata": {"attributes.agentq.event_id": "m2", "attributes.host.name": "mac", "attributes.agentq.runtime": "macos", "attributes.agentq.agent": "claude", "attributes.agentq.session": "fixture-session", "attributes.agentq.model.name": "claude-opus-5-5", "attributes.agentq.model.input_tokens": 900, "attributes.agentq.model.output_tokens_unknown": "not in transcript", "attributes.agentq.model.cache_read_tokens": 180000, "attributes.agentq.model.cache_creation_tokens": 0, "attributes.agentq.model.cost_unknown": "not reported"}},
+        {"id": "m3", "name": "agentq.model", "startTime": "2026-10-13T07:03:39Z", "metadata": {"attributes.agentq.event_id": "m3", "attributes.host.name": "fra", "attributes.agentq.runtime": "macos", "attributes.agentq.agent": "claude", "attributes.agentq.session": "fixture-session", "attributes.agentq.model.name": "claude-sonnet-5-5", "attributes.agentq.model.input_tokens": 400, "attributes.agentq.model.output_tokens": 120, "attributes.agentq.model.cache_read_tokens": 30000, "attributes.agentq.model.cache_creation_tokens": 0, "attributes.agentq.model.cost_unknown": "not reported"}}
       ],
       "agentq.resource": [
         {"id": "r1", "traceId": "r1", "startTime": "2026-10-13T06:50:00Z",
