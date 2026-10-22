@@ -6,7 +6,7 @@ One dashboard for taskqorg tools: hosts and versions, boards, agent activity and
 
 ```sh
 dashq serve                      # page on http://127.0.0.1:18882 (loopback only)
-dashq report --period=7200       # the /data JSON once; --host=, --agent=, --session= filter
+dashq report --period=7200       # the /data JSON once; --host=, --agent=, --session= filter; --block= reads a telemetry block
 dashq selftest                   # fixture rendering, config, one read of each source
 dashq --snapshot DIR             # fixture page as DIR/page.html and DIR/page.png (headless Chrome)
 dashq service install            # coreq service unit running `dashq service run`

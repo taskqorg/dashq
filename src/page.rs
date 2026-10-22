@@ -412,12 +412,24 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         }
         let t = &r["telemetry"];
         if r["product"] == "taskq" && !revoked && t["state"] != "off" {
-            let line = if t["state"] == "ok" {
+            let mut line = if t["state"] == "ok" {
                 let why = json!({"reason": t["reason"].as_str().unwrap_or("not reported")});
-                format!("last sync {} · backlog {} rows ({} bytes) · gap {} rows", at(&t["last_synced"], now), num(&t["backlog_rows"], &why), num(&t["backlog_bytes"], &why), num(&t["gap_rows"], &why))
+                let k = &t["retained"];
+                format!("last sync {} · backlog {} rows ({} bytes) · gap {} rows · retained seq {}–{} ({} rows, {} blocks)", at(&t["last_synced"], now), num(&t["backlog_rows"], &why), num(&t["backlog_bytes"], &why), num(&t["gap_rows"], &why),
+                    text(&k["first_seq"]), text(&k["last_seq"]), text(&k["rows"]), text(&k["blocks"]))
             } else {
                 format!("Unknown · {}", text(&t["reason"]))
             };
+            // #181 A3: DashQ's own removals and the seq ranges no stored block covers, never folded into the sender's gap
+            for p in t["pruned"].as_array().into_iter().flatten() {
+                let _ = write!(line, " · pruned by DashQ ({}) {} rows", text(&p["cause"]), text(&p["rows"]));
+            }
+            if t["hole_rows"].as_i64().is_some_and(|n| n > 0) {
+                let _ = write!(line, " · not received {} rows in {} ranges", text(&t["hole_rows"]), text(&t["holes_total"]));
+            }
+            if t["restarts"].as_i64().is_some_and(|n| n > 0) {
+                let _ = write!(line, " · sender store restarted {}×", text(&t["restarts"]));
+            }
             let _ = writeln!(w, "<p class=\"detail\">Telemetry: {line}</p>");
         }
         let x = &r["export"];
@@ -1412,6 +1424,10 @@ mod tests {
         };
         let ok = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": 5, "backlog_bytes": 900, "gap_rows": 2, "reason": null}));
         assert!(ok.contains("Telemetry: last sync ") && ok.contains("(60s ago) · backlog 5 rows (900 bytes) · gap 2 rows"), "{ok}");
+        // #181 A3: DashQ's retained range, its own removals and unreceived rows stay apart from the sender's gap
+        let kept = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "status not reported by taskq",
+            "retained": {"first_seq": 7, "last_seq": 12, "rows": 4, "blocks": 2}, "pruned": [{"cause": "capacity", "rows": 6}], "hole_rows": 2, "holes_total": 1, "restarts": 1}));
+        assert!(kept.contains("· retained seq 7–12 (4 rows, 2 blocks) · pruned by DashQ (capacity) 6 rows · not received 2 rows in 1 ranges · sender store restarted 1×"), "{kept}");
         let partial = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "status not reported by taskq"}));
         assert!(partial.contains("backlog <span class=\"unknown\" title=\"unknown: status not reported by taskq\">—</span> rows"), "{partial}");
         assert!(html(json!({"state": "unknown", "reason": "no telemetry block yet"})).contains("Telemetry: Unknown · no telemetry block yet"));
