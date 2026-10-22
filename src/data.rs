@@ -557,24 +557,26 @@ pub fn build(inp: &Value) -> Value {
         }
         // TaskQ R6 3 (#1565): a live session's progress comes from its host's enrolled `taskq-board/1` task `session`
         // (stage, update time, one bounded worker line); the newest per task wins, shown on doing and review rows only.
-        let mut progress: BTreeMap<u64, &Value> = BTreeMap::new();
+        // the host shown is the enrolled row's label, not the payload's; a future `at` cannot pin newest-wins
+        let mut progress: BTreeMap<u64, (&Value, &str)> = BTreeMap::new();
         for r in inp["installations"]["rows"].as_array().into_iter().flatten()
             .filter(|r| r["product"] == "taskq" && r["connection"] != "revoked" && r["snapshot"]["schema"] == "taskq-board/1")
         {
             let p = &r["snapshot"]["payload"];
+            let label = r["host_label"].as_str().filter(|h| safe(h, 64, b"_.-")).unwrap_or("unknown");
             if !p["board"]["repo"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(repo)) {
                 continue;
             }
             for t in p["tasks"].as_array().into_iter().flatten() {
-                let (Some(n), Some(at)) = (t["n"].as_u64(), t["session"]["at"].as_u64()) else { continue };
-                if progress.get(&n).is_none_or(|v| v["at"].as_u64() < Some(at)) {
-                    progress.insert(n, &t["session"]);
+                let (Some(n), Some(at)) = (t["n"].as_u64(), t["session"]["at"].as_u64().filter(|&at| at <= now)) else { continue };
+                if progress.get(&n).is_none_or(|(v, _)| v["at"].as_u64() < Some(at)) {
+                    progress.insert(n, (&t["session"], label));
                 }
             }
         }
         for t in board["tasks"].as_array_mut().unwrap() {
-            if let Some(s) = t["n"].as_u64().and_then(|n| progress.get(&n)).filter(|_| matches!(t["state"].as_str(), Some("doing" | "review"))) {
-                t["session"] = json!({"host": s["host"], "runtime": s["runtime"], "stage": s["stage"], "age_s": now.checked_sub(s["at"].as_u64().unwrap()), "line": s["line"]});
+            if let Some(&(s, host)) = t["n"].as_u64().and_then(|n| progress.get(&n)).filter(|_| matches!(t["state"].as_str(), Some("doing" | "review"))) {
+                t["session"] = json!({"host": host, "runtime": s["runtime"], "stage": s["stage"], "age_s": now - s["at"].as_u64().unwrap(), "line": s["line"]});
             }
         }
         for i in board["failed"].as_array().unwrap() {
@@ -989,7 +991,8 @@ mod tests {
     }
 
     // Chain: enrolled taskq-board/1 task session -> board task row (#1565). Risk: an off-host Codex session shows no
-    // progress, an older or another board's record wins, or a closed task keeps a stale line.
+    // progress, an older or another board's record wins, a closed task keeps a stale line, a payload
+    // names another host, or a future time pins the newest choice.
     #[test]
     fn taskq_session_progress_joins_the_board_task_row() {
         let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
@@ -997,10 +1000,10 @@ mod tests {
         let tasks = build(&inp)["boards"][0]["tasks"].clone();
         let n = |state: &str| tasks.as_array().unwrap().iter().find(|t| t["state"] == state).unwrap()["n"].as_u64().unwrap();
         let (doing, ready) = (n("doing"), n("ready"));
-        let tasks_of = |at: u64, line: &str| [doing, ready].map(|n| json!({"n": n, "state": "doing", "session": {"host": "win", "runtime": "codex", "stage": "doing", "at": at, "line": line}}));
-        let rec = |repo: &str, at: u64, line: &str| json!({"product": "taskq", "connection": "active", "snapshot": {"schema": "taskq-board/1", "payload": {"schema": 1,
+        let tasks_of = |at: u64, line: &str| [doing, ready].map(|n| json!({"n": n, "state": "doing", "session": {"host": "spoof", "runtime": "codex", "stage": "doing", "at": at, "line": line}}));
+        let rec = |repo: &str, at: u64, line: &str| json!({"product": "taskq", "connection": "active", "host_label": "win", "snapshot": {"schema": "taskq-board/1", "payload": {"schema": 1,
             "board": {"kind": "github", "host": "github.com", "repo": repo}, "tasks": tasks_of(at, line)}}});
-        inp["installations"] = json!({"rows": [rec("taskqorg/taskq", now - 90, "old"), rec("taskqorg/taskq", now - 30, "Running tests"), rec("taskqorg/other", now, "other board")]});
+        inp["installations"] = json!({"rows": [rec("taskqorg/taskq", now - 90, "old"), rec("taskqorg/taskq", now - 30, "Running tests"), rec("taskqorg/other", now, "other board"), rec("taskqorg/taskq", now + 60, "future")]});
         let doc = build(&inp);
         let row = |n: u64| doc["boards"][0]["tasks"].as_array().unwrap().iter().find(|t| t["n"] == n).unwrap().clone();
         assert_eq!(row(doing)["session"], json!({"host": "win", "runtime": "codex", "stage": "doing", "age_s": 30, "line": "Running tests"}));
