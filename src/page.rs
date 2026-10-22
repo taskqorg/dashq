@@ -75,7 +75,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let filters: String = ["host", "agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v| format!("&{k}={}", enc(v)))).collect();
     let query = format!("?period={}{}", doc["period"].as_u64().unwrap_or(1800), filters);
     let mut action_html = String::new();
-    let action_count = actions(&mut action_html, doc, now, &query);
+    let action_count = actions(&mut action_html, doc, now);
     let mut h = String::new();
     let w = &mut h;
     let _ = write!(w, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body data-view=\"/\">\n<header>\n<h1>dashq</h1>\n");
@@ -133,6 +133,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     host_grid(w, doc, now);
     w.push_str(&action_html);
     let _ = writeln!(w, "<details id=\"source-status\"><summary>Source status \u{00b7} {} non-ok</summary><ul class=\"summary\">{}</ul></details>", not_ok.len(), not_ok.join(""));
+    changes(w, &doc["changes"], now);
 
     // 1. Attention
     let att = &doc["attention"];
@@ -439,6 +440,17 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             Some("unknown") => format!("Unknown · {}", text(&x["reason"])),
             _ => "Unknown · no qualified export evidence".into(),
         };
+        // D23: each delivery stage known, unknown or not applicable, from its own evidence
+        let route: Vec<String> = ["emitted", "queued", "accepted", "projected", "exported", "queryable"].iter().map(|k| {
+            let s = &r["route"][*k];
+            let v = match s["state"].as_str() {
+                Some("known") => match &s["value"] { Value::Bool(true) => if s["at"].is_null() { "yes".into() } else { format!("yes {}", at(&s["at"], now)) }, Value::Bool(false) => "no".into(), x => text(x) },
+                Some("not_applicable") => "n/a".into(),
+                _ => format!("unknown ({})", text(&s["reason"])),
+            };
+            format!("{k} {v}")
+        }).collect();
+        let _ = writeln!(w, "<p class=\"detail\" id=\"route-{id}\">Route: {}</p>", route.join(" · "));
         let _ = writeln!(w, "<p class=\"detail\">Export: {export}</p><details id=\"identity-{id}\"><summary id=\"scope-{id}\">Identity &amp; scope</summary><dl><dt>Installation</dt><dd><code>{}</code></dd><dt>Workspace</dt><dd>{}</dd><dt>Generation</dt><dd>{}</dd><dt>Version</dt><dd>{}</dd><dt>Authorized data</dt><dd>{}</dd><dt>Observation authority</dt><dd>Observation only · no task actions or host commands</dd>", esc(inst_id), esc(ws), text(&r["generation"]), r["snapshot"]["payload"]["version"].as_str().or_else(|| r["snapshot"]["payload"]["agentq.version"].as_str()).map(esc).unwrap_or_else(|| "Unknown · not reported".into()), r["scopes"].as_array().map(|v| v.iter().map(text).collect::<Vec<_>>().join(", ")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Unknown · not reported".into()));
         if let Some(caps) = r["capabilities"].as_array().filter(|c| !c.is_empty()) {
             let _ = writeln!(w, "<dt>Separately approved operations</dt><dd>{}</dd>", caps.iter().map(text).collect::<Vec<_>>().join(", "));
@@ -481,15 +493,15 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
             parts.join(" · ")
         };
         let source_note = r.get("source").map(unknown_line).unwrap_or_default();
-        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{detail}{source_note}</td></tr>", text(&r["check"]), status);
+        let row = format!("check-{}-{}", enc(ch["installation"].as_str().unwrap_or("report")), enc(r["check"].as_str().unwrap_or("")));
+        let _ = writeln!(w, "<tr id=\"{}\"><td>{}</td><td>{}</td><td>{detail}{source_note}</td></tr>", esc(&row), text(&r["check"]), status);
     }
     for m in ch["manual_rules"].as_array().into_iter().flatten() {
         let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>Manual rule: never verified by serverq.</td></tr>", text(&m["rule"]), badge("unknown", "not verified"));
     }
     let _ = writeln!(w, "</table>");
     for f in ch["findings"].as_array().into_iter().flatten() {
-        let identity = serde_json::to_vec(&json!([f["workspace"], f["installation"], f["rule"], f["first_seen"]])).unwrap();
-        let key: String = ring::digest::digest(&ring::digest::SHA256, &identity).as_ref().iter().map(|b| format!("{b:02x}")).collect();
+        let key = crate::explain::finding_id(f);
         let st = if f["state"] == "verified" && f["source"]["state"] == "ok" { "ok" } else { "unknown" };
         let _ = writeln!(w, "<details class=\"finding\" id=\"finding-{key}\"><summary id=\"finding-summary-{key}\">{} · {} · episode {}</summary><p>Workspace {} · installation <code>{}</code></p><p>First {} · last {} · observed {} · verified {}</p><p>Catalog {} <code>{}</code></p>", text(&f["rule"]), badge(st, f["state"].as_str().unwrap_or("unknown")), text(&f["first_seen"]), text(&f["workspace"]), text(&f["installation"]), at(&f["first_seen"], now), at(&f["last_seen"], now), at(&f["observed_at"], now), at(&f["verified_at"], now), text(&f["catalog"]["state"]), text(&f["catalog"]["sha256"]));
         let _ = writeln!(w, "{}", unknown_line(&f["source"]));
@@ -884,28 +896,41 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
 }
 
 /// D8.2: a person and a named action; observations/history remain in host detail.
-fn actions(w: &mut String, doc: &Value, now: u64, query: &str) -> usize {
+fn actions(w: &mut String, doc: &Value, now: u64) -> usize {
     let _ = writeln!(w, "<section id=\"attention\"><h2>Attention</h2><div class=\"action-list\">");
-    let mut count = 0;
-    for b in doc["boards"].as_array().into_iter().flatten() {
-        for q in b["questions"].as_array().into_iter().flatten() {
-            count += 1;
-            let target = format!("/projects?period={}#board-{}-q-{}", doc["period"].as_u64().unwrap_or(1800), enc(b["project"].as_str().unwrap_or("")), text(&q["number"]));
-            let _ = writeln!(w, "<p class=\"action-row\"><span>{} · #{} {}</span><a data-view-link data-board-question=\"{}\" data-task=\"{}\" href=\"{}\">Answer</a></p>", text(&b["project"]), text(&q["number"]), text(&q["title"]), text(&b["project"]), text(&q["number"]), esc(&target));
-        }
-    }
-    for i in doc["attention"]["current"].as_array().into_iter().flatten() {
-        let (target, action) = match i["source"].as_str() {
-            Some("taskq") if i["url"].is_string() => (i["url"].as_str().unwrap().to_string(), "Review failure"),
-            Some("serverq") => (format!("/checks{query}#checks"), "Diagnostics"),
-            _ => continue,
+    // D23: exactly the producer requests of /data, each opening its question, failure or finding
+    let requests = doc["attention"]["requests"].as_array().map_or(&[][..], Vec::as_slice);
+    for r in requests {
+        let what = match r["kind"].as_str() {
+            Some("finding") => format!("{} · {}", text(&r["host"]), text(&r["rule"])),
+            _ => format!("{} · #{}", text(&r["project"]), text(&r["task"])),
         };
-        count += 1;
-        let _ = writeln!(w, "<p class=\"action-row\"><span>{} · {} · {}</span><a {} href=\"{}\">{action}</a></p>", text(&i["host"]), text(&i["what"]), at(&i["since"], now), if target.starts_with('/') { "data-view-link" } else { "" }, esc(&target));
+        let target = r["target"].as_str().unwrap_or("");
+        let data = if r["kind"] == "question" { format!(" data-board-question=\"{}\" data-task=\"{}\"", text(&r["project"]), text(&r["task"])) } else { String::new() };
+        let since = if r["since"].is_null() { String::new() } else { format!(" · {}", at(&r["since"], now)) };
+        let _ = writeln!(w, "<p class=\"action-row\"><span>{what} {}{since}</span><a {}{data} href=\"{}\">{}</a></p>", text(&r["reason"]), if target.starts_with('/') { "data-view-link" } else { "" }, esc(target), text(&r["action"]));
     }
-    if count == 0 { let _ = writeln!(w, "<p>No actions requested.</p>"); }
+    if requests.is_empty() { let _ = writeln!(w, "<p>No actions requested.</p>"); }
     let _ = writeln!(w, "</div></section>");
-    count
+    requests.len()
+}
+
+/// D23 Changes: new, ongoing and resolved conditions of the period with their coverage; on demand.
+fn changes(w: &mut String, c: &Value, now: u64) {
+    let rows = c["rows"].as_array().map_or(&[][..], Vec::as_slice);
+    let cmp = &c["comparison"];
+    let _ = writeln!(w, "<details id=\"changes\"><summary>Changes in the last {} · {}</summary>", dur(c["window_s"].as_u64().unwrap_or(0)), text(&cmp["state"]));
+    if cmp["state"] != "available" { let _ = writeln!(w, "<p class=\"note\">Comparison {}: {}</p>", text(&cmp["state"]), text(&cmp["reason"])); }
+    let _ = writeln!(w, "<ul class=\"items\">");
+    for r in rows {
+        let until = if r["until"].is_null() { String::new() } else { format!(" · resolved {}", at(&r["until"], now)) };
+        let _ = writeln!(w, "<li><b>{}</b> · {} · {} · since {}{until}</li>", text(&r["state"]), text(&r["source"]), text(&r["what"]), at(&r["since"], now));
+    }
+    let _ = writeln!(w, "</ul>");
+    if rows.is_empty() { let _ = writeln!(w, "<p class=\"note\">No condition with a producer time in this window.</p>"); }
+    let coverage: Vec<String> = c["coverage"].as_array().into_iter().flatten().map(|x| if x["baseline"] == true { format!("{} baseline", text(&x["source"])) } else { format!("{}: {}", text(&x["source"]), text(&x["reason"])) }).collect();
+    let unclassified: Vec<String> = c["unclassified"].as_object().into_iter().flatten().map(|(k, n)| format!("{} {}", esc(k), text(n))).collect();
+    let _ = writeln!(w, "<p class=\"detail\">Coverage: {}{}</p></details>", if coverage.is_empty() { "none".into() } else { coverage.join(" · ") }, if unclassified.is_empty() { String::new() } else { format!(" · without start time: {}", unclassified.join(", ")) });
 }
 
 /// Host detail: real samples, gaps, policy components and independent source evidence.
@@ -970,13 +995,24 @@ fn servers(w: &mut String, res: &Value, now: u64) {
 /// D13: the TaskQ-owned browser components render these rows; static output keeps source/issue links.
 fn boards(w: &mut String, boards: &[Value]) {
     let _ = writeln!(w, "<section id=\"boards\" data-boards=\"{}\"><h2>Tasks</h2><div class=\"board-blocks\"></div><div class=\"board-fallback\">", esc(&serde_json::to_string(boards).unwrap()));
+    let mut waiting = String::new();
     for b in boards {
         let _ = writeln!(w, "<p><a href=\"{}\">{}</a> · Shared TaskQ blocks require JavaScript.</p>{}", text(&b["url"]), text(&b["project"]), unknown_line(&b["source"]));
+        // D23: TaskQ's own admission decision for each waiting row, never a DashQ guess
+        for t in b["tasks"].as_array().into_iter().flatten().filter(|t| t["admission"].is_object()) {
+            let a = &t["admission"];
+            let host = a["host"].as_str().map(|h| format!(" · {}", esc(h))).unwrap_or_default();
+            let age = a["age_s"].as_u64().map_or_else(|| "time unknown".into(), |s| format!("observed {} ago", dur(s)));
+            let _ = writeln!(waiting, "<li id=\"waiting-{}-{}\"><a href=\"{}\">{} #{}</a> {} · <b>{}</b> · {}{host} · {age}{}</li>", enc(b["project"].as_str().unwrap_or("")), text(&t["n"]), text(&t["url"]), text(&b["project"]), text(&t["n"]), text(&t["state"]),
+                text(&a["code"]), text(&a["meaning"]), a["reason"].as_str().map(|r| format!(" <span class=\"detail\">— {}</span>", esc(r))).unwrap_or_default());
+        }
         for q in b["questions"].as_array().into_iter().flatten() {
             let _ = writeln!(w, "<p>{} · {}</p>", issue(q), text(&q["text"]));
         }
     }
-    let _ = writeln!(w, "</div></section>");
+    let _ = writeln!(w, "</div><h3>Waiting work</h3>");
+    if waiting.is_empty() { let _ = writeln!(w, "<p class=\"note\">No ready or waiting task.</p>"); } else { let _ = writeln!(w, "<ul class=\"items\" id=\"waiting\">{waiting}</ul>"); }
+    let _ = writeln!(w, "</section>");
 }
 
 /// Bytes in GB with one decimal (10^9, the producers' own figures).

@@ -18,7 +18,7 @@ const UNKNOWN: [&str; 6] = ["no-model", "no-usage", "log-unreadable", "app-turn"
 /// A log read, or the newest telemetry block, older than this is stale (D6); the service rereads logs every 60 s.
 const LIMIT: u64 = 300;
 /// Attempt rows listed per document, newest first (D21).
-const ATTEMPTS: usize = 200;
+const ATTEMPTS: usize = crate::explain::CAP;
 
 /// Reads the stage records of one `taskq.log`; other lines are taskq's own and never leave this function.
 pub fn read(path: &str) -> Result<(Value, bool), crate::source::Fail> {
@@ -297,7 +297,9 @@ pub fn build(inp: &Value) -> Value {
         .collect();
     attempts.sort_by_key(|a| std::cmp::Reverse(a.0));
     let total = attempts.len();
-    let attempts: Vec<Value> = attempts.into_iter().take(ATTEMPTS).map(|(_, a)| a).collect();
+    // D23: `cursor` pages the newest-first list
+    let cursor = inp["filters"]["cursor"].as_str().and_then(|c| c.parse().ok()).unwrap_or(0);
+    let attempts: Vec<Value> = attempts.into_iter().skip(cursor).take(ATTEMPTS).map(|(_, a)| a).collect();
     // the worst host names the block's state; one missing source never reads ok
     let bad = ["unknown", "unconfirmed", "stale", "incomplete"].iter().find_map(|st| hosts.iter().find(|h| h["source"]["state"] == *st));
     let mut src = match (hosts.first(), bad) {

@@ -36,7 +36,7 @@ console.log('PASS immutable asset checksums');
 const blocks = bundle('project-blocks.js', 'TaskqProjectBlocks'), {boardProjects} = require('../assets/boards.js');
 const caps = html => [...html.matchAll(/class="([^"]*)" data-tqp="tasks"[^>]*data-state="(\w+)" aria-label="([^"]*)"/g)].map(m => [m[2], m[1], m[3]]);
 const [taskq, agentq] = boardProjects(require('../fixture/data.json').boards);
-assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
+assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready', 'Blocked'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
 assert(blocks.summary(taskq).includes('href="https://github.com/taskqorg/taskq/issues"') && blocks.summary(taskq).includes('data-icon="github"'), 'board link and provider icon');
 assert.deepEqual(caps(blocks.summary(agentq)).map(c => c[2].split(' · ')[1]), blocks.states.map(([, n]) => n + ': unknown'), 'unread board: every state unknown, none 0');
 const all = blocks.aggregate([taskq, agentq]);

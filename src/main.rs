@@ -7,6 +7,7 @@ mod clients;
 mod configure;
 mod data;
 mod enroll;
+mod explain;
 mod export;
 mod findings;
 mod optimization;
@@ -30,7 +31,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -940,12 +941,47 @@ mod tests {
         let report = app.doc(period, filters, Some(store::Scope::All));
         let (a, r) = (&data["agent_work"], &report["agent_work"]);
         assert_eq!((&a["attempts"], &a["rows"], &a["hosts"]), (&r["attempts"], &r["rows"], &r["hosts"]));
+        // D23 A6: the same projection names the same window, cursor, cap, changes and requests
+        for k in ["query", "changes"] { assert_eq!(data[k], report[k], "{k}"); }
+        assert_eq!((&data["attention"]["requests"], &data["query"]["timezone"], &data["query"]["cap"]), (&report["attention"]["requests"], &json!("UTC"), &json!(200)));
         assert_eq!((a["attempts_total"].as_u64(), data["sources"]["agent_work"]["state"].as_str()), (Some(7), Some("incomplete")));
         let page = String::from_utf8(route(&app, "GET", "/agents", "period=7200", Some(store::Scope::All)).2).unwrap();
         for t in a["attempts"].as_array().unwrap() {
             assert!(page.contains(&format!("<td>{}</td>", t["attempt"])), "attempt {} on the page", t["attempt"]);
         }
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// D23 A6 live (owner host, `DASHQ_LIVE_CONFIG=<config> cargo test -- --ignored live_waiting`): one real board
+    /// read through the pinned taskq binary; `/data` and `dashq report` agree, and every waiting row carries TaskQ's
+    /// own admission. Volatile times (`generated_at`, ages, window bounds, which move by the second) are dropped before comparing.
+    #[test]
+    #[ignore]
+    fn live_waiting_work_report_matches_data() {
+        let p = PathBuf::from(std::env::var("DASHQ_LIVE_CONFIG").expect("DASHQ_LIVE_CONFIG"));
+        let cfg = load_config(&p).unwrap();
+        let enroll = enroll::Enroll::open_with(p.parent().unwrap(), &cfg.public_host, cfg.limits);
+        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let (_, _, body) = route(&app, "GET", "/data", "period=86400&cursor=0", Some(store::Scope::All));
+        let (period, filters) = report_query(&["--period=86400", "--cursor=0"]).unwrap();
+        fn calm(v: &mut Value) {
+            match v {
+                Value::Object(o) => {
+                    for k in ["generated_at", "age_s", "from", "to", "at", "now", "start", "end"] { o.remove(k); }
+                    o.values_mut().for_each(calm);
+                }
+                Value::Array(a) => a.iter_mut().for_each(calm),
+                _ => {}
+            }
+        }
+        let (mut data, mut report): (Value, Value) = (serde_json::from_slice(&body).unwrap(), app.doc(period, filters, Some(store::Scope::All)));
+        let waiting: Vec<String> = data["boards"].as_array().unwrap().iter().flat_map(|b| b["tasks"].as_array().unwrap().iter().filter(|t| t["admission"].is_object())
+            .map(|t| format!("{}#{} {} {} {} observed {}", b["project"].as_str().unwrap(), t["n"], t["state"], t["admission"]["code"], t["admission"]["reason"], t["admission"]["observed"]))).collect();
+        eprintln!("{}\nquery {}\nchanges {} rows, comparison {}\nrequests {}", waiting.join("\n"), data["query"], data["changes"]["rows_total"], data["changes"]["comparison"], data["attention"]["requests"].as_array().unwrap().len());
+        assert!(!waiting.is_empty() && waiting.iter().all(|w| !w.contains(" \"unknown\" ")), "TaskQ admission on every waiting row");
+        calm(&mut data);
+        calm(&mut report);
+        assert!(data == report, "/data and dashq report differ");
     }
 
     fn load_config_fixture() -> Config {

@@ -1,0 +1,7 @@
+{
+  "repo": "taskqorg/taskq",
+  "tag": "v4.6.32",
+  "commit": "2c95bcf5315a9240691f4742830ff5e204196c46",
+  "path": "tests/fixtures/admission-codes.json",
+  "sha256": "cdc3b201a5d0049f0119647abe62497f239247b6e096f9fd10786d08825b5d63"
+}
