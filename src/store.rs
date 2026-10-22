@@ -203,7 +203,7 @@ pub struct Telemetry {
     pub oldest: Option<i64>,
     pub newest: Option<i64>,
     pub status: Option<String>,
-    /// `(cause, blocks, rows, highest seq)` removed by DashQ: `capacity` or `retention`.
+    /// `(cause, blocks, rows, highest seq)` removed by DashQ: `capacity`, `retention` or `allowlist` (lines dropped at ingest).
     pub pruned: Vec<(String, i64, i64, Option<i64>)>,
     /// Inclusive seq ranges between stored blocks, at most [`HOLES`]; `holes_total` and `hole_rows` count all.
     pub holes: Vec<(i64, i64)>,
@@ -1011,6 +1011,15 @@ impl Store {
                             let seq = |k: &str| p[k]["seq"].as_i64().or(p[k].as_i64());
                             tx.execute("INSERT INTO telemetry (installation, workspace, generation, event_id, observed, received, status, payload, first_seq, last_seq, rows) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                                 params![g.installation, g.workspace, g.generation, e.id, e.observed, now, p.get("status").map(|x| x.to_string()), e.payload, seq("first"), seq("last"), p["rows"].as_i64()])?;
+                            // lines dropped at ingest (outside the allowlist) are known loss like pruned ones (#181)
+                            if let Some(n) = p["dropped"].as_i64().filter(|n| *n > 0) {
+                                tx.execute(
+                                    "INSERT INTO telemetry_pruned VALUES (?1, ?2, 'allowlist', 1, ?3, ?4, ?5)
+                                     ON CONFLICT (installation, workspace, cause) DO UPDATE SET blocks = blocks + 1, rows = rows + excluded.rows,
+                                       through_seq = MAX(COALESCE(through_seq, excluded.through_seq), COALESCE(excluded.through_seq, through_seq)), at = excluded.at",
+                                    params![g.installation, g.workspace, n, seq("last"), now],
+                                )?;
+                            }
                             // one budget per installation and workspace: a busy host never evicts another's blocks;
                             // the oldest leave first and their loss stays counted
                             let over: Vec<i64> = tx
