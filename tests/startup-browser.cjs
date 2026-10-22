@@ -3,7 +3,7 @@
 const {chromium} = require('playwright');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const dir = process.env.DASHQ_STARTUP_EVIDENCE;
-const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/boards.js', 'assets/app.js'].map(f => fs.readFileSync(f, 'utf8')).join('\n');
+const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/taskq/task-controls.js', 'assets/boards.js', 'assets/app.js'].map(f => fs.readFileSync(f, 'utf8')).join('\n');
 const css = ['assets/style.css', 'assets/taskq/resource-controls.css', 'assets/resources.css', 'assets/taskq/project-blocks.css', 'assets/taskq/answer-card.css'].map(f => fs.readFileSync(f, 'utf8')).join('\n');
 const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'pending', 'warmup', 'partial', 'all-failed', 'recovery'];
 (async () => {

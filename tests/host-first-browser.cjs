@@ -4,7 +4,7 @@ const {chromium} = require('playwright');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict'), crypto = require('node:crypto');
 const dir = process.env.DASHQ_HOST_FIRST_EVIDENCE, capture = process.argv.includes('--capture');
 const html = fs.readFileSync(path.join(dir, 'page.html'), 'utf8');
-const jsFiles = ['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/boards.js','assets/app.js'];
+const jsFiles = ['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js', 'assets/boards.js','assets/app.js'];
 const cssFiles = ['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css'];
 const out = 'docs/design/evidence/host-first-runtime';
 const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','specq F1–F7'],reference:'docs/design/evidence/host-first/manifest.json',

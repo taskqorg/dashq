@@ -8,7 +8,7 @@ const {run} = require('./answer-live.cjs');
 const BOARD = 'o/test', OTHER = 'o/other', TASK = 7, S = 'github|1', HOST = 'dash.example';
 const asset = f => fs.readFileSync(__dirname + '/../assets/taskq/' + f, 'utf8');
 
-function stub({guard = true, rows = [{product: 'taskq', workspace: BOARD, running: {version: '4.1.0', last_known: false}, observation: {state: 'ok'}}], app = ['project-blocks.js', 'answer-card.js'].map(asset).join('\n')} = {}) {
+function stub({guard = true, rows = [{product: 'taskq', workspace: BOARD, running: {version: '4.1.0', last_known: false}, observation: {state: 'ok'}}], app = ['project-blocks.js', 'answer-card.js', 'task-controls.js'].map(asset).join('\n')} = {}) {
   const st = {rev: 100, writes: 0, comments: [], ops: new Map(), revoked: false};
   const json = (res, code, v) => { res.writeHead(code, {'content-type': 'application/json'}); res.end(JSON.stringify(v)); };
   const refuse = (res, code) => json(res, code, {outcome: 'rejected', op_id: null});

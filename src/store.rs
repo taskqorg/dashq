@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT 
 CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL, workspace TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, product TEXT NOT NULL, installation TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, schemas TEXT NOT NULL, expires INTEGER NOT NULL, interval INTEGER NOT NULL, polled INTEGER NOT NULL, failures INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied', 'invalid', 'acked')), workspace TEXT, generation INTEGER, sealed BLOB);
 CREATE TABLE IF NOT EXISTS activations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
+CREATE TABLE IF NOT EXISTS controllers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
 CREATE TABLE IF NOT EXISTS answerers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
 CREATE TABLE IF NOT EXISTS answers(op_id TEXT PRIMARY KEY, subject TEXT NOT NULL, workspace TEXT NOT NULL, board TEXT NOT NULL, task INTEGER NOT NULL, revision INTEGER NOT NULL, payload BLOB NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'stale', 'unknown')), receipt TEXT, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS resource_grants(grant_id TEXT PRIMARY KEY, actor_id TEXT NOT NULL, subject TEXT NOT NULL, workspace TEXT NOT NULL, installation TEXT NOT NULL, generation INTEGER NOT NULL, projects TEXT NOT NULL, runtimes TEXT NOT NULL, host_policy INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked INTEGER NOT NULL);
@@ -636,6 +637,27 @@ impl Store {
             [workspace, subject],
             |r| r.get(0),
         )?)
+    }
+
+    /// Task controls require a separate explicit grant; answer/enrollment authority never implies it.
+    pub fn set_controller(&self, workspace: &str, subject: &str, allow: bool) -> Result<(), Error> {
+        self.write(|tx| {
+            if allow { tx.execute("INSERT OR IGNORE INTO controllers VALUES (?1, ?2)", [workspace, subject])?; }
+            else { tx.execute("DELETE FROM controllers WHERE workspace = ?1 AND subject = ?2", [workspace, subject])?; }
+            Ok(())
+        })
+    }
+
+    pub fn can_control(&self, workspace: &str, subject: &str) -> Result<bool, Error> {
+        Ok(self.lock()?.query_row(
+            "SELECT EXISTS (SELECT 1 FROM members m JOIN controllers c ON c.workspace = m.workspace AND c.subject = m.subject WHERE m.workspace = ?1 AND m.subject = ?2 AND m.role = 'admin')",
+            [workspace, subject], |r| r.get(0),
+        )?)
+    }
+
+    /// A control must pass its canonical row check before it acquires a pending dispatch identity.
+    pub fn has_answer(&self, op_id: &str) -> Result<bool, Error> {
+        Ok(self.lock()?.query_row("SELECT EXISTS (SELECT 1 FROM answers WHERE op_id = ?1)", [op_id], |r| r.get(0))?)
     }
 
     /// Records `op` as `pending` unless its op ID exists; returns the existing record instead.

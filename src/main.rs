@@ -30,7 +30,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -52,6 +52,7 @@ struct Config {
     public_host: String,
     /// `None`: no answer route (D13); writes need the dedicated credential and the pinned binary.
     answer: Option<answer::Config>,
+    task_controls: Option<answer::Config>,
     /// `resources: true` enables the typed host-policy routes (D14); off until the target-host adapter is qualified.
     resources: bool,
     /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
@@ -115,21 +116,17 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => None,
         Some(_) => Some(s("/taskq/binary", &|x| std::path::Path::new(x).is_absolute())?),
     };
-    let answer = match v.get("answer") {
-        None => None,
-        Some(_) => {
-            let token = s("/answer/token", &|x| std::path::Path::new(x).is_absolute())?;
-            let boards = v["answer"]["boards"]
-                .as_object()
-                .filter(|o| !o.is_empty())
-                .and_then(|o| o.iter().map(|(b, w)| w.as_str().filter(|w| enroll::id(w, 64) && projects.contains(b)).map(|w| (b.clone(), w.to_string()))).collect())
-                .ok_or("config: bad key answer.boards")?;
-            if taskq_bin.is_none() {
-                return Err("config: bad key taskq.binary".into());
-            }
-            Some(answer::Config { token: token.into(), boards })
-        }
+    let write_config = |key: &str| -> Result<Option<answer::Config>, String> {
+        if v.get(key).is_none() { return Ok(None); }
+        let token = s(&format!("/{key}/token"), &|x| std::path::Path::new(x).is_absolute())?;
+        let boards = v[key]["boards"].as_object().filter(|o| !o.is_empty())
+            .and_then(|o| o.iter().map(|(b, w)| w.as_str().filter(|w| enroll::id(w, 64) && projects.contains(b)).map(|w| (b.clone(), w.to_string()))).collect())
+            .ok_or(format!("config: bad key {key}.boards"))?;
+        if taskq_bin.is_none() { return Err("config: bad key taskq.binary".into()); }
+        Ok(Some(answer::Config { token: token.into(), boards }))
     };
+    let answer = write_config("answer")?;
+    let task_controls = write_config("task_controls")?;
     let resources = match v.get("resources") {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key resources")?,
@@ -174,6 +171,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         serverq_host: host,
         public_host,
         answer,
+        task_controls,
         resources,
         agentq_configure,
         taskq_logs,
@@ -351,7 +349,7 @@ fn handle(app: &App, mut s: TcpStream) {
     }
     let req = enroll::Req { method, path, query, headers: &headers, body: &body };
     let c = &app.cfg;
-    let ctx = answer::Ctx { enroll: &app.enroll, cfg: c.answer.as_ref(), bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
+    let ctx = answer::Ctx { enroll: &app.enroll, cfg: if path == "/task/control" { c.task_controls.as_ref() } else { c.answer.as_ref() }, bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
     let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let t0 = profile::begin();
@@ -360,7 +358,7 @@ fn handle(app: &App, mut s: TcpStream) {
         ("http.configure", x.status)
     } else if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
-        ("http.answer", x.status)
+        (if path == "/task/control" { "http.control" } else { "http.answer" }, x.status)
     } else if let Some(x) = policy::route(&rctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.resources", x.status)
@@ -497,7 +495,7 @@ fn serve(t: &Tool, service: bool) -> ! {
 }
 
 fn app_js() -> String {
-    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
+    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
 }
 
 fn style_css() -> String {
@@ -561,7 +559,8 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if fixture_html() != FIXTURE_HTML {
         return Err("fixture: rendering differs from fixture/page.html".into());
     }
-    println!("fixture: ok");
+    answer::control_fixture()?;
+    println!("fixture: ok; task controls: taskq.task-controls/1");
     let p = config_path(t);
     if !p.exists() {
         println!("config: none at DASHQ_CONFIG or {}; source reads skipped", p.display());
@@ -666,6 +665,11 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             enroll::Enroll::answerer(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
             println!("answerer: {subject} {op} in {workspace}");
+        }
+        ["controller", workspace, subject, op @ ("on" | "off")] => {
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            enroll::Enroll::controller(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
+            println!("controller: {subject} {op} in {workspace}");
         }
         ["resources", "grant", workspace, subject, installation, hours, rest @ ..] => {
             let hours: i64 = hours.parse().ok().filter(|h| (1..=24 * 365).contains(h)).unwrap_or_else(|| t.die(USAGE));
@@ -878,7 +882,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -966,6 +970,19 @@ mod tests {
         write(&t);
         let a = load_config(&p).unwrap().answer.unwrap();
         assert_eq!((a.token.to_str(), a.boards["taskqorg/dashq"].as_str()), (token_path.to_str(), "ws-1"));
+        // #179 A1/A5: controls are separately configured, off by default, and bound to configured boards.
+        assert!(load_config(&p).unwrap().task_controls.is_none());
+        t["task_controls"] = json!({"token": token_path, "boards": {"taskqorg/dashq": "ws-1"}});
+        write(&t);
+        assert_eq!(load_config(&p).unwrap().task_controls.unwrap().boards["taskqorg/dashq"], "ws-1");
+        t["task_controls"]["boards"] = json!({"other/repo": "ws-1"});
+        write(&t);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key task_controls.boards");
+        t["task_controls"]["boards"] = json!({"taskqorg/dashq": "ws-1"});
+        t["task_controls"]["token"] = json!("relative");
+        write(&t);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key task_controls.token");
+        t.as_object_mut().unwrap().remove("task_controls");
         // only configured projects are answerable, and answers need the pinned binary
         t["answer"]["boards"] = json!({"other/repo": "ws-1"});
         write(&t);

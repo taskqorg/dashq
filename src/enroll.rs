@@ -191,6 +191,13 @@ impl Enroll {
         e.store.set_answerer(workspace, subject, allow).map_err(|e| format!("dashq.db: {e:?}"))
     }
 
+    /// Host-administrator-only task-control grant, separate from answering and observation.
+    pub fn controller(dir: &Path, workspace: &str, subject: &str, allow: bool) -> Result<(), String> {
+        if !id(workspace, 64) || !valid_subject(subject) { return Err("controller: bad workspace or subject".into()); }
+        let e = Enroll::open(dir, "")?;
+        e.store.set_controller(workspace, subject, allow).map_err(|e| format!("dashq.db: {e:?}"))
+    }
+
     /// True when another session is allowed for `ip` now; else the seconds to wait.
     fn admit(&self, ip: &str, now: i64) -> Result<(), i64> {
         let mut m = self.recent.lock().unwrap_or_else(|p| p.into_inner());
@@ -2059,7 +2066,7 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
+        let cfg = crate::Config { langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
         crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
     }
 

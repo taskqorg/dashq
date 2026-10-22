@@ -261,3 +261,10 @@ a { color:var(--link);text-underline-offset:3px; }
 .host-evidence { grid-column:1/-1;min-width:0;overflow-wrap:anywhere; }
 .host-observation.unconfirmed { color:var(--muted); }
 .host-evidence-grid { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:14px; }
+
+/* D13: the adapter gates the unchanged TaskQ control block. */
+.task-control-adapter fieldset{border:0;padding:0;margin:.3em 0;min-width:0}
+.task-control-adapter .task-controls{display:flex;flex-wrap:wrap;gap:.4em;align-items:center}
+.task-control-adapter p{margin:.2em 0}
+.task-control-adapter p:empty{display:none}
+.task-control-adapter button{font:inherit;padding:.2em .45em}
