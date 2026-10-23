@@ -941,9 +941,25 @@ mod tests {
         cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
         let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
-        let data: Value = serde_json::from_slice(&body).unwrap();
+        let mut data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--period=7200"]).unwrap();
-        let report = app.doc(period, filters, Some(store::Scope::All));
+        let mut report = app.doc(period, filters, Some(store::Scope::All));
+        // Separate requests can cross a second; validate ages/windows before comparing their stable contents.
+        for doc in [&mut data, &mut report] {
+            let at = doc["generated_at"].as_u64().unwrap();
+            for host in doc["agent_work"]["hosts"].as_array_mut().unwrap() {
+                let src = &mut host["source"];
+                if let Some(observed) = src["at"].as_u64() {
+                    assert_eq!(src["age_s"], json!(at.saturating_sub(observed)));
+                    src["age_s"] = json!(0);
+                }
+            }
+            for k in ["query", "changes"] {
+                assert_eq!((&doc[k]["from"], &doc[k]["to"]), (&json!(at - period), &json!(at)));
+                doc[k]["from"] = json!(0);
+                doc[k]["to"] = json!(period);
+            }
+        }
         let (a, r) = (&data["agent_work"], &report["agent_work"]);
         assert_eq!((&a["attempts"], &a["rows"], &a["hosts"]), (&r["attempts"], &r["rows"], &r["hosts"]));
         // D23 A6: the same projection names the same window, cursor, cap, changes and requests
