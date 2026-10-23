@@ -113,6 +113,7 @@ function controlKey(e) {
   return e.tagName.toLowerCase();
 }
 function renderBoards() {
+  if (typeof TaskqTaskWorkspace !== 'undefined') return renderTaskWorkspace();
   const root = document.getElementById('boards');
   if (!root) return;
   const boards = JSON.parse(root.dataset.boards), blocks = root.querySelector('.board-blocks');

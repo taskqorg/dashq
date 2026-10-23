@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT 
 CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL, workspace TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, product TEXT NOT NULL, installation TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, schemas TEXT NOT NULL, expires INTEGER NOT NULL, interval INTEGER NOT NULL, polled INTEGER NOT NULL, failures INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied', 'invalid', 'acked')), workspace TEXT, generation INTEGER, sealed BLOB);
 CREATE TABLE IF NOT EXISTS activations(installation TEXT NOT NULL, generation INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (installation, generation));
+CREATE TABLE IF NOT EXISTS pm_requesters(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY(workspace,subject));
+CREATE TABLE IF NOT EXISTS pm_hosts(installation TEXT PRIMARY KEY, generation INTEGER NOT NULL, workspace TEXT NOT NULL, targets TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS pm_ops(actor TEXT NOT NULL, op TEXT NOT NULL, subject TEXT NOT NULL, workspace TEXT NOT NULL, installation TEXT NOT NULL, generation INTEGER NOT NULL, revision TEXT NOT NULL, digest BLOB NOT NULL, request TEXT, expires INTEGER NOT NULL, delivered INTEGER NOT NULL, receipt TEXT, PRIMARY KEY(actor,op));
 CREATE TABLE IF NOT EXISTS controllers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
 CREATE TABLE IF NOT EXISTS answerers(workspace TEXT NOT NULL, subject TEXT NOT NULL, PRIMARY KEY (workspace, subject));
 CREATE TABLE IF NOT EXISTS answers(op_id TEXT PRIMARY KEY, subject TEXT NOT NULL, workspace TEXT NOT NULL, board TEXT NOT NULL, task INTEGER NOT NULL, revision INTEGER NOT NULL, payload BLOB NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'accepted', 'rejected', 'stale', 'unknown')), receipt TEXT, at INTEGER NOT NULL);
@@ -348,7 +351,7 @@ pub struct Pending {
 pub struct Store {
     conn: Mutex<Connection>,
     waiting: AtomicUsize,
-    limits: Limits,
+    pub(crate) limits: Limits,
 }
 
 fn create_private(path: &Path) -> Result<(), Error> {
@@ -371,14 +374,14 @@ fn check(c: &Connection) -> Result<(), Error> {
 }
 
 /// Live bytes: used pages plus the WAL file.
-fn used(c: &Connection, path: &Path) -> Result<u64, Error> {
+pub(crate) fn used(c: &Connection, path: &Path) -> Result<u64, Error> {
     let pages: i64 = c.query_row("SELECT (SELECT page_count FROM pragma_page_count) - (SELECT freelist_count FROM pragma_freelist_count)", [], |r| r.get(0))?;
     let page: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;
     let wal = std::fs::metadata(format!("{}-wal", path.display())).map(|m| m.len()).unwrap_or(0);
     Ok(pages as u64 * page as u64 + wal)
 }
 
-fn authorize(c: &Connection, verifier: &[u8]) -> Result<Option<Grant>, Error> {
+pub(crate) fn authorize(c: &Connection, verifier: &[u8]) -> Result<Option<Grant>, Error> {
     Ok(c.query_row(
         "SELECT installation, generation, workspace, account, scopes, board, capabilities FROM grants g WHERE verifier = ?1
          AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)",
@@ -557,7 +560,7 @@ impl Store {
         Ok(Store { conn: Mutex::new(c), waiting: AtomicUsize::new(0), limits })
     }
 
-    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, Error> {
+    pub(crate) fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, Error> {
         if self.waiting.fetch_add(1, Ordering::SeqCst) >= self.limits.writers {
             self.waiting.fetch_sub(1, Ordering::SeqCst);
             return Err(Error::Busy);
@@ -577,7 +580,7 @@ impl Store {
         Ok(r)
     }
 
-    fn path(c: &Connection) -> std::path::PathBuf {
+    pub(crate) fn path(c: &Connection) -> std::path::PathBuf {
         c.path().unwrap_or_default().into()
     }
 
@@ -1310,6 +1313,7 @@ impl Store {
     pub fn prune(&self, now: i64) -> Result<(), Error> {
         let l = self.limits;
         self.write(|tx| {
+            tx.execute("UPDATE pm_ops SET request=NULL WHERE expires<=?1", [now])?;
             let cut = now - l.outbox_secs;
             // a gap belongs to the workspace of the grant that sent its events
             tx.execute(

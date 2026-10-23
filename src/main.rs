@@ -4,6 +4,7 @@ mod accounting;
 mod agent_work;
 mod model_use;
 mod answer;
+mod pm;
 mod clients;
 mod configure;
 mod data;
@@ -32,7 +33,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -55,6 +56,7 @@ struct Config {
     /// `None`: no answer route (D13); writes need the dedicated credential and the pinned binary.
     answer: Option<answer::Config>,
     task_controls: Option<answer::Config>,
+    pm_requests: bool,
     /// `resources: true` enables the typed host-policy routes (D14); off until the target-host adapter is qualified.
     resources: bool,
     /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
@@ -131,6 +133,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     };
     let answer = write_config("answer")?;
     let task_controls = write_config("task_controls")?;
+    let pm_requests = match v.get("pm_requests") { None => false, Some(v) => v.as_bool().ok_or("config: bad key pm_requests")? };
     let resources = match v.get("resources") {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key resources")?,
@@ -177,6 +180,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         public_host,
         answer,
         task_controls,
+        pm_requests,
         resources,
         agentq_configure,
         taskq_logs,
@@ -361,8 +365,12 @@ fn handle(app: &App, mut s: TcpStream) {
     let ctx = answer::Ctx { enroll: &app.enroll, cfg: if path == "/task/control" { c.task_controls.as_ref() } else { c.answer.as_ref() }, bin: c.taskq_bin.as_deref(), public_host: &c.public_host, state: &app.answers };
     let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
+    let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = configure::route(&cctx, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.pm", x.status)
+    } else if let Some(x) = configure::route(&cctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.configure", x.status)
     } else if let Some(x) = answer::route(&ctx, &req, source::now() as i64) {
@@ -504,11 +512,11 @@ fn serve(t: &Tool, service: bool) -> ! {
 }
 
 fn app_js() -> String {
-    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
+    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/taskq/task-workspace.js"), include_str!("../assets/taskq/pm-composer.js"), include_str!("../assets/workspace.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
 }
 
 fn style_css() -> String {
-    [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css")].join("\n")
+    [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css"), include_str!("../assets/taskq/pm-composer.css"), include_str!("../assets/workspace.css"), &format!("@scope (#taskq-workspace) {{{}}}", include_str!("../assets/taskq/task-workspace.css"))].join("\n")
 }
 
 fn fixture_doc() -> Value {
@@ -675,6 +683,13 @@ fn main() {
             enroll::Enroll::answerer(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
             println!("answerer: {subject} {op} in {workspace}");
         }
+        ["pm-requester", workspace, subject, op @ ("on" | "off")] => {
+            if !enroll::id(workspace, 64) || !enroll::valid_subject(subject) { t.die("pm-requester: bad workspace or subject"); }
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
+            e.store().pm_requester(workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&format!("PM grant: {e:?}")));
+            println!("PM actor: {} · {op} in {workspace}", pm::actor(subject));
+        }
         ["controller", workspace, subject, op @ ("on" | "off")] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             enroll::Enroll::controller(&dir, workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&e));
@@ -806,6 +821,13 @@ mod tests {
     #[test]
     fn shared_board_conformance() {
         let out = std::process::Command::new("node").arg("tests/boards.cjs").current_dir(env!("CARGO_MANIFEST_DIR")).output().expect("node is required for shared TaskQ conformance");
+        assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+
+    // #186 A2-A4: unchanged release assets and PM identity/receipt fixtures.
+    #[test]
+    fn shared_workspace_conformance() {
+        let out = std::process::Command::new("node").arg("tests/workspace.cjs").current_dir(env!("CARGO_MANIFEST_DIR")).output().expect("node is required for shared TaskQ conformance");
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }
 
@@ -1007,7 +1029,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -1075,7 +1097,13 @@ mod tests {
             write(&t);
             assert_eq!(load_config(&p).err().unwrap(), format!("config: bad key {key}"));
         }
-        // forwarding is off unless the flag is a literal true
+        // #186 A1: PM requires a literal boolean opt-in.
+        assert!(!c.pm_requests);
+        let mut pm = good.clone(); pm["pm_requests"] = json!(true); write(&pm);
+        assert!(load_config(&p).unwrap().pm_requests);
+        pm["pm_requests"] = json!("yes"); write(&pm);
+        assert_eq!(load_config(&p).err().unwrap(), "config: bad key pm_requests");
+        // Forwarding has its own opt-in.
         assert!(!c.forward);
         let mut f = good.clone();
         f["langfuse"]["forward"] = json!("yes");

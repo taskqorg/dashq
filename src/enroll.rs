@@ -221,7 +221,7 @@ impl Enroll {
 impl Enroll {
     /// One request from a device; else the seconds until the next token.
     // ponytail: in-memory buckets, reset by a restart; qualify under the C5 load hold
-    fn spend(&self, g: &store::Grant, now: i64) -> Result<(), i64> {
+    pub(crate) fn spend(&self, g: &store::Grant, now: i64) -> Result<(), i64> {
         let mut m = self.buckets.lock().unwrap_or_else(|p| p.into_inner());
         if m.len() > 10_000 {
             m.retain(|_, (_, t)| now - *t < 60);
@@ -2177,7 +2177,7 @@ mod tests {
 
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
-        let cfg = crate::Config { prices: Value::Null, langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
+        let cfg = crate::Config { prices: Value::Null, langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
         crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
     }
 
