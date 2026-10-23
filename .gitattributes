@@ -10,3 +10,5 @@ assets/taskq/project-blocks.* -text
 assets/taskq/task-controls.* -text
 fixture/taskq/admission-codes.json -text
 fixture/taskq/host-observations.json -text
+assets/taskq/task-workspace* -text
+assets/taskq/pm-composer* -text

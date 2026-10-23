@@ -246,7 +246,7 @@ fn post(c: &Ctx, r: &Req, now: i64) -> Resp {
 
 /// True when another answer is allowed for `subject` now; else the seconds to wait.
 // ponytail: in-memory window, reset by a restart
-fn admit(a: &Answers, subject: &str, now: i64) -> Result<(), i64> {
+pub(crate) fn admit(a: &Answers, subject: &str, now: i64) -> Result<(), i64> {
     let mut m = a.recent.lock().unwrap_or_else(|p| p.into_inner());
     let v = m.entry(subject.into()).or_default();
     v.retain(|t| now - t < 60);

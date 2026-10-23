@@ -1,0 +1,8 @@
+/* TaskQ fit sets body width to 100%; include DashQ padding in that width. */
+body{box-sizing:border-box}
+/* The released window stylesheet is scoped in style_css(); the embedding supplies its containing box. */
+#taskq-workspace{height:75vh;min-height:360px;max-height:900px;--work:currentColor;--ready:currentColor;--failed:currentColor;--ask:currentColor;--surface:light-dark(#fafbfc,#252b32);--muted:light-dark(#59636e,#b9c3cd);--edge:light-dark(#dce0e5,#46505b);color:light-dark(#243039,#eef2f5);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#workspace-notice{overflow-wrap:anywhere}
+#pm-target{max-width:100%;font:inherit}
+#pm-composer .conversation-composer{display:grid;gap:6px}
+#pm-composer textarea{box-sizing:border-box;width:100%;font:inherit}

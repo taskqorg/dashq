@@ -64,7 +64,7 @@ async function refresh() {
     const page = await fetch('/' + query, { cache: 'no-store' });
     if (!page.ok) throw new Error('HTTP ' + page.status);
     const next = new DOMParser().parseFromString(await page.text(), 'text/html');
-    const main = next.getElementById('main');
+    let main = next.getElementById('main');
     if (!main) throw new Error('invalid page');
     if (query !== location.search) { busy = false; queueMicrotask(refresh); return; }
     // D10: new values keep open disclosures, focus and reading position
@@ -90,9 +90,16 @@ async function refresh() {
     const oldBoards = document.getElementById('boards'), newBoards = main.querySelector('#boards');
     if (oldBoards && newBoards) {
       oldBoards.dataset.boards = newBoards.dataset.boards;
-      newBoards.replaceWith(oldBoards);
-    }
-    document.getElementById('main').replaceWith(main);
+      // Keep the workspace connected: detaching it blurs focused drafts and task-detail controls.
+      const current = document.getElementById('main');
+      for (const child of [...current.childNodes]) if (child !== oldBoards) child.remove();
+      let before = true;
+      for (const child of [...main.childNodes]) {
+        if (child === newBoards) { before = false; continue; }
+        current.insertBefore(child, before ? oldBoards : null);
+      }
+      main = current;
+    } else document.getElementById('main').replaceWith(main);
     const attention = document.getElementById('attention-link');
     if (attention && next.getElementById('attention-link')) attention.textContent = next.getElementById('attention-link').textContent;
     renderBoards();
