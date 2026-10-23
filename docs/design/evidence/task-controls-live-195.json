@@ -1,0 +1,238 @@
+{
+  "candidate": "9850f5bc1bf6d56a3547ab246ec410ec2cb400fb",
+  "dashq": "v0.15.0",
+  "taskq": "v4.6.30",
+  "platform": "Docker Linux x86_64 on macOS; no published ports",
+  "actor": "synthetic, host-local; no forward-auth qualification",
+  "credential": "existing owner-authorized host PAT; original mode 0600; no new token",
+  "checks": {
+    "component pin": {
+      "result": "PASS"
+    },
+    "candidate version": {
+      "result": "PASS"
+    },
+    "served released control bundle": {
+      "result": "PASS"
+    },
+    "fresh complete board preflight": {
+      "result": "PASS"
+    },
+    "disposable held with own-task dependency": {
+      "result": "PASS",
+      "detail": {
+        "state": "held",
+        "revision": 6356531142,
+        "controls": [
+          "start"
+        ]
+      }
+    },
+    "worker admission blocked by #195": {
+      "result": "PASS"
+    },
+    "released renderer offers Start": {
+      "result": "PASS"
+    },
+    "synthetic controller capability": {
+      "result": "PASS"
+    },
+    "missing actor": {
+      "result": "PASS",
+      "detail": {
+        "status": 401,
+        "outcome": "rejected",
+        "reason": "Sign-in required: open the dashboard address"
+      }
+    },
+    "revoked controller": {
+      "result": "PASS",
+      "detail": {
+        "status": 403,
+        "outcome": "rejected",
+        "reason": "This account may not control tasks on this board"
+      }
+    },
+    "cross-workspace controller": {
+      "result": "PASS",
+      "detail": {
+        "status": 403,
+        "outcome": "rejected",
+        "reason": "This account may not control tasks on this board"
+      }
+    },
+    "cross-origin request": {
+      "result": "PASS",
+      "detail": {
+        "status": 403,
+        "outcome": "rejected",
+        "reason": "Request refused: it did not come from this dashboard's own page"
+      }
+    },
+    "wrong CSRF": {
+      "result": "PASS",
+      "detail": {
+        "status": 403,
+        "outcome": "rejected",
+        "reason": "Request refused: the form expired or belongs to another account; reload the page"
+      }
+    },
+    "stale revision": {
+      "result": "PASS",
+      "detail": {
+        "status": 409,
+        "outcome": "stale",
+        "reason": "The task changed; review its current controls"
+      }
+    },
+    "all denial probes left canonical log/revision unchanged": {
+      "result": "PASS",
+      "detail": {
+        "probes": 6,
+        "comments": 1,
+        "revision": 6356531142
+      }
+    },
+    "one offered Start accepted": {
+      "result": "PASS",
+      "detail": {
+        "status": 200,
+        "body": {
+          "task": 205,
+          "op_id": "dashq.control.live195.start.205.6356531142",
+          "outcome": "accepted",
+          "state": "waiting",
+          "revision": 6356558193,
+          "reason": "",
+          "next": ""
+        }
+      }
+    },
+    "one canonical operation entry": {
+      "result": "PASS",
+      "detail": {
+        "comments": 2
+      }
+    },
+    "real board moved to waiting": {
+      "result": "PASS",
+      "detail": {
+        "state": "waiting",
+        "revision": 6356558193,
+        "controls": [
+          "stop",
+          "later"
+        ],
+        "attempt": null
+      }
+    },
+    "same op-id repeats exact accepted receipt": {
+      "result": "PASS",
+      "detail": {
+        "status": 200,
+        "body": {
+          "task": 205,
+          "op_id": "dashq.control.live195.start.205.6356531142",
+          "outcome": "accepted",
+          "state": "waiting",
+          "revision": 6356558193,
+          "reason": "",
+          "next": ""
+        }
+      }
+    },
+    "same op-id retry adds no canonical entry": {
+      "result": "PASS"
+    },
+    "DashQ projection shows canonical waiting row": {
+      "result": "PASS",
+      "detail": {
+        "state": "waiting",
+        "revision": 6356558193,
+        "source": {
+          "state": "ok",
+          "at": 1792725569,
+          "age_s": 0,
+          "reason": null,
+          "incomplete": false
+        }
+      }
+    }
+  },
+  "cleanup": {
+    "test_task_closed": true,
+    "closed_task": 205,
+    "candidate_removed": true,
+    "taskq-install_removed": true,
+    "board_removed": true,
+    "container_removed": true
+  },
+  "binaries": {
+    "dashq_sha256": "c30433c3967f5a79caacbdd5f9555040aec29db8224b317fb61563a4d31fcb4e",
+    "taskq_sha256": "041ac4914c0aaa4b573e4c53fffd2b4660cc075a51cc92b0703b96b3d8e50cb9"
+  },
+  "component": {
+    "release": "v4.6.30",
+    "commit": "09cb0d7db35d0de51bef83d9fa3ec803eafad42d",
+    "files": {
+      "answer-card.js": "c4b9c515bfb85d4daf1c96fd61642d5b495551d42b844d3c82447b9e8d049d49",
+      "answer-card.css": "8a9bf9e08bd73795f02021809a008a210d0ac61569c0e365107c77e6cca38bcc",
+      "answer-card.json": "0913dda8e1ba589f4417e666c11d576479a574fee268009071821c6a1763ff94",
+      "project-blocks.js": "cbc2498e57b16a1350c7819939f1a65563270f53424443e5e1ec98bfe5f618f7",
+      "project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0",
+      "project-blocks.json": "948ba88778b7390e36867bee978b2afb2576eca09889183394562b5ba2465fc5",
+      "project-blocks.sources.json": "48f471ada93269ef2263206f64ce108d42bb5e9f7df589244c43608a19526a73",
+      "project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+      "task-controls.js": "5185c668dea13d217d3a4f95452d647b04b9b2f049c624530a96d8d7e25b1a80",
+      "task-controls.json": "365233d01a50eb7ef515051a32ee8f6a8d09d41f6b72ba744d14aa4d25003ecb"
+    }
+  },
+  "task": 205,
+  "receipt": {
+    "status": 200,
+    "body": {
+      "task": 205,
+      "op_id": "dashq.control.live195.start.205.6356531142",
+      "outcome": "accepted",
+      "state": "waiting",
+      "revision": 6356558193,
+      "reason": "",
+      "next": ""
+    }
+  },
+  "readback": {
+    "state": "waiting",
+    "revision": 6356558193,
+    "controls": [
+      "stop",
+      "later"
+    ],
+    "attempt": null
+  },
+  "pm": {
+    "result": "MOVED",
+    "consumer_route_status": 404,
+    "reason": "Owner moved A5 to #186; no PM adapter, grant or request is delivered by #195.",
+    "release": "v4.6.33",
+    "files": {
+      "taskq-4.6.33-pm-composer-fixtures.json": "0f9b25c1a6abbd7aa7b0fc5e8f1551933fc9f7e73c41720510116fd4740d8e78",
+      "taskq-4.6.33-pm-composer-sources.json": "98a7ceb388e0c1da4be285d93541ce82a5d1fbeb92f157d6d36e231969db0ca5",
+      "taskq-4.6.33-pm-composer.css": "10e0263ce874eb0a5f9570e1aa8e99323a52cb2d28d2054d25631d357f0320fb",
+      "taskq-4.6.33-pm-composer.js": "8718133305abe624efa57aebac2b4d734ec60fd45d833a7f4df5ec368d4682f8"
+    },
+    "task": "taskqorg/dashq#186",
+    "acceptance": [
+      "A3",
+      "A7"
+    ],
+    "owner_answer": "https://github.com/taskqorg/dashq/issues/195#issuecomment-6356608853"
+  },
+  "controls": "qualified for this container candidate and synthetic host-local subject",
+  "production": "No production/FRA/Access/Caddy changes. Existing host listener untouched.",
+  "limitations": [
+    "Test-only owner exception: existing host PAT reused instead of a new dedicated token; no production authority granted.",
+    "Synthetic host-local subject and isolated controller grant; browser forward-auth and native macOS dispatch not qualified.",
+    "PM request/readback moved to #186 A3/A7 by owner answer; no PM request was sent and no PM host grant was created.",
+    "Production configuration was not accessed; its current contents are unknown."
+  ]
+}
