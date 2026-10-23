@@ -38,3 +38,11 @@ Operation `dashq.control.live195.start.205.6356531142` has exactly one [canonica
 - A4: no FRA, production config, Access or Caddy changes were made. Production configuration was not read, so its current contents remain unknown. Production enablement still requires the full gate and explicit owner approval under D13.
 
 R12 is applied by naming the exact artifacts, real receipts and remaining gaps; R13 is applied by preserving the production boundary and adding no PM mutation authority. The temporary environment/harness failures are not product fixes or passing live evidence.
+
+## Publication check repair
+
+The [first merge-result test run](https://github.com/taskqorg/dashq/actions/runs/39895526740) failed in `agent_work_agrees_across_data_report_and_page`: sequential responses crossed a second, so host source ages changed from 0 to 1. All other fields in that assertion matched. Query and changes windows also move with each response's timestamp.
+
+On Windows, a temporary 1.1 s delay between the two reads reproduced the assertion failure with `cargo test --locked agent_work_agrees_across_data_report_and_page` (0 passed, 1 failed). The same delayed check passed after validating each source age and window against its response's `generated_at` before normalizing only those computed values for comparison (1 passed). The delay was then removed. Attempts, counts, states, reasons, producer times, query parameters, change records, model use and page presence retain their existing assertions; no product behavior or test gate changed (R12 / TaskQ § 7.4).
+
+The Windows candidate gate also exposed CRLF conversion of `task-controls.js`, `task-controls.json` and `admission-codes.json`, which lacked the byte-preserving Git attributes already used for other pinned TaskQ assets. Before the fix, the admission hash, shared-board conformance and answer live-gate tests failed (109 passed, 3 failed, 2 ignored). Extending the existing attributes restored the upstream bytes without changing the published hashes; `cargo test --locked admission_codes`, `node tests/boards.cjs` and `node tests/answer-live-stub.cjs` then passed. Checksum and pre-write refusal protection remain required.
