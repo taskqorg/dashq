@@ -26,6 +26,15 @@ Consume [TaskQ v4.6.30 B1–B4](https://github.com/taskqorg/taskq/blob/v4.6.30/d
 
 Published project-blocks supplies summary/aggregate/task/handle with navigation callbacks, not a complete tray workspace or general task-control dispatcher. The target is the same released TaskQ detail/menus/controls as the tray. TaskQ must supply versioned browser API, capabilities, operations/receipts, fixtures and published hashes. The released task-control component and fixed command table are adopted behind the separate [control gate](task-controls.md); the full workspace remains unavailable. No imitation workspace, Close operation, remote shell or second editor. Existing answers/policies keep D13/D14 gates; observation grants add none. Consequential actions retain explicit review.
 
+Release readback for #186 (#203, [TaskQ v4.6.33](https://github.com/taskqorg/taskq/releases/tag/v4.6.33), 2026-10-23): the PM composer from taskq#1615 is published with its fixtures and source manifest, each listed in `SHA256SUMS` (SHA-256):
+
+- `taskq-4.6.33-pm-composer.js` `8718133305abe624efa57aebac2b4d734ec60fd45d833a7f4df5ec368d4682f8`
+- `taskq-4.6.33-pm-composer.css` `10e0263ce874eb0a5f9570e1aa8e99323a52cb2d28d2054d25631d357f0320fb`
+- `taskq-4.6.33-pm-composer-fixtures.json` `0f9b25c1a6abbd7aa7b0fc5e8f1551933fc9f7e73c41720510116fd4740d8e78`
+- `taskq-4.6.33-pm-composer-sources.json` `98a7ceb388e0c1da4be285d93541ce82a5d1fbeb92f157d6d36e231969db0ca5` (component `pm-composer` version 1, schema `taskq.pm/1`)
+
+v4.6.33 publishes no workspace, detail or menu browser asset; its browser components are project-blocks, answer card, task controls, resource controls, finding composer and PM composer. #186 A2 therefore stays an explicit adoption gap until TaskQ releases them. Nothing here is live-board qualified (#195).
+
 Host counts need TaskQ's authoritative assignment/completeness contract. Heartbeats show attempts, not all pending allocations; global Ready is not every host's queue. Unassigned work stays separate; unsupported assignment is `?` with a reason. Claude/Codex sign-in needs an explicit host/runtime probe, time and validity (Menu M3 names local status.json probes, not an enrolled remote-login schema). Activity, routing and board freshness are no substitute. Online likewise needs qualified probe evidence; absence is unknown. These producer/adoption gaps require approved follow-up, not invented fields or new authority.
 
 ## Task controls (#179)
