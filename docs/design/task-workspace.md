@@ -41,6 +41,6 @@ Request text is temporary input, not conversation storage: it is cleared on a te
 
 `node tests/workspace-browser.cjs` replays all three published workspace journeys (narrow, large text, keyboard), then the DashQ adapter at 1024/16 light and 360/20 dark. It checks refresh/navigation/outage preservation, lost reply and identical-request reconciliation through a native-session receipt, task details and horizontal fit. These checks use invented boards and native sessions, never a forge write or real runtime launch. The candidate gate remains `cargo test --locked` and `cargo run -- selftest`; merge-result CI qualifies publication (R12, TaskQ § 7).
 
-The owner answer on #186 moves A7 live test-board/readback qualification to [#195](https://github.com/taskqorg/dashq/issues/195). Production `pm_requests` remains absent until that check passes and the owner approves configuration. No production grant, config or host was changed here.
+The owner answer on #186 moves A7 live test-board/readback qualification to [#195](https://github.com/taskqorg/dashq/issues/195). The owner approved production `pm_requests` on #187 (2026-10-24, [evidence](evidence/operator-redesign-live-187.md)). No production grant, config or host was changed here.
 
 Rollback: unset `pm_requests` or revoke the workspace/host PM grant. This stops new exchange/delivery; it does not undo board changes, erase operation identities or stop native sessions already launched. Older binaries leave the new tables intact. Re-enabling reads the existing identities rather than replaying native launch.
