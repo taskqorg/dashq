@@ -62,6 +62,7 @@ async function workspaceSend(m) {
   if (m.a === 'set' && (m.font || m.theme)) { for(const key of ['font','theme']) if(m[key]) workspaceAppearance[key]=m[key]; taskWorkspaceView.S = {...taskWorkspaceView.S,...workspaceAppearance}; taskWorkspace.draw(); return; }
   if (m.a === 'set' && m.navigation) return;
   if (['ready','size','resize','resize-end','drag','view-state','answer-local'].includes(m.a)) return;
+  if (m.a === 'workspace' && m.open?.page === 'answer') return workspaceAnswerOpen(m.open);
   if (m.a === 'workspace' && m.open?.page === 'conversations') {
     workspaceNotice('Send one PM request below; continue the dialogue in its native session.');
     document.getElementById('pm-composer').scrollIntoView({block:'center'}); document.getElementById('pm-draft')?.focus();
@@ -69,12 +70,41 @@ async function workspaceSend(m) {
   }
   workspaceNotice('This native TaskQ operation is unavailable in DashQ. Existing answer, task and resource permissions remain separate.');
 }
+// #187: TaskQ's "Answer in workspace…" asks the host for its native answer page. DashQ mounts the pinned answer card
+// (D13) for that one question on the guarded /answer route, keyed by project like the board fallback.
+function workspaceAnswerOpen(o) {
+  const boards = JSON.parse(document.getElementById('boards').dataset.boards);
+  const b = boards.find(b => b.project === o.root) || boards.find(b => b.url === o.board);
+  if (!b || !Number.isSafeInteger(o.task)) return workspaceNotice('This question is not on a configured board. Answer on the board.');
+  let card = boardCards.get('workspace-answer');
+  if (!card) {
+    const el = document.getElementById('workspace-answer');
+    card = {el, widget: TaskqAnswerCard.mount(el, {
+      capability: board => card.source?.state === 'ok' && !card.source.incomplete ? answerCapability(board)
+        : {answer: false, reason: 'Board observation ' + (card.source?.state || 'unknown') + '; answer on the board.'},
+      send: answerSend})};
+    boardCards.set('workspace-answer', card);
+  }
+  Object.assign(card, {board: b.project, n: o.task, rows: []});
+  workspaceAnswerUpdate(boards);
+  answerAccessLoad(b.project);
+  workspaceNotice('Answer #' + o.task + ' of ' + b.project + ' below; the answer permission stays separate.');
+  card.el.scrollIntoView({block: 'center'});
+}
+function workspaceAnswerUpdate(boards) {
+  const card = boardCards.get('workspace-answer'); if (!card) return;
+  const b = boards.find(b => b.project === card.board), row = b?.tasks?.find(t => t.n === card.n);
+  card.source = b?.source;
+  // ponytail: a question gone from the board keeps the card's last receipt until another question is opened.
+  if (row) card.rows = [{board: card.board, row}];
+  card.widget.update(card.rows);
+}
 function renderTaskWorkspace() {
   const root = document.getElementById('boards'); if (!root) return;
   const boards = JSON.parse(root.dataset.boards), host = new URLSearchParams(location.search).get('host');
   if (!taskWorkspace) {
     const blocks = root.querySelector('.board-blocks');
-    blocks.innerHTML = '<div id="workspace-notice" role="status">Actions require their separate actor grants. Native host operations are unavailable here.</div><div id="taskq-workspace"><div class="menu"></div></div><div id="workspace-coverage"></div><h3>PM request</h3><label for="pm-target">TaskQ target</label> <select id="pm-target"></select><div id="pm-composer"></div>';
+    blocks.innerHTML = '<div id="workspace-notice" role="status">Actions require their separate actor grants. Native host operations are unavailable here.</div><div id="taskq-workspace"><div class="menu"></div></div><div id="workspace-answer"></div><div id="workspace-coverage"></div><h3>PM request</h3><label for="pm-target">TaskQ target</label> <select id="pm-target"></select><div id="pm-composer"></div>';
     taskWorkspaceView = TaskqTaskWorkspace.createState();
     taskWorkspace = TaskqTaskWorkspace.create(taskWorkspaceView,{menu:blocks.querySelector('.menu'),send:workspaceSend});
     taskWorkspace.mount();
@@ -92,6 +122,7 @@ function renderTaskWorkspace() {
       id:()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join(''), now:()=>Math.floor(Date.now()/1000),send,reconcile:send});
   }
   taskWorkspace.receive({...workspaceState(boards,host),...workspaceAppearance});
+  workspaceAnswerUpdate(boards);
   const coverage = document.getElementById('workspace-coverage'); coverage.replaceChildren();
   for (const b of boards) {
     const p = document.createElement('p'); p.id=boardId(b.project);
