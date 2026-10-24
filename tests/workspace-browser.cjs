@@ -31,7 +31,7 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
   }
   for(const [width,font,theme] of [[1024,16,'light'],[360,20,'dark']]){
    const page=await browser.newPage({viewport:{width,height:850},colorScheme:theme,reducedMotion:'reduce'}),errors=[],posts=[];
-   page.on('pageerror',e=>errors.push(e.message));let offline=false,answer='lost';
+   page.on('pageerror',e=>errors.push(e.message));let offline=false,answer='lost';const answers=[];
    const doc=JSON.parse(read('fixture/data.json')),b=doc.boards[0];
    b.source={state:'ok',at:Math.floor(Date.now()/1000),age_s:0,incomplete:false};
    b.tasks=[{n:7,state:'doing',title:'One shared task workspace',url:b.url+'/7',revision:20,controls:['stop','later']}];b.questions=[];b.failed=[];b.attempts=[];doc.boards=[b];
@@ -45,7 +45,9 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
      if(answer==='lost')return route.fulfill({status:502,body:'lost reply'});
      return route.fulfill({json:{schema:r.schema,actor_id:r.actor_id,op_id:r.op_id,revision:r.revision,outcome:'accepted',request_id:'a'.repeat(64),native:{state:'launched',host:'invented-host',runtime:'claude',session:'invented-session',url:'https://claude.ai/code/session_invented'}}});
     }
-    if(p==='/task/control'||p==='/answer')return route.fulfill({status:503,json:{reason:'fixture: action off'}});
+    if(p==='/answer'&&req.method()==='GET')return route.fulfill({json:{csrf:'invented-answer-csrf'}});
+    if(p==='/answer'){const f=new URLSearchParams(req.postData());answers.push(Object.fromEntries(f));return route.fulfill({json:{outcome:'accepted',task:Number(f.get('task')),op_id:'dashq.'+f.get('op_id')}});}
+    if(p==='/task/control')return route.fulfill({status:503,json:{reason:'fixture: action off'}});
     const body=p==='/app.js'?js:p==='/style.css'?css:p==='/data'?JSON.stringify(doc):html();
     return route.fulfill({contentType:p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':p==='/data'?'application/json':'text/html',body});
    });
@@ -77,6 +79,17 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
    // Native-created tasks become visible through the same subsequent board observation.
    b.tasks.push({n:8,state:'held',title:'PM-created task read back from its board',url:b.url+'/8',revision:21,controls:['start']});
    await page.evaluate(()=>refresh());assert.equal(await page.locator('[data-a=task-detail]').count(),2);
+   // #187 DQ-06: the workspace's "Answer in workspace…" reached no card (only 'conversations' was handled).
+   // Risk: the question is visible but unanswerable in DashQ; it must reach the pinned card and guarded /answer once.
+   b.tasks.push({n:9,state:'ask',title:'Keep the old API?',url:b.url+'/9',revision:22,controls:[],question:{parsed:true,text:'Problem: Keep the old API?',done:null,problem:'Keep the old API?',evidence:[],choices:[{id:1,text:'Keep it',recommended:true,consequential:false},{id:2,text:'Remove it',recommended:false,consequential:false}],limits:{lines:4,chars:240}}});
+   await page.evaluate(()=>refresh());
+   await page.locator('[data-a=task-detail]:has-text("#9")').click();
+   await page.locator('#taskq-popover [data-page=answer]').click();
+   await page.locator('#workspace-answer button[data-choice="2"]:not([disabled])').click();
+   await page.waitForFunction(()=>/accepted/i.test(document.getElementById('workspace-answer').innerText));
+   assert.deepEqual(answers.map(a=>[a.board,a.task,a.revision,a.choice,a.csrf]),[[b.project,'9','22','2','invented-answer-csrf']]);
+   await page.evaluate(()=>refresh());assert.equal(answers.length,1,'refresh does not resend the answer');
+   await page.keyboard.press('Escape');
    const instance=await page.evaluateHandle(()=>taskWorkspace);
    for(const path of ['/hosts','/agents','/services','/checks','/integrations','/projects']){
     await page.evaluate(path=>navigateView(path),path);assert.equal(new URL(page.url()).pathname,path);

@@ -11,7 +11,7 @@
 | All configured boards and unassigned tasks | TaskQ workspace list, counters, saved views, search and project menus |
 | Host count | Same workspace with current attempt evidence only; host queue coverage stays unknown |
 | Task detail, state, issue, failures | TaskQ detail; board identity and producer coverage stay beside the workspace |
-| Question and Attention link | Same workspace question; existing guarded `/answer` dispatcher |
+| Question and Attention link | Same workspace question; its `Answer in workspace…` mounts the pinned D13 answer card for that question below the workspace, on the existing guarded `/answer` dispatcher (#187) |
 | Start, Stop, Later, Retry | Existing `/task/control`; a fresh canonical offer, revision and controller grant remain necessary |
 | Close, unsupported management and host operations | Explicit unavailable response or the authoritative issue/Closed board link; no new dispatcher |
 | Resources, connections, services, checks, agent work | Existing DashQ routes and D14/D16 components remain reachable |
