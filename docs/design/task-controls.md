@@ -23,7 +23,7 @@ The adapter shows Sending, accepted, stale, rejected and unknown with receipt re
 
 ## Qualification and rollback
 
-Owner decision in #179 separates live qualification into held [#195](https://github.com/taskqorg/dashq/issues/195). Production `task_controls` must remain absent until #195 passes and the owner approves configuration. No production config, credentials or board were changed by #179.
+Owner decision in #179 separates live qualification into held [#195](https://github.com/taskqorg/dashq/issues/195). #195 passed; the owner approved production `task_controls` on #187 (2026-10-24, [evidence](evidence/operator-redesign-live-187.md)). No production config, credentials or board were changed by #179.
 
 The [#195 test-only real-board evidence](evidence/task-controls-live-195.md) records an accepted control, same-ID replay and non-mutating denials using the owner-authorized existing PAT and a synthetic host-local actor. Production enablement still requires explicit owner approval; browser forward-auth and native macOS are not qualified by that container run. The owner moved #195 A5 (PM composer/request readback) to [#186 A3/A7](https://github.com/taskqorg/dashq/issues/186); #195 adds no PM adapter.
 
