@@ -64,9 +64,31 @@ output appears.
 |---|---|
 | taskq heartbeats (GitHub) | Qualified here: identity, running, stale/last known, release, update |
 | GitHub `releases/latest` | Qualified here for taskq; other products have no row from this source |
-| Enrolled `agentq-snapshot/1` | Not qualified: needs the production enrollment store (separate authorization) |
+| Enrolled `agentq-snapshot/1` | Lifecycle and health qualified by #214 (below); other fields not qualified |
 | Langfuse `agentq.installation` | Not qualified: needs production Langfuse keys (separate authorization) |
 | Legacy updater snapshots (Langfuse) | Not qualified: same as above |
 
 Producer gaps from #70 remain unknown in every row: selected version, health receipt, lifecycle
 stage, update history, safe reason code and coreq version.
+
+## #214. AgentQ lifecycle and health on FRA
+
+Task #214 reads lifecycle and health from the enrolled `agentq-snapshot/1` `release` (agentq
+v0.10.0). Readback: the PM read the `versions` rows of the FRA service, dashq `0.16.2` (tag
+`v0.16.2` on `1b54ca84cfc5bf4496a2d5b504872a527d39f5fe`), `/data` `generated_at` `1792894449`, and
+posted them in [issue comment 6392339584](https://github.com/taskqorg/dashq/issues/214#issuecomment-6392339584).
+The worker host has no route to FRA, so this record rests on that comment.
+
+| Row | Observation | Running | Lifecycle | Health |
+|---|---|---|---|---|
+| `hermes-fra1/native` | `ok`, age 20 s | `0.10.0` (enrollment) | `pending_disable` (`host_disabled`) | `verified`, scope `status_written`, `0.10.0` |
+| `macbook-m2.local/native` | `ok`, age 37 s | `0.10.0` (enrollment) | `pending_disable` (`host_disabled`) | `verified`, scope `status_written`, `0.10.0` |
+
+Both hosts are disabled by the owner (agentq#169) and now read `pending_disable` from a fresh
+snapshot instead of `lifecycle stage not reported by enrollment`. The AgentQ release times
+(`lifecycle.at`) are `1792894429` (hermes-fra1) and `1792894412` (macbook-m2.local), 20 s and 37 s
+before `generated_at`, inside the 180 s limit; each health receipt (`1792887614`, `1792887575`)
+precedes its host's release time. `release.at` `1792894247` is the GitHub release check time, not an
+AgentQ time. Remaining gaps in both rows:
+`selected` and `coreq`. The rendered Services page was not captured; the rows are the document the
+page renders (D5).
