@@ -298,24 +298,27 @@ fn versions(w: &mut String, versions: &Value, now: u64) {
     // Known installations keep identity across host renames; legacy rows without an ID use host within source/workspace.
     let id = |r: &Value| format!("version-{}", enc(&json!([r["product"], r["provenance"], r["installation"], r["workspace"], if r["installation"].is_null() { &r["host"] } else { &Value::Null }]).to_string()));
     let value = |v: &Value| if v.is_null() { "Not reported".into() } else { text(v) };
+    // a receipt reads verified only as the projection reports it (#214); anything else stays unknown
+    let verified = |r: &Value| r["health"]["state"] == "verified";
+    let health = |r: &Value| if verified(r) { "Health verified" } else { "Current health unknown" };
     let version = |v: &Value| format!("{}{}", v["version"].as_str().map_or_else(|| format!("<span class=\"muted\" title=\"Unknown: {}\">—</span>", esc(v["reason"].as_str().unwrap_or("not reported"))), esc), if v["last_known"] == true { "<small>Last known</small>" } else { "" });
     let _ = writeln!(w, "<section id=\"qversions\"><div class=\"app\"><div class=\"line spread\"><h2>Services</h2><small>Versions · updates · diagnostics</small></div><small>Host-managed updates · observation only</small><div class=\"inventory\"><div class=\"row rowhead\"><span>Service / installation</span><span>Running</span><span>Selected</span><span>Available</span><span>State / observation</span></div>");
     for (i, r) in rows.iter().enumerate() {
         let key = id(r);
         let obs = &r["observation"];
         let update = match r["update"]["state"].as_str() { Some("available") => "Update available", Some("current") => "Version current", Some("error") => "Update error reported", _ => "Update unknown" };
-        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small>{}</span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>Current health unknown</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), r["reason"].as_str().map(|s| format!("<small>{}</small>", esc(s))).unwrap_or_default(), version(&r["running"]), version(&r["selected"]), version(&r["release"]), at(&r["release"]["at"], now), text(&r["release"]["state"]), text(&obs["state"]), at(&obs["at"], now));
+        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small>{}</span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>{}</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), r["reason"].as_str().map(|s| format!("<small>{}</small>", esc(s))).unwrap_or_default(), version(&r["running"]), version(&r["selected"]), version(&r["release"]), at(&r["release"]["at"], now), text(&r["release"]["state"]), text(&obs["state"]), at(&obs["at"], now), health(r));
     }
     let _ = writeln!(w, "</div>");
     for (i, r) in rows.iter().enumerate() {
         let key = id(r);
-        let _ = writeln!(w, "<section class=\"detail version-body\" id=\"{key}\" aria-labelledby=\"select-{key}\"{}><h3>{} · {}</h3><p class=\"notice\">Current health unknown: {}. Service health does not verify every integration or workload.</p><div class=\"columns\"><section><h3>Update</h3><ol class=\"steps\">", if i == 0 { "" } else { " hidden" }, text(&r["product"]), text(&r["host"]), text(&r["health"]["reason"]));
+        let _ = writeln!(w, "<section class=\"detail version-body\" id=\"{key}\" aria-labelledby=\"select-{key}\"{}><h3>{} · {}</h3><p class=\"notice\">{}. Service health does not verify every integration or workload.</p><div class=\"columns\"><section><h3>Update</h3><ol class=\"steps\">", if i == 0 { "" } else { " hidden" }, text(&r["product"]), text(&r["host"]), if verified(r) { format!("Health verified: {} wrote its status {}", text(&r["health"]["version"]), at(&r["health"]["at"], now)) } else { format!("Current health unknown: {}", text(&r["health"]["reason"])) });
         for (label, v) in [("Release check", &r["release"]), ("Version comparison", &r["update"]), ("Lifecycle", &r["lifecycle"])] {
             let _ = writeln!(w, "<li><span aria-hidden=\"true\">{}</span><span>{label}: {}{}</span></li>", if v["state"] == "error" { "!" } else { "—" }, text(&v["state"]), v["reason"].as_str().map(|s| format!(" · {}", esc(s))).unwrap_or_default());
         }
         let _ = writeln!(w, "</ol></section><section><h3>Diagnostics</h3>");
         let engines = r["libraries"]["engines"].as_object().map(|e| e.iter().map(|(k,v)| format!("{} {}", esc(k), value(v))).collect::<Vec<_>>().join(" · ")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Not reported".into());
-        for (label, v) in [("Health receipt", "Not reported".into()), ("Safe reason code", "Not reported".into()), ("Queue oldest age at observation", r["queue_age_s"].as_u64().map_or("Not reported".into(), dur)), ("Engine / component", engines), ("coreq version", value(&r["libraries"]["coreq"]))] {
+        for (label, v) in [("Health receipt", if verified(r) { format!("status_written · {} · {}", text(&r["health"]["version"]), at(&r["health"]["at"], now)) } else { "Not reported".into() }), ("Safe reason code", "Not reported".into()), ("Queue oldest age at observation", r["queue_age_s"].as_u64().map_or("Not reported".into(), dur)), ("Engine / component", engines), ("coreq version", value(&r["libraries"]["coreq"]))] {
             let _ = writeln!(w, "<div class=\"fact\"><small>{label}</small><span>{v}</span></div>");
         }
         let _ = writeln!(w, "</section></div><details id=\"events-{key}\"><summary id=\"summary-events-{key}\">Evidence &amp; timeline</summary>");
@@ -1248,7 +1251,7 @@ mod tests {
         for case in cases["cases"].as_object().unwrap().values() {
             if let Some(id) = case["installation"].as_str() { assert!(html.contains(id), "{id}"); }
         }
-        for expected in ["Last known", "Current health unknown", "health receipt not reported", "Lifecycle: unknown", "Update error reported", "Update history", "Host observation", "Release check", "Not reported", "0.51.0", "12s", "win-1/windows", "win-1/wsl"] {
+        for expected in ["Last known", "Current health unknown", "health receipt not reported", "Lifecycle: unknown", "Lifecycle: pending_disable · host_disabled", "Health verified: 0.4.16 wrote its status", "Current health unknown: health receipt unknown: no_receipt", "Update error reported", "Update history", "Host observation", "Release check", "Not reported", "0.51.0", "12s", "win-1/windows", "win-1/wsl"] {
             assert!(html.contains(expected), "{expected}");
         }
         for absent in ["data-phase", "data-font", "<select", "<form", "recovery confirmed", "checksum-mismatch", "Running · healthy"] { assert!(!html.contains(absent), "{absent}"); }

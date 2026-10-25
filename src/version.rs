@@ -69,6 +69,62 @@ fn observed(mut obs: Value, collection: &Value) -> Value {
     obs
 }
 
+/// Health and lifecycle from an AgentQ snapshot `release` (agentq v0.10.0 release.rs `project`), re-checked here:
+/// a missing, future or stale release time, a producer that marks it not fresh, an unknown code or a receipt for
+/// another version reads unknown with the reason, and a `healthy` stage needs a verified receipt (V2).
+fn release_state(rel: &Value, running: &Value, now: u64) -> (Value, Value) {
+    let unknown = |r: String| json!({"state": "unknown", "at": rel["at"], "reason": r});
+    let code = |v: &Value, allowed: &[&str]| v.as_str().filter(|s| allowed.contains(s)).map(str::to_owned);
+    let stale = match rel["at"].as_u64() {
+        None => Some("release time not reported".to_string()),
+        Some(at) if at > now => Some("release time in the future (clock uncertain)".to_string()),
+        Some(at) if now - at > crate::enroll::STALE_SECS => Some(format!(
+            "release observation {} old (limit {})",
+            dur(now - at),
+            dur(crate::enroll::STALE_SECS)
+        )),
+        Some(_) if rel["fresh"] != true => Some("release observation not fresh at the producer".to_string()),
+        _ => None,
+    };
+    if let Some(r) = stale {
+        return (unknown(r.clone()), unknown(r));
+    }
+    let h = &rel["health"];
+    let health = match h["state"].as_str() {
+        Some("verified")
+            if h["scope"] == "status_written"
+                && h["at"].as_u64().is_some_and(|t| t <= rel["at"].as_u64().unwrap_or(0)) =>
+        {
+            if running.is_string() && h["version"] == *running {
+                json!({"state": "verified", "scope": "status_written", "version": running, "at": h["at"], "reason": null})
+            } else {
+                unknown("health receipt for another version".into())
+            }
+        }
+        Some("unknown") => unknown(match code(&h["reason"], &["no_receipt", "stale_observation"]) {
+            Some(c) => format!("health receipt unknown: {c}"),
+            None => "health receipt unknown".into(),
+        }),
+        _ => unknown("health receipt invalid".into()),
+    };
+    let reason = code(
+        &rel["reason"],
+        &["control_unknown", "host_disabled", "selection_unknown", "selection_changed", "status_written", "no_receipt"],
+    );
+    let lifecycle = match code(&rel["lifecycle"], &["waiting_for_activation", "starting", "healthy", "pending_disable"]) {
+        Some(s) if s == "healthy" && health["state"] != "verified" => {
+            unknown("lifecycle stage needs a verified health receipt".into())
+        }
+        Some(s) => json!({"state": s, "at": rel["at"], "reason": reason}),
+        None if rel["lifecycle"] == "unknown" => unknown(match reason {
+            Some(c) => format!("lifecycle unknown: {c}"),
+            None => "lifecycle unknown".into(),
+        }),
+        None => unknown("lifecycle stage invalid".into()),
+    };
+    (health, lifecycle)
+}
+
 /// One row from the producer's own fields; `obs` is the host observation (producer time), separate from release time.
 #[allow(clippy::too_many_arguments)]
 fn row(
@@ -107,7 +163,13 @@ fn row(
     for v in [&mut running, &mut selected] {
         v["last_known"] = json!(!fresh && !v["version"].is_null());
     }
-    let missing = gaps(product, provenance);
+    // an AgentQ snapshot `release` reports lifecycle and health (#214); every other producer leaves both gaps
+    let rel = &extra["release"];
+    let missing: Vec<&str> = gaps(product, provenance)
+        .iter()
+        .copied()
+        .filter(|f| !(rel.is_object() && (*f == "health" || *f == "lifecycle")))
+        .collect();
     // a verified comparison alone permits the update-available label (V1)
     let update = match (release["version"].as_str(), running["version"].as_str()) {
         _ if extra["update_error"] == true => {
@@ -121,21 +183,24 @@ fn row(
         }
         _ => json!({"state": "unknown", "reason": "no verified version comparison"}),
     };
-    let health = match obs["state"].as_str() {
-        Some("ok") => gap("health receipt", provenance),
+    let (health, lifecycle) = match obs["state"].as_str() {
+        Some("ok") if rel.is_object() => release_state(rel, &running["version"], now),
+        Some("ok") => (gap("health receipt", provenance), gap("lifecycle stage", provenance)),
         _ => {
-            json!({"state": "unknown", "reason": format!("observation {}: {}", obs["state"].as_str().unwrap_or("unknown"), obs["reason"].as_str().unwrap_or("no reason"))})
+            let u = json!({"state": "unknown", "reason": format!("observation {}: {}", obs["state"].as_str().unwrap_or("unknown"), obs["reason"].as_str().unwrap_or("no reason"))});
+            let l = if rel.is_object() { u.clone() } else { gap("lifecycle stage", provenance) };
+            (u, l)
         }
     };
     let reported = |f: &str| !missing.contains(&f);
     json!({
         "product": product, "provenance": provenance, "installation": installation, "workspace": workspace, "host": host,
         "observation": obs, "running": running, "selected": selected, "release": release,
-        "reported_available": extra["reported_available"], "update": update, "health": health, "lifecycle": gap("lifecycle stage", provenance),
+        "reported_available": extra["reported_available"], "update": update, "health": health, "lifecycle": lifecycle,
         // libraries are metadata, never rows (V1): engines when reported, coreq not reported by any contract yet
         "libraries": {"coreq": null, "engines": extra["engines"]},
         "queue_age_s": extra["queue_age_s"], "connection": extra["connection"],
-        "coverage": (["running", "selected", "engines", "queue"].into_iter().filter(|f| reported(f)).collect::<Vec<_>>()),
+        "coverage": (["running", "selected", "health", "lifecycle", "engines", "queue"].into_iter().filter(|f| reported(f)).collect::<Vec<_>>()),
         "gaps": missing,
     })
 }
@@ -200,6 +265,7 @@ pub fn build(inp: &Value, fleet: &[Value], heartbeats: &[Value]) -> Value {
             "reported_available": if ok { crate::data::semver(&p["update"]["available"]) } else { Value::Null },
             "update_error": ok && p["update"]["error"] == true,
             "queue_age_s": if ok { p["queue"]["oldest_age"].as_u64().map_or(Value::Null, |a| json!(a)) } else { Value::Null },
+            "release": if ok && product == "agentq" { p["release"].clone() } else { Value::Null },
             "connection": r["connection"]});
         let mut x = row(
             product,
@@ -459,17 +525,19 @@ mod tests {
             }
         }
         let rows = out["rows"].as_array().unwrap();
-        // coreq is a library: never a row; every unreported field names its producer gap
+        // coreq is a library: never a row; every unreported field names its producer gap; only a fresh receipt
+        // for the running version reads verified (#214)
         assert!(rows.iter().all(|r| r["product"] != "coreq"
-            && r["health"]["state"] == "unknown"
+            && (r["health"]["state"] == "unknown") == (r["installation"] != "inst-ok")
             && r["gaps"].as_array().is_some_and(|g| !g.is_empty())));
         assert!(rows.iter().any(|r| r["provenance"] == "taskq-heartbeat"
             && r["reason"] == "older heartbeat: no service id"));
+        // fields outside the contract (top-level health, update.state) and invalid release codes never surface
+        let wait = rows.iter().find(|r| r["installation"] == "inst-wait").unwrap().to_string();
+        assert!(!wait.contains("healthy") && !wait.contains("waiting_for_connections"), "{wait}");
         let text = out.to_string();
         assert!(
-            !text.contains("/Users")
-                && !text.contains("healthy")
-                && !text.contains("waiting_for_connections"),
+            !text.contains("/Users") && !text.contains("/private") && !text.contains("rolling_back"),
             "no raw producer claims"
         );
         // a failed source drops only its own rows
