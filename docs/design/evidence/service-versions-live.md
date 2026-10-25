@@ -85,7 +85,10 @@ The worker host has no route to FRA, so this record rests on that comment.
 | `macbook-m2.local/native` | `ok`, age 37 s | `0.10.0` (enrollment) | `pending_disable` (`host_disabled`) | `verified`, scope `status_written`, `0.10.0` |
 
 Both hosts are disabled by the owner (agentq#169) and now read `pending_disable` from a fresh
-snapshot instead of `lifecycle stage not reported by enrollment`. Release time `1792894247` is
-within 180 s of the snapshot times; each health receipt predates it. Remaining gaps in both rows:
+snapshot instead of `lifecycle stage not reported by enrollment`. The AgentQ release times
+(`lifecycle.at`) are `1792894429` (hermes-fra1) and `1792894412` (macbook-m2.local), 20 s and 37 s
+before `generated_at`, inside the 180 s limit; each health receipt (`1792887614`, `1792887575`)
+precedes its host's release time. `release.at` `1792894247` is the GitHub release check time, not an
+AgentQ time. Remaining gaps in both rows:
 `selected` and `coreq`. The rendered Services page was not captured; the rows are the document the
 page renders (D5).
