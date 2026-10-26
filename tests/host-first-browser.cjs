@@ -34,7 +34,7 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       assert(!await page.locator('#servers').isVisible());
       assert(!await page.locator('#installations').isVisible());
       assert.equal(await page.locator('.first').count(),0);
-      assert.equal(await page.locator('#host-grid polyline').count(),0,'trends belong to detail');
+      assert(await page.locator('#host-grid .overview-metric polyline').count()>0,'D10: sample-backed trends on Overview');
       assert((await page.locator('#host-grid').innerText()).includes('Unknown or unavailable'));
       await page.evaluate(()=>navigateView(new URL('/?period=86400&host=fra%2Fnative&agent=codex&session=fixture',location.origin)));
       await page.waitForFunction(()=>!busy);
@@ -67,6 +67,7 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       assert(await page.locator('#boards').isVisible());
       await page.goBack(); assert.equal(new URL(page.url()).pathname,'/');
       assert(await page.locator('#host-grid').isVisible());
+      await page.locator('#host-grid .host-facts > summary').first().click();
       await page.locator('#host-grid .count-link').first().click();
       await page.waitForFunction(()=>!busy);
       assert.equal(new URL(page.url()).pathname,'/projects');

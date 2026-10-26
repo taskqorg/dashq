@@ -166,6 +166,20 @@ async function refresh() {
 }
 // D6 / #178: expiry also applies while refresh is unavailable or deferred by a text selection.
 function expireHostObservations(failed = false) {
+  document.querySelectorAll('.overview-summary').forEach(e => {
+    e.observedSince ??= performance.now();
+    const status = e.querySelector('.overview-state');
+    const metrics = e.querySelector('.overview-metrics');
+    if (!metrics) return;
+    status.dataset.observedState ??= status.textContent;
+    if (e.hasAttribute('data-resource-valid-for') && (performance.now() - e.observedSince) / 1000 > Number(e.dataset.resourceValidFor)) {
+      status.textContent = 'Stale resource data · ' + status.dataset.observedState;
+      metrics.dataset.state = 'stale';
+    } else if (failed) {
+      status.textContent = 'Unconfirmed resource data · ' + status.dataset.observedState;
+      metrics.dataset.state = 'unconfirmed';
+    }
+  });
   document.querySelectorAll('.host-observation[data-valid-for]').forEach(e => {
     e.observedSince ??= performance.now();
     if ((performance.now() - e.observedSince) / 1000 > Number(e.dataset.validFor)) {

@@ -25,9 +25,10 @@ const css = ['assets/style.css','assets/taskq/resource-controls.css','assets/res
       await page.goto('http://fixture/');await page.waitForFunction(()=>!busy);
       await page.addStyleTag({content:`html{font-size:${size}px}`});
       const host = page.locator('#host-win');
+      await host.locator('.host-facts > summary').click();
       assert((await host.innerText()).includes('logged in'));
       assert((await host.innerText()).includes('2 queued'));
-      const evidence = host.locator('details');await evidence.locator('summary').click();
+      const evidence = host.locator('.host-evidence');await evidence.locator('summary').click();
       assert((await evidence.innerText()).includes('aaaaaaaaaaaa'));
       assert((await evidence.innerText()).includes('valid until'));
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal overflow');

@@ -1,0 +1,191 @@
+{
+  "reference": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "browser": "141.0.7390.37",
+  "platform": "win32",
+  "inputs": {
+    "src/page.rs": "cd7124166a9301281699ee52d802f493402bcfd76bec2b00cb5e6225f630e8e8",
+    "assets/app.js": "053e4661b7ae06d5e9c71deef2ea36333ef87a17644ffd1b7bb40b28709402b2",
+    "assets/style.css": "867057da2031df0a9bf3f80ef0fa89d8c403fb4765790c8e9808eca70796a604",
+    "assets/overview-icons.svg": "01c0b4e0947726c60dd5bbc4607df234b99e0feb300c217d5006453070206dd0",
+    "tests/overview-browser.cjs": "72e682f27f982345e764cfb61914498d70cd1622b272c24ab6be2ebbf7c243f9"
+  },
+  "rendered": "6f1a7a0990d865a47023d6e03936af3ce7b97f8d1818534215f402fe540b2d64",
+  "cells": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3
+      }
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2
+      },
+      "expected": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2
+      },
+      "expected": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2
+      }
+    }
+  ],
+  "checks": [
+    "hierarchy",
+    "reference geometry",
+    "honest missing history",
+    "disclosure/focus across outage/recovery",
+    "direct finding and Back",
+    "no writes"
+  ]
+}

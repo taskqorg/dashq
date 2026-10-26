@@ -62,7 +62,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 7] = [("/", "Hosts"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections")];
+pub const VIEWS: [(&str, &str); 7] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -130,6 +130,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
         return h;
     }
 
+    let _ = write!(w, "<h1 id=\"overview-title\">Overview</h1>");
     host_grid(w, doc, now);
     w.push_str(&action_html);
     let _ = writeln!(w, "<details id=\"source-status\"><summary>Source status \u{00b7} {} non-ok</summary><ul class=\"summary\">{}</ul></details>", not_ok.len(), not_ok.join(""));
@@ -784,11 +785,15 @@ fn bar(p: Option<f64>) -> String {
 fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &str) -> String {
     if points.len() < 3 { return "<span class=\"trend none\">no trend yet · warmup, 3 real samples needed</span>".into(); }
     let from = to.saturating_sub(TREND);
+    let points: Vec<_> = points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from && a <= to)).collect();
+    if points.iter().filter(|p| f(p).is_some()).count() < 3 {
+        return "<span class=\"trend none\">no trend yet · warmup, 3 real samples needed</span>".into();
+    }
     let mut lines: Vec<Vec<(u64, f64)>> = vec![vec![]];
     for p in points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from)) {
         let at = p["at"].as_u64().unwrap();
         let last = lines.last_mut().unwrap();
-        if last.last().is_some_and(|(a, _)| at - a > 2 * crate::resource::BUCKET) {
+        if last.last().is_some_and(|(a, _)| at <= *a || at.saturating_sub(*a) > 2 * crate::resource::BUCKET) {
             lines.push(vec![]);
         }
         match f(p) {
@@ -813,7 +818,7 @@ fn host_observation(h: &Value, kind: &str, field: &str, now: u64) -> String {
     let rows: Vec<_> = h["taskq"]["observations"].as_array().into_iter().flatten().filter(|o| o["kind"] == kind).collect();
     if rows.is_empty() {
         let why = match kind { "login" => "no login probe; activity does not prove sign-in", "queue" => "host-assigned queue not reported; shared work is in Tasks", _ => "no qualified online probe" };
-        return format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">?</span>", esc(why), esc(why));
+        return format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">unknown</span>", esc(why), esc(why));
     }
     rows.iter().map(|o| {
         let shown = if o["state"] == "unknown" { "unknown".into() } else { o[field].as_str().map(esc).unwrap_or_else(|| text(&o[field])) };
@@ -834,8 +839,10 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
     }
     let extra: String = ["agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v| format!("&{k}={}", enc(v)))).collect();
     let query = |path: &str, id: &str| format!("{path}?period={}&host={}{extra}", doc["period"].as_u64().unwrap_or(1800), enc(id));
-    let unknown = |why: &str| format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">?</span>", esc(why), esc(why));
-    let _ = writeln!(w, "<section id=\"host-grid\"><h2>Hosts</h2><div class=\"grid-head\" aria-hidden=\"true\"><span>Host · observation</span><span>Services · update state</span><span>Client sign-in</span><span>CPU</span><span>RAM</span><span>Disk</span><span>Tasks</span></div>");
+    let unknown = |why: &str| format!("<span class=\"unknown\" tabindex=\"0\" title=\"Unknown: {}\" aria-label=\"Unknown: {}\">unknown</span>", esc(why), esc(why));
+    let _ = writeln!(w, "<section id=\"host-grid\"><h2>Infrastructure</h2><p class=\"overview-period\">Last 30 minutes · 0–100%</p>");
+    w.push_str(include_str!("../assets/overview-icons.svg"));
+    let _ = write!(w, "<div class=\"overview-hosts\">");
     if hosts.is_empty() { let _ = writeln!(w, "<p>No host observations received. <a data-view-link href=\"/projects\">Open Tasks</a>.</p>"); }
     for h in hosts {
         let id = h["id"].as_str().unwrap_or("");
@@ -851,7 +858,10 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         let observed_age = f["age_s"].as_u64().map_or(age.clone(), |a| format!("<span data-age-s=\"{a}\">{age}</span>"));
         let why = format!("{}; {}", f["reason"].as_str().unwrap_or("AgentQ heartbeat"), h["reason"].as_str().unwrap_or("canonical host identity"));
         let (name, kind) = id.split_once('/').unwrap_or((id, "kind unknown"));
-        let _ = writeln!(w, "<article class=\"host\" id=\"host-{key}\"><div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">TaskQ {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), host_observation(&h, "online", "state", now), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
+        let _ = writeln!(w, "<article class=\"host overview-host\" id=\"host-{key}\">");
+        overview_host(w, &h, res, doc, now);
+        let _ = write!(w, "<details class=\"host-facts\" id=\"host-facts-{key}\"><summary id=\"host-facts-toggle-{key}\">Host details</summary><div class=\"host-facts-grid\">");
+        let _ = writeln!(w, "<div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">TaskQ {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), host_observation(&h, "online", "state", now), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
         for i in doc["attention"]["current"].as_array().into_iter().flatten().filter(|i| i["source"] == "serverq" && i["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))) {
             let _ = writeln!(w, "<small class=\"host-warning\">{} <a data-view-link href=\"/checks?period={}#checks\">Diagnostics</a></small>", text(&i["what"]), doc["period"].as_u64().unwrap_or(1800));
         }
@@ -894,9 +904,78 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
             }
             let _ = write!(w, "</div></details>");
         }
-        let _ = writeln!(w, "</article>");
+        let _ = writeln!(w, "</div></details></article>");
     }
-    let _ = writeln!(w, "<p class=\"legend\">? Unknown or unavailable · stale values are last known. Online is TaskQ service presence, not machine or client health. Sign-in and queues use scoped producer observations with expiry. Running counts are observed attempts, not complete host totals.</p></section>");
+    let _ = writeln!(w, "</div><details class=\"legend\" id=\"host-help\"><summary>Unknown or unavailable</summary><p>Stale values are last known. Online is TaskQ service presence, not machine or client health. Sign-in and queues use scoped producer observations with expiry. Running counts are observed attempts, not complete host totals.</p></details></section>");
+}
+
+fn overview_icon(name: &str) -> String {
+    format!("<svg class=\"overview-icon\" aria-hidden=\"true\"><use href=\"#overview-{name}\"/></svg>")
+}
+
+/// D8/D10: resource state is scoped to resources, never inferred machine/service health.
+fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u64) {
+    let id = host["id"].as_str().unwrap_or("");
+    let (name, kind) = id.split_once('/').unwrap_or((id, ""));
+    let src = if res.is_null() { &host["freshness"] } else { &res["source"] };
+    let current = &res["current"];
+    let has_values = !current.is_null();
+    let state = src["state"].as_str().unwrap_or("unknown");
+    let request = doc["attention"]["requests"].as_array().into_iter().flatten().find(|r| r["host"].as_str().is_some_and(|h| h.eq_ignore_ascii_case(id)));
+    let status = if let Some(r) = request { r["reason"].as_str().unwrap_or("Needs attention") }
+        else if state == "stale" { "No recent data" }
+        else if !has_values { "Resource data unavailable" }
+        else if state != "ok" { "Resource data not confirmed" }
+        else { "Resource samples available" };
+    let age = src["age_s"].as_u64().map_or("Observation age unknown".into(), |age| format!("{} <span data-age-s=\"{age}\">{} old</span>", if res.is_null() {"Host observation"}else{"Resources"}, dur(age)));
+    let mut validity = src["age_s"].as_u64().filter(|_|has_values && state=="ok").map_or(String::new(),|age|format!(" data-resource-valid-for=\"{}\"",crate::resource::STALE.saturating_sub(age)));
+    if request.is_some() {validity.push_str(" data-request=\"true\"");}
+    let _ = write!(w, "<div class=\"overview-summary\"{validity}><div class=\"overview-identity\"><span class=\"overview-machine\">{}</span><div><h3 class=\"overview-name\">{}</h3><span class=\"overview-age\">{kind} {age}</span></div></div><p class=\"overview-state\">{}</p>", overview_icon("server"), esc(name), esc(status), kind=esc(kind));
+    let points = res["history"]["points"].as_array().map_or(&[][..], Vec::as_slice);
+    let to = doc["resources"]["to"].as_u64().unwrap_or(now);
+    if has_values {
+        let _ = write!(w, "<div class=\"overview-metrics\" data-state=\"{}\">", esc(state));
+        let cpu = |p: &Value| p["cpu"]["percent"].as_f64();
+        let shown = cpu(current).map(|p| format!("{p:.1}%"));
+        overview_metric(w, id, "CPU", "cpu", shown, cpu(current), points, to, &cpu, &current["cpu"]["reason"]);
+        let ram = |p: &Value| pct(&p["memory"]["used_bytes"], &p["memory"]["total_bytes"]);
+        let m = &current["memory"];
+        let shown = ram(current).map(|_| format!("{} / {} GB", gb(&m["used_bytes"]), gb(&m["total_bytes"])));
+        overview_metric(w, id, "RAM", "memory-stick", shown, ram(current), points, to, &ram, &m["reason"]);
+        for disk in current["disks"].as_array().into_iter().flatten() {
+            let disk_id = disk["id"].as_str().unwrap_or("unknown filesystem");
+            let disk_pct = |p: &Value| p["disks"].as_array().into_iter().flatten().find(|d| d["id"] == disk_id).and_then(|d| pct(&d["used_bytes"], &d["total_bytes"]));
+            let p = pct(&disk["used_bytes"], &disk["total_bytes"]);
+            let shown = p.map(|_| format!("{} / {} GB", gb(&disk["used_bytes"]), gb(&disk["total_bytes"])));
+            overview_metric(w, id, &format!("Disk {disk_id}"), "hard-drive", shown, p, points, to, &disk_pct, &disk["reason"]);
+        }
+        if current["disks"].as_array().is_none_or(Vec::is_empty) || !current["disk_reason"].is_null() {
+            let _ = write!(w, "<p class=\"overview-gap\">Disks unavailable: {}</p>", esc(current["disk_reason"].as_str().unwrap_or("no filesystem sample")));
+        }
+        let _ = write!(w, "</div>");
+        let history = &res["history"];
+        for (field, label) in [("gaps", "Sample gaps"), ("resets", "CPU resets")] {
+            let in_window = history[field].as_array().into_iter().flatten().any(|v| {
+                if field=="gaps" {v["to"].as_u64().is_some_and(|t|t>=to.saturating_sub(TREND)) && v["from"].as_u64().is_some_and(|t|t<=to)}
+                else {v.as_u64().is_some_and(|t|t>=to.saturating_sub(TREND) && t<=to)}
+            });
+            if in_window { let _ = write!(w, "<small class=\"overview-gap\">{label} in this window</small>"); }
+        }
+        if state != "ok" { let _ = write!(w, "<small class=\"overview-gap\">{state}: {}</small>", esc(src["reason"].as_str().unwrap_or("coverage unavailable"))); }
+    } else {
+        let _ = write!(w, "<div class=\"overview-empty\">CPU · RAM · disk unavailable<small>{}</small></div>", esc(src["reason"].as_str().unwrap_or("no resource sample")));
+    }
+    let extra: String = ["agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v|format!("&{k}={}",enc(v)))).collect();
+    let default_target = format!("/hosts?period={}&host={}{extra}#servers", doc["period"].as_u64().unwrap_or(1800), enc(id));
+    let target = request.and_then(|r|r["target"].as_str()).unwrap_or(&default_target);
+    let action = request.and_then(|r|r["action"].as_str()).unwrap_or(if has_values {"Inspect resources"} else {"Source details"});
+    let _ = write!(w, "<a class=\"overview-open\" data-view-link href=\"{}\">{}{}</a></div>", esc(target), overview_icon("arrow-up-right"), esc(action));
+}
+
+fn overview_metric(w: &mut String, host: &str, label: &str, icon: &str, shown: Option<String>, percent: Option<f64>, points: &[Value], to: u64, metric: &dyn Fn(&Value) -> Option<f64>, reason: &Value) {
+    let shown = shown.unwrap_or_else(||format!("Unknown: {}", esc(reason.as_str().unwrap_or("not reported"))));
+    let key = enc(&format!("{host}-{label}"));
+    let _ = write!(w, "<div class=\"overview-metric\"><div class=\"overview-current\"><span class=\"overview-metric-top\">{}<span>{}</span></span><span class=\"overview-number\" id=\"overview-value-{key}\" data-n=\"{}\" data-metric=\"{key}\">{shown}</span>{}</div>{}</div>", overview_icon(icon), esc(label), percent.map_or(String::new(),|p|p.to_string()), bar(percent), trend(points, to, metric, &esc(label)));
 }
 
 /// D8.2: a person and a named action; observations/history remain in host detail.
@@ -1077,6 +1156,56 @@ fn resources(w: &mut String, res: &Value, now: u64) {
 mod tests {
     use super::*;
 
+    /// #219 A1–A3 / D4.4: the public reference's three synthetic host scenarios, never live data.
+    #[test]
+    fn minimal_overview() {
+        let now = 1_000_000u64;
+        let mut d = crate::fixture_doc();
+        d["generated_at"] = json!(now);
+        d["hosts"] = json!([]);
+        d["resources"]["rows"] = json!([]);
+        d["resources"]["to"] = json!(now);
+        d["attention"]["current"] = json!([]);
+        d["attention"]["requests"] = json!([{"host":"FRA","reason":"Low disk space","action":"Inspect disk","target":"/checks#fixture-disk"}]);
+        for (name, state, age) in [("Mac", "unknown", 12), ("FRA", "ok", 12), ("Desktop", "stale", 1560)] {
+            let source = json!({"state":state,"at":now-age,"age_s":age,"reason":if state=="ok" {Value::Null}else{json!("resource evidence unavailable")}});
+            d["hosts"].as_array_mut().unwrap().push(json!({"id":name,"freshness":source}));
+            if name == "Mac" { continue; }
+            let sample = |i: usize| json!({"at":now-1800+i as u64*298,"cpu":{"percent":([18,31,21,28,24,30,28][i])},
+                "memory":{"used_bytes":(([24.0,27.0,31.0,34.0,36.0,37.0,38.75][i]*16e9/100.0) as u64),"total_bytes":16_000_000_000u64},
+                "disks":[{"id":"root","used_bytes":([42,48,57,67,78,86,92][i] as u64*1_000_000_000),"total_bytes":100_000_000_000u64}]});
+            let points: Vec<_> = if name=="FRA" {(0..7).map(sample).collect()}else{vec![]};
+            d["resources"]["rows"].as_array_mut().unwrap().push(json!({"host":name,"installation":name,"source":source,"current":if name=="FRA" {sample(6)}else{Value::Null},"history":{"points":points,"samples":points.len(),"gaps":[],"resets":[]}}));
+        }
+        let html = render(&d, &json!({}));
+        if let Some(dir) = std::env::var_os("DASHQ_OVERVIEW_EVIDENCE") {
+            let dir = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("page.html"), &html).unwrap();
+            std::fs::write(dir.join("data.json"), d.to_string()).unwrap();
+        }
+        assert!(html.contains("class=\"overview-metrics\""), "#219: Overview needs right-hand resource trends");
+        let mut grid = String::new(); host_grid(&mut grid, &d, now);
+        assert_eq!(grid.matches("<polyline").count(), 3, "CPU, RAM and the actual filesystem have trends");
+        assert!(grid.contains("Resource data unavailable") && grid.contains("No recent data"));
+        // D4.4 / W3,W10: old-window samples, missing values, resets and gaps cannot fabricate a line.
+        let point = |at, p| json!({"at":at,"cpu":{"percent":p}});
+        let cpu = |p: &Value|p["cpu"]["percent"].as_f64();
+        assert!(!trend(&[point(now-2000,1),point(now-1900,2),point(now-12,3)],now,&cpu,"CPU").contains("<polyline"),"warmup counts only this window");
+        let mut points = vec![point(now-1800,0),point(now-1500,50),point(now-1200,100),point(now-900,50),point(now-600,0),point(now-300,100)];
+        points[2]["cpu"]["percent"] = Value::Null;
+        points[2]["cpu"]["reason"] = json!("counter reset");
+        assert_eq!(trend(&points,now,&cpu,"CPU").matches("<polyline").count(),2,"reset breaks the line");
+        points.remove(2);points.remove(2);
+        assert_eq!(trend(&points,now,&cpu,"CPU").matches("<polyline").count(),2,"over two buckets breaks the line");
+        d["resources"]["rows"][0]["history"]["gaps"] = json!([{"from":now-900,"to":now}]);
+        d["resources"]["rows"][0]["history"]["resets"] = json!([now-1200]);
+        d["resources"]["rows"][0]["source"]["state"] = json!("incomplete");
+        d["resources"]["rows"][0]["source"]["reason"] = json!("capped query");
+        let mut capped=String::new();host_grid(&mut capped,&d,now);
+        assert!(capped.contains("Sample gaps")&&capped.contains("CPU resets")&&capped.contains("incomplete: capped query"));
+    }
+
     /// #170 A1/A2, D8: hosts precede actions; telemetry gaps never imply health or a human request.
     #[test]
     fn host_first_actions_and_unknowns() {
@@ -1135,7 +1264,7 @@ mod tests {
         d["resources"]["rows"].as_array_mut().unwrap().push(variant);
         d["resources"]["rows"][2]["host"] = json!("FRA/native");
         let mut html = String::new(); host_grid(&mut html, &d, 0);
-        assert_eq!(html.matches("class=\"host\"").count(),3,"case variants cannot add a host");
+        assert_eq!(html.matches("class=\"host overview-host\"").count(),3,"case variants cannot add a host");
     }
 
     /// F1/F6: the approved #169 scenario through the real renderer; unsupported probes stay unknown.
