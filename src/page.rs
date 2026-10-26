@@ -62,7 +62,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 7] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections")];
+pub const VIEWS: [(&str, &str); 8] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -183,6 +183,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     if configured("langfuse") || has_rows(&doc["resources"]["rows"]) { servers(w, &doc["resources"], now); }
     if let Some(rows) = doc["boards"].as_array().filter(|a| !a.is_empty()) { boards(w, rows); }
     installations(w, &doc["installations"], &doc["resources"], now);
+    telemetry(w, &doc["installations"], now, &query);
     integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
     if configured("langfuse") || has_rows(&doc["resources"]["rows"]) {
         resources(w, &doc["resources"], now);
@@ -329,6 +330,61 @@ fn versions(w: &mut String, versions: &Value, now: u64) {
         let _ = writeln!(w, "</details></section>");
     }
     let _ = writeln!(w, "<details id=\"version-meanings\"><summary id=\"summary-version-meanings\">Version meanings</summary><p><strong>Running</strong> — last observed service process.</p><p><strong>Selected</strong> — version chosen by the host launcher; may not be running yet.</p><p><strong>Available</strong> — release found by the last check; not an installation receipt. Check state and time remain separate from host observation.</p><small>coreq is a shared library, not another service. Missing or stale evidence never means healthy. Last known versions do not establish current process state.</small></details></div></section>");
+}
+
+/// D11/D23: delivery evidence is per sender and stage, never an all-event success claim.
+fn telemetry(w: &mut String, inst: &Value, now: u64, query: &str) {
+    let _ = writeln!(w, "<section id=\"telemetry\"><h2>Telemetry</h2><p class=\"note\">Events and metrics only. Stages carry their own evidence times; a receipt proves one delivery, not complete interval coverage. Coverage spans retained history, independently of the selected activity period.</p>{}", unknown_line(&inst["source"]));
+    let rows = inst["rows"].as_array().map(Vec::as_slice).unwrap_or_default();
+    if rows.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">Unknown · no sender observations available. <a href=\"/integrations{}\" data-view-link>Inspect connections</a></p>", esc(query));
+    }
+    for r in rows {
+        let anchor = crate::enroll::anchor(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
+        let connection = format!("/integrations{query}#{anchor}");
+        let _ = writeln!(w, "<article class=\"telemetry-sender\" id=\"telemetry-{anchor}\"><h3>{} · {} · {}</h3><p class=\"detail\">Installation {} · workspace {} · generation {} · connection {} · <a id=\"telemetry-link-{anchor}\" data-view-link href=\"{}\">Connection evidence</a></p><ol class=\"delivery-stages\" aria-label=\"Delivery stages\">", text(&r["product"]), text(&r["host_label"]), text(&r["runtime"]), text(&r["installation"]), text(&r["workspace"]), text(&r["generation"]), text(&r["connection"]), esc(&connection));
+        for (key, label) in [("emitted", "Emitted"), ("queued", "Queued"), ("accepted", "Accepted"), ("projected", "Projected"), ("exported", "Exported"), ("queryable", "Queryable")] {
+            let s = &r["route"][key];
+            let (state, name) = match s["state"].as_str() { Some("known") => ("known", "Known"), Some("not_applicable") => ("not_applicable", "Not applicable"), _ => ("unknown", "Unknown") };
+            let value = match (state, &s["value"]) { ("known", Value::Bool(true)) => "Yes".into(), ("known", Value::Bool(false)) => "No".into(), ("known", v) => num(v, s), _ => "—".into() };
+            let why = s["reason"].as_str().unwrap_or(if state == "unknown" { "no stage evidence" } else { "—" });
+            let _ = writeln!(w, "<li data-stage=\"{key}\" data-state=\"{state}\"><strong>{label}</strong><span>{name} · {value}</span><small>Evidence time: {}</small><small>{}</small></li>", at(&s["at"], now), esc(why));
+        }
+        let _ = writeln!(w, "</ol>{}<p class=\"detail\"><a href=\"/data{}\">Route projection evidence</a></p>", unknown_line(&r["observation"]), esc(query));
+        let t = &r["telemetry"];
+        if r["product"] == "taskq" && t["state"] != "off" && !t.is_null() {
+            let k = &t["retained"];
+            let _ = writeln!(w, "<h4>Coverage</h4>{}<div class=\"telemetry-coverage\"><div><strong>Retained in receipt order</strong>", unknown_line(t));
+            if k.is_object() {
+                let _ = writeln!(w, "<p>seq {}–{} · {} rows · {} bytes · {} blocks</p><p class=\"detail\">First receipt: {}<br>Newest receipt: {}</p>", num(&k["first_seq"], t), num(&k["last_seq"], t), num(&k["rows"], t), num(&k["bytes"], t), num(&k["blocks"], t), at(&k["oldest_received"], now), at(&k["newest_received"], now));
+            } else { let _ = writeln!(w, "<p class=\"unknown\">Unknown · {}</p>", text(&t["reason"])); }
+            let sender = &t["sender"];
+            let _ = writeln!(w, "</div><div><strong>Sender counters</strong><p>Backlog: {} rows · {} bytes<br>Sender gap: {} rows</p><p class=\"detail\">Newest retained block: {}</p>{}</div><div><strong>Unreceived between blocks</strong>", num(&sender["backlog_rows"], sender), num(&sender["backlog_bytes"], sender), num(&sender["gap_rows"], sender), at(&t["last_synced"], now), unknown_line(sender));
+            if k.is_object() {
+                let _ = writeln!(w, "<p>{} holes · {} rows</p><ul class=\"telemetry-ranges\">", num(&t["holes_total"], t), num(&t["hole_rows"], t));
+                for hole in t["holes"].as_array().into_iter().flatten() {
+                    let _ = writeln!(w, "<li>seq {}–{} · {} rows</li>", num(&hole["from_seq"], t), num(&hole["to_seq"], t), num(&hole["rows"], t));
+                }
+                let listed = t["holes"].as_array().map_or(0, Vec::len);
+                let _ = writeln!(w, "</ul><p class=\"detail\">{listed} ranges listed (cap 32). These are gaps between retained blocks, not a sender loss total.</p><p>Restarts: {}</p><p class=\"detail\">A seq moving back marks a replaced sender store; ranges are receipt-ordered, not a continuous interval.</p>", num(&t["restarts"], t));
+            } else { let _ = writeln!(w, "<p class=\"unknown\">Unknown · no retained sequence coverage; holes and restarts unavailable.</p>"); }
+            let _ = writeln!(w, "</div><div><strong>Known loss by DashQ</strong><ul>");
+            for p in t["pruned"].as_array().into_iter().flatten() {
+                let _ = writeln!(w, "<li>{}: {} rows · {} blocks · through seq {}</li>", text(&p["cause"]), num(&p["rows"], t), num(&p["blocks"], t), num(&p["through_seq"], t));
+            }
+            if t["pruned"].as_array().is_some_and(Vec::is_empty) { let _ = writeln!(w, "<li>No removals recorded</li>"); }
+            let evidence = t["evidence"].as_array().map(Vec::as_slice).unwrap_or_default();
+            let _ = writeln!(w, "</ul></div></div><details id=\"blocks-{anchor}\"><summary id=\"summary-blocks-{anchor}\">Retained block evidence · {} of {} (newest 200)</summary><ul class=\"telemetry-blocks\">", evidence.len(), num(&t["blocks"], t));
+            for b in evidence {
+                let _ = writeln!(w, "<li><a href=\"/data{}&amp;block={}\">{}</a> · generation {} · seq {}–{} · {} rows<br><span class=\"detail\">Observed: {} · received: {}</span> · <a data-view-link href=\"{}\">Installation row</a></li>", esc(query), enc(b["event_id"].as_str().unwrap_or("")), text(&b["event_id"]), num(&b["generation"], t), num(&b["first_seq"], t), num(&b["last_seq"], t), num(&b["rows"], t), at(&b["observed_at"], now), at(&b["received_at"], now), esc(&connection));
+            }
+            let _ = writeln!(w, "</ul></details>");
+        } else {
+            let _ = writeln!(w, "<p class=\"note\">Block coverage not applicable · {}</p>", t["reason"].as_str().map(esc).unwrap_or_else(|| "no TaskQ telemetry grant".into()));
+        }
+        let _ = writeln!(w, "</article>");
+    }
+    let _ = writeln!(w, "</section>");
 }
 
 /// Connected installations (D11, enrollment C1): connection, data age, history warmup and export gaps are separate
@@ -1155,6 +1211,59 @@ fn resources(w: &mut String, res: &Value, now: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #222 A1–A4 / D11,D22,D23: real renderer fixtures protect unknown/false stages, scoped evidence and gaps.
+    #[test]
+    fn telemetry_view() {
+        let mut doc = crate::fixture_doc();
+        doc["generated_at"] = json!(1000);
+        doc["filters"] = json!({"host": "win", "agent": "codex", "session": "example"});
+        let mut row = json!({"installation":"tq","workspace":"w","generation":2,"host_label":"win","runtime":"native","product":"taskq",
+            "connection":"active","received_at":990,"projected":false,"observation":{"state":"stale","at":700,"age_s":300,"reason":"old snapshot"},
+            "snapshot":{"event_id":"board-1","schema":"taskq-board/1"},"export":{"state":"not_applicable","reason":"no Langfuse export required"},
+            "telemetry":{"state":"ok","blocks":202,"last_synced":990,"sender":{"state":"unknown","reason":"status not reported by taskq"},
+                "retained":{"blocks":202,"rows":500,"bytes":4096,"first_seq":10,"last_seq":4,"oldest_received":800,"newest_received":990},
+                "holes":[{"from_seq":20,"to_seq":22,"rows":3}],"holes_total":40,"hole_rows":90,"restarts":1,
+                "pruned":[{"cause":"capacity","blocks":1,"rows":5,"through_seq":9},{"cause":"retention","blocks":2,"rows":8,"through_seq":8},{"cause":"allowlist","blocks":1,"rows":1,"through_seq":18}],
+                "evidence":[{"event_id":"block-2","generation":2,"first_seq":1,"last_seq":4,"rows":4,"observed_at":980,"received_at":990}]}});
+        for n in 1..200 {
+            row["telemetry"]["evidence"].as_array_mut().unwrap().push(json!({"event_id":format!("older-{n}"),"generation":2,"first_seq":10+n,"last_seq":10+n,"rows":1,"observed_at":800,"received_at":800}));
+        }
+        row["route"] = crate::explain::route(&row);
+        let mut pending = json!({"installation":"aq","workspace":"w","generation":1,"host_label":"A long sender label with <invented> & characters","runtime":"native","product":"agentq","connection":"pending",
+            "export":{"state":"unknown","reason":"export forwarding not qualified"},"telemetry":{"state":"off","reason":"telemetry not in grant"}});
+        pending["route"] = crate::explain::route(&pending);
+        let mut known = row.clone();
+        known["installation"] = json!("counted");
+        known["telemetry"]["sender"] = json!({"state":"ok","backlog_rows":0,"backlog_bytes":0,"gap_rows":2});
+        known["route"] = crate::explain::route(&known);
+        doc["installations"] = json!({"source":{"state":"ok"},"rows":[row,pending,known]});
+        let html = render_view(&doc, &json!({}), "/telemetry");
+        assert!(html.contains("id=\"telemetry\""), "#222: missing dedicated Telemetry view");
+        assert!(html.contains("data-stage=\"emitted\" data-state=\"unknown\""));
+        assert!(html.contains("snapshot not projected for this generation") && html.contains("Not applicable"));
+        assert!(html.contains("seq 10–4") && html.contains("seq 20–22") && html.contains("allowlist"));
+        assert!(html.contains("block=block-2") && html.contains("#inst-tq-w"));
+        assert!(!html.contains("<invented>"));
+        if let Some(out) = std::env::var_os("DASHQ_TELEMETRY_EVIDENCE") {
+            let dir = std::path::PathBuf::from(out);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("page.html"), html).unwrap();
+            std::fs::write(dir.join("data.json"), doc.to_string()).unwrap();
+            doc["installations"]["rows"] = json!([]);
+            std::fs::write(dir.join("empty.html"), render_view(&doc, &json!({}), "/telemetry")).unwrap();
+        }
+        for (name, reason, pruned) in [("unreceived", "no telemetry block yet", json!([])), ("pruned", "every stored block was pruned", json!([{"cause":"retention","rows":4,"blocks":1,"through_seq":4}]))] {
+            doc["installations"]["rows"] = json!([{"installation":"gone","workspace":"w","product":"taskq","connection":"revoked",
+                "telemetry":{"state":"unknown","reason":reason,"blocks":0,"retained":null,"sender":{"state":"unknown","reason":reason},
+                    "pruned":pruned,"holes":[],"holes_total":0,"hole_rows":0,"restarts":0,"evidence":[]}}]);
+            let page = render_view(&doc, &json!({}), "/telemetry");
+            assert!(!page.contains("0 holes") && !page.contains("Restarts: 0"), "#222: absent retained sequence coverage cannot claim zero gaps");
+            if let Some(out) = std::env::var_os("DASHQ_TELEMETRY_EVIDENCE") {
+                std::fs::write(std::path::PathBuf::from(out).join(format!("{name}.html")), page).unwrap();
+            }
+        }
+    }
 
     /// #219 A1–A3 / D4.4: the public reference's three synthetic host scenarios, never live data.
     #[test]

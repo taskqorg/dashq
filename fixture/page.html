@@ -11,7 +11,7 @@
 <header>
 <h1>dashq</h1>
 <nav id="views" aria-label="Dashboard views"><a id="view-home" data-view-inherit data-view-link href="/?period=1800">Overview</a> <a id="view-projects" data-view-inherit data-view-link href="/projects?period=1800">Tasks</a> <a id="attention-link" data-view-inherit data-view-link href="/?period=1800#attention">Attention · 4</a></nav>
-<details id="more"><summary>More</summary><div><a id="view-hosts" data-view-inherit data-view-link href="/hosts?period=1800">Host detail</a> <a id="view-agents" data-view-inherit data-view-link href="/agents?period=1800">Agents</a> <a id="view-services" data-view-inherit data-view-link href="/services?period=1800">Services</a> <a id="view-checks" data-view-inherit data-view-link href="/checks?period=1800">Checks</a> <a id="view-integrations" data-view-inherit data-view-link href="/integrations?period=1800">Connections</a> <a href="/connect">Connect a service</a>
+<details id="more"><summary>More</summary><div><a id="view-hosts" data-view-inherit data-view-link href="/hosts?period=1800">Host detail</a> <a id="view-agents" data-view-inherit data-view-link href="/agents?period=1800">Agents</a> <a id="view-services" data-view-inherit data-view-link href="/services?period=1800">Services</a> <a id="view-checks" data-view-inherit data-view-link href="/checks?period=1800">Checks</a> <a id="view-integrations" data-view-inherit data-view-link href="/integrations?period=1800">Connections</a> <a id="view-telemetry" data-view-inherit data-view-link href="/telemetry?period=1800">Telemetry</a> <a href="/connect">Connect a service</a>
 <a href="https://langfuse.example.com/project/p1/traces">Langfuse traces</a> <a href="https://langfuse.example.com/project/p1/dashboards">Langfuse dashboards</a>
 </div></details></header><main id="main"><p id="view-unavailable" class="note" hidden>No observations available for this view. <a href="/?period=1800">Return to overview</a>.</p>
 <p class="bar">Updated <time data-at="1791875139">07:05 UTC</time> · Period <strong>30 min</strong> · <a href="/?period=7200">2 h</a> · <a href="/?period=86400">24 h</a> <button id="refresh" type="button">Refresh</button></p>
@@ -163,6 +163,18 @@
 <dt>Evidence</dt><dd><code>host-fixture</code> · taskq-board/1</dd><dt>Snapshot history</dt><dd><span class="unknown" title="unknown: history unavailable">—</span> retained snapshots; resource trends use their own samples</dd></dl></details>
 <p><a id="revoke-inst-tq-fixture-example" href="/connect?revoke=tq-fixture&amp;workspace=example">Revoke…</a></p>
 </div>
+</section>
+<section id="telemetry"><h2>Telemetry</h2><p class="note">Events and metrics only. Stages carry their own evidence times; a receipt proves one delivery, not complete interval coverage. Coverage spans retained history, independently of the selected activity period.</p>
+<article class="telemetry-sender" id="telemetry-inst-tq-fixture-example"><h3>taskq · fra · native</h3><p class="detail">Installation tq-fixture · workspace example · generation  · connection active · <a id="telemetry-link-inst-tq-fixture-example" data-view-link href="/integrations?period=1800#inst-tq-fixture-example">Connection evidence</a></p><ol class="delivery-stages" aria-label="Delivery stages">
+<li data-stage="emitted" data-state="unknown"><strong>Emitted</strong><span>Unknown · —</span><small>Evidence time: —</small><small>producer reports no emitted count</small></li>
+<li data-stage="queued" data-state="unknown"><strong>Queued</strong><span>Unknown · —</span><small>Evidence time: —</small><small>producer reports no queue</small></li>
+<li data-stage="accepted" data-state="unknown"><strong>Accepted</strong><span>Unknown · —</span><small>Evidence time: —</small><small>no receipt</small></li>
+<li data-stage="projected" data-state="known"><strong>Projected</strong><span>Known · Yes</span><small>Evidence time: 07:05 UTC (20s ago)</small><small>—</small></li>
+<li data-stage="exported" data-state="unknown"><strong>Exported</strong><span>Unknown · —</span><small>Evidence time: —</small><small>no export evidence</small></li>
+<li data-stage="queryable" data-state="known"><strong>Queryable</strong><span>Known · Yes</span><small>Evidence time: 07:05 UTC (20s ago)</small><small>—</small></li>
+</ol><p class="detail"><a href="/data?period=1800">Route projection evidence</a></p>
+<p class="note">Block coverage not applicable · no TaskQ telemetry grant</p>
+</article>
 </section>
 <section id="resources">
 <h2>Resource samples</h2>

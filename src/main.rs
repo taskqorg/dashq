@@ -875,7 +875,7 @@ mod tests {
         assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
         assert_eq!(route(&app, "GET", "/projects", "period=5", None).0, "400 Bad Request");
         // D22 / F7: direct shared view URLs must resolve, not become 404 or JSON.
-        for path in ["/projects", "/hosts", "/agents", "/services", "/checks", "/integrations"] {
+        for path in ["/projects", "/hosts", "/agents", "/services", "/checks", "/integrations", "/telemetry"] {
             let r = route(&app, "GET", path, "period=7200&host=fixture", None);
             assert_eq!(r.0, "200 OK", "{path}");
             assert!(String::from_utf8(r.2).unwrap().contains(&format!("data-view=\"{path}\"")));
@@ -907,6 +907,15 @@ mod tests {
         let report = app.doc(period, filters, Some(store::Scope::All));
         let b = &data["telemetry_block"];
         assert_eq!(b, &report["telemetry_block"]);
+        // #222 / D23: the page, /data and report consume one scoped route/coverage projection.
+        let rows = &data["installations"]["rows"];
+        for field in ["route", "telemetry"] { assert_eq!(rows[0][field], report["installations"]["rows"][0][field]); }
+        assert_eq!(rows[0]["telemetry"]["evidence"][0]["event_id"], "t-1");
+        assert!(rows[0]["telemetry"]["evidence"][0].get("payload").is_none());
+        let page = String::from_utf8(route(&app, "GET", "/telemetry", "", Some(store::Scope::All)).2).unwrap();
+        assert!(page.contains("block=t-1") && page.contains("data-stage=\"accepted\" data-state=\"known\""));
+        let scoped = String::from_utf8(route(&app, "GET", "/telemetry", "", None).2).unwrap();
+        assert!(!scoped.contains("block=t-1"), "no subject cannot read sender evidence");
         assert_eq!((&b["state"], &b["blocks"][0]["payload"], &b["blocks"][0]["received_at"], &b["blocks"][0]["coverage"]["retained"]["last_seq"]), (&json!("ok"), &serde_json::from_str::<Value>(payload).unwrap(), &json!(now), &json!(2)));
         assert_eq!(app.doc(1800, json!({"block": "t-1"}), None)["telemetry_block"]["blocks"], json!([]), "no subject: no block");
         assert!(report_query(&["--block=a b"]).is_err() && report_query(&["block=t-1"]).is_err());

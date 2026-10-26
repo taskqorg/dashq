@@ -1,0 +1,81 @@
+{
+  "kind": "runtime-fixture-evidence",
+  "rules": [
+    "R12/R13",
+    "D11/D22/D23",
+    "#222 A1–A4"
+  ],
+  "browser": "155.0.8059.85",
+  "platform": "win32",
+  "before": "cargo test --locked telemetry_view: FAIL #222: missing dedicated Telemetry view",
+  "after": "PASS: six stage states and independent coverage from the scoped document",
+  "inputs": {
+    "dashq.md": "3a4b8ed4efaf76de5d601044c2d063a97f1ff6639c8e01640642592d993fda89",
+    "src/page.rs": "a2683dd49c75fea606b9d9de589ffd96fc68fd2495abaafaa69876908c2b81af",
+    "src/enroll.rs": "064eff2e299c58c8b7cd6c12d9b27d06fddd79b88c0b33c73eaf2c3f5a6a00c6",
+    "src/store.rs": "cd8745ef056df9dde61c00397da3ce59a8cd3d07d857bd591e651fe53a64e8f5",
+    "assets/taskq/resource-controls.js": "14134d91063767a58510f3cf34f3988b5e13594e0231738b5d73aa60fbc8068f",
+    "assets/resources.js": "4f779b0acd47ba2d5cf85a8123ae9d008b8c4f989a7a6d116f591c3468b728df",
+    "assets/taskq/project-blocks.js": "cbc2498e57b16a1350c7819939f1a65563270f53424443e5e1ec98bfe5f618f7",
+    "assets/taskq/answer-card.js": "c4b9c515bfb85d4daf1c96fd61642d5b495551d42b844d3c82447b9e8d049d49",
+    "assets/taskq/task-controls.js": "5185c668dea13d217d3a4f95452d647b04b9b2f049c624530a96d8d7e25b1a80",
+    "assets/taskq/task-workspace.js": "dca311b60e096bec062668ae1d059dbb6b56f3483cbd493d0bcc829a719bf469",
+    "assets/taskq/pm-composer.js": "8718133305abe624efa57aebac2b4d734ec60fd45d833a7f4df5ec368d4682f8",
+    "assets/workspace.js": "1a5a2fc7ced22a9b0e29b395923d27f25f18f38dd38b3750982713a7468d9415",
+    "assets/boards.js": "e978cdb91d73ab24ca5e2c8ca7d3f2967012978828eb40cf3869d87ee919ba4a",
+    "assets/app.js": "0e040a38a872e670779ff48e0e8270e9580ede2da6bb8e2fa31e488f1699be41",
+    "assets/style.css": "c29fa17f2716b953aedb4c33fe2bce2d5f48018fdfcf601b5a4bb9164942595a",
+    "assets/taskq/resource-controls.css": "9f81ec867aaf0cf95c4abbd5c37889632e1a6034b0e33331b52c41f92b836907",
+    "assets/resources.css": "de33099548d72ca2f6a10b1c139c9162c38e8b4865d581a9bec3ad97e8b725b6",
+    "assets/taskq/project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0",
+    "assets/taskq/answer-card.css": "8a9bf9e08bd73795f02021809a008a210d0ac61569c0e365107c77e6cca38bcc",
+    "assets/taskq/pm-composer.css": "10e0263ce874eb0a5f9570e1aa8e99323a52cb2d28d2054d25631d357f0320fb",
+    "assets/workspace.css": "bbee0d56a9fda1ac06792c8e1fe3a3c20e0f31e9a782cdca1ff8b2ad7c9b2ce2",
+    "assets/taskq/task-workspace.css": "fecf5874922579f804712b3012c9400277d1e3123f3725b4a70156b800fa64b1",
+    "tests/telemetry-browser.cjs": "d0cab6ade53d3d94420fe0383352096eef3521ac6d974b3b0149c3a1eb65cc04"
+  },
+  "rendered": "6ca274e1cb8791fe60fa580e17898e9276b648c6a273cf05ee79b28cea4380f9",
+  "cells": [
+    {
+      "width": 1280,
+      "text_px": 16,
+      "theme": "light",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "text_px": 16,
+      "theme": "dark",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "text_px": 20,
+      "theme": "light",
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "text_px": 20,
+      "theme": "dark",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "text_px": 24,
+      "theme": "light",
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "text_px": 24,
+      "theme": "dark",
+      "result": "PASS"
+    }
+  ],
+  "notTested": [
+    "production telemetry",
+    "deployment",
+    "owner visual acceptance"
+  ]
+}
