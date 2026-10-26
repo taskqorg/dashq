@@ -49,6 +49,7 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
         await page.evaluate(url=>navigateView(new URL(url,location.origin)), view);
         await page.waitForFunction(()=>!busy);
         if(view==='/projects')assert(await page.locator('#boards .tqp-task').first().isVisible(),'Tasks opens its first board rows');
+        if(view==='/hosts')await page.locator('#host-grid .host-facts').evaluateAll(es=>es.forEach(e=>e.open=true));
         const geometry = await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,viewport:innerWidth,
           overflow:[...document.querySelectorAll('#host-grid .cell,#attention a,#boards .tqp-task')].filter(e=>e.getClientRects().length).filter(e=>{const r=e.getBoundingClientRect();return r.left<-.5||r.right>innerWidth+.5;}).map(e=>e.textContent.slice(0,50))}));
         assert(geometry.scrollWidth<=width,JSON.stringify({width,size,theme,view,...geometry}));
@@ -67,7 +68,7 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
       assert(await page.locator('#boards').isVisible());
       await page.goBack(); assert.equal(new URL(page.url()).pathname,'/');
       assert(await page.locator('#host-grid').isVisible());
-      await page.locator('#host-grid .host-facts > summary').first().click();
+      await page.locator('#host-grid .host-facts').first().evaluate(e=>e.open=true);
       await page.locator('#host-grid .count-link').first().click();
       await page.waitForFunction(()=>!busy);
       assert.equal(new URL(page.url()).pathname,'/projects');

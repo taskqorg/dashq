@@ -130,7 +130,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
         return h;
     }
 
-    let _ = write!(w, "<h1 id=\"overview-title\">Overview</h1>");
+    let _ = write!(w, "<h2 id=\"overview-title\">Overview</h2>");
     host_grid(w, doc, now);
     w.push_str(&action_html);
     let _ = writeln!(w, "<details id=\"source-status\"><summary>Source status \u{00b7} {} non-ok</summary><ul class=\"summary\">{}</ul></details>", not_ok.len(), not_ok.join(""));
@@ -783,11 +783,10 @@ fn bar(p: Option<f64>) -> String {
 /// 30 min line on 0–100 %; a gap of more than two buckets, an unknown value or a reset breaks the line. Fewer than
 /// two connected samples draw nothing: no chart from a single reading.
 fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &str) -> String {
-    if points.len() < 3 { return "<span class=\"trend none\">no trend yet · warmup, 3 real samples needed</span>".into(); }
     let from = to.saturating_sub(TREND);
     let points: Vec<_> = points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from && a <= to)).collect();
     if points.iter().filter(|p| f(p).is_some()).count() < 3 {
-        return "<span class=\"trend none\">no trend yet · warmup, 3 real samples needed</span>".into();
+        return "<span class=\"trend none\">no trend yet · fewer than 3 real samples in last 30 min</span>".into();
     }
     let mut lines: Vec<Vec<(u64, f64)>> = vec![vec![]];
     for p in points.iter().filter(|p| p["at"].as_u64().is_some_and(|a| a >= from)) {
@@ -807,7 +806,7 @@ fn trend(points: &[Value], to: u64, f: &dyn Fn(&Value) -> Option<f64>, label: &s
         .map(|l| format!("<polyline points=\"{}\"/>", l.iter().map(|(a, v)| format!("{:.1},{:.1}", (a - from) as f64 / TREND as f64 * 120.0, 32.0 - v / 100.0 * 32.0)).collect::<Vec<_>>().join(" ")))
         .collect();
     if lines.is_empty() {
-        return "<span class=\"trend none\">no trend yet</span>".into();
+        return "<span class=\"trend none\">no trend yet · gaps or unavailable samples</span>".into();
     }
     format!("<svg class=\"trend\" viewBox=\"0 0 120 32\" preserveAspectRatio=\"none\" role=\"img\" aria-label=\"{label}, last 30 min, 0–100 %\">{}</svg>", lines.join(""))
 }
@@ -859,7 +858,7 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         let why = format!("{}; {}", f["reason"].as_str().unwrap_or("AgentQ heartbeat"), h["reason"].as_str().unwrap_or("canonical host identity"));
         let (name, kind) = id.split_once('/').unwrap_or((id, "kind unknown"));
         let _ = writeln!(w, "<article class=\"host overview-host\" id=\"host-{key}\">");
-        overview_host(w, &h, res, doc, now);
+        overview_host(w, &h, res, doc, now, &query("/hosts", id));
         let _ = write!(w, "<details class=\"host-facts\" id=\"host-facts-{key}\"><summary id=\"host-facts-toggle-{key}\">Host details</summary><div class=\"host-facts-grid\">");
         let _ = writeln!(w, "<div class=\"cell identity\" tabindex=\"0\" title=\"{}\"><a class=\"host-name\" data-view-link href=\"{}\">{}</a><small class=\"kind\">{}</small><span class=\"detail\">TaskQ {}<br>Data: {} · {observed_age}</span>", esc(&why), esc(&query("/hosts", id)), esc(name), esc(kind), host_observation(&h, "online", "state", now), badge(f["state"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")));
         for i in doc["attention"]["current"].as_array().into_iter().flatten().filter(|i| i["source"] == "serverq" && i["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(id))) {
@@ -914,7 +913,7 @@ fn overview_icon(name: &str) -> String {
 }
 
 /// D8/D10: resource state is scoped to resources, never inferred machine/service health.
-fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u64) {
+fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u64, detail_target: &str) {
     let id = host["id"].as_str().unwrap_or("");
     let (name, kind) = id.split_once('/').unwrap_or((id, ""));
     let src = if res.is_null() { &host["freshness"] } else { &res["source"] };
@@ -927,7 +926,8 @@ fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u6
         else if !has_values { "Resource data unavailable" }
         else if state != "ok" { "Resource data not confirmed" }
         else { "Resource samples available" };
-    let age = src["age_s"].as_u64().map_or("Observation age unknown".into(), |age| format!("{} <span data-age-s=\"{age}\">{} old</span>", if res.is_null() {"Host observation"}else{"Resources"}, dur(age)));
+    let source = if res.is_null() {"Host observation"}else{res["provenance"].as_str().unwrap_or("Resources")};
+    let age = src["age_s"].as_u64().map_or("Observation age unknown".into(), |age| format!("{} <span data-age-s=\"{age}\">{} old</span>", esc(source), dur(age)));
     let mut validity = src["age_s"].as_u64().filter(|_|has_values && state=="ok").map_or(String::new(),|age|format!(" data-resource-valid-for=\"{}\"",crate::resource::STALE.saturating_sub(age)));
     if request.is_some() {validity.push_str(" data-request=\"true\"");}
     let _ = write!(w, "<div class=\"overview-summary\"{validity}><div class=\"overview-identity\"><span class=\"overview-machine\">{}</span><div><h3 class=\"overview-name\">{}</h3><span class=\"overview-age\">{kind} {age}</span></div></div><p class=\"overview-state\">{}</p>", overview_icon("server"), esc(name), esc(status), kind=esc(kind));
@@ -954,6 +954,7 @@ fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u6
         }
         let _ = write!(w, "</div>");
         let history = &res["history"];
+        if history["state"]=="warmup" {let _ = write!(w,"<small class=\"overview-gap\">Warmup · collecting 3 real samples</small>");}
         for (field, label) in [("gaps", "Sample gaps"), ("resets", "CPU resets")] {
             let in_window = history[field].as_array().into_iter().flatten().any(|v| {
                 if field=="gaps" {v["to"].as_u64().is_some_and(|t|t>=to.saturating_sub(TREND)) && v["from"].as_u64().is_some_and(|t|t<=to)}
@@ -965,15 +966,14 @@ fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u6
     } else {
         let _ = write!(w, "<div class=\"overview-empty\">CPU · RAM · disk unavailable<small>{}</small></div>", esc(src["reason"].as_str().unwrap_or("no resource sample")));
     }
-    let extra: String = ["agent", "session"].iter().filter_map(|k| doc["filters"][*k].as_str().map(|v|format!("&{k}={}",enc(v)))).collect();
-    let default_target = format!("/hosts?period={}&host={}{extra}#servers", doc["period"].as_u64().unwrap_or(1800), enc(id));
+    let default_target = format!("{detail_target}#servers");
     let target = request.and_then(|r|r["target"].as_str()).unwrap_or(&default_target);
     let action = request.and_then(|r|r["action"].as_str()).unwrap_or(if has_values {"Inspect resources"} else {"Source details"});
     let _ = write!(w, "<a class=\"overview-open\" data-view-link href=\"{}\">{}{}</a></div>", esc(target), overview_icon("arrow-up-right"), esc(action));
 }
 
 fn overview_metric(w: &mut String, host: &str, label: &str, icon: &str, shown: Option<String>, percent: Option<f64>, points: &[Value], to: u64, metric: &dyn Fn(&Value) -> Option<f64>, reason: &Value) {
-    let shown = shown.unwrap_or_else(||format!("Unknown: {}", esc(reason.as_str().unwrap_or("not reported"))));
+    let shown = shown.unwrap_or_else(||format!("— unknown: {}", esc(reason.as_str().unwrap_or("not reported"))));
     let key = enc(&format!("{host}-{label}"));
     let _ = write!(w, "<div class=\"overview-metric\"><div class=\"overview-current\"><span class=\"overview-metric-top\">{}<span>{}</span></span><span class=\"overview-number\" id=\"overview-value-{key}\" data-n=\"{}\" data-metric=\"{key}\">{shown}</span>{}</div>{}</div>", overview_icon(icon), esc(label), percent.map_or(String::new(),|p|p.to_string()), bar(percent), trend(points, to, metric, &esc(label)));
 }
@@ -1191,7 +1191,8 @@ mod tests {
         // D4.4 / W3,W10: old-window samples, missing values, resets and gaps cannot fabricate a line.
         let point = |at, p| json!({"at":at,"cpu":{"percent":p}});
         let cpu = |p: &Value|p["cpu"]["percent"].as_f64();
-        assert!(!trend(&[point(now-2000,1),point(now-1900,2),point(now-12,3)],now,&cpu,"CPU").contains("<polyline"),"warmup counts only this window");
+        let old_history=trend(&[point(now-2000,1),point(now-1900,2),point(now-12,3)],now,&cpu,"CPU");
+        assert!(!old_history.contains("<polyline") && !old_history.contains("warmup") && old_history.contains("last 30 min"),"older history is not startup warmup");
         let mut points = vec![point(now-1800,0),point(now-1500,50),point(now-1200,100),point(now-900,50),point(now-600,0),point(now-300,100)];
         points[2]["cpu"]["percent"] = Value::Null;
         points[2]["cpu"]["reason"] = json!("counter reset");
@@ -1204,6 +1205,15 @@ mod tests {
         d["resources"]["rows"][0]["source"]["reason"] = json!("capped query");
         let mut capped=String::new();host_grid(&mut capped,&d,now);
         assert!(capped.contains("Sample gaps")&&capped.contains("CPU resets")&&capped.contains("incomplete: capped query"));
+        d["attention"]["requests"]=json!([]);
+        d["resources"]["rows"][0]["source"]["state"]=json!("stale");
+        d["resources"]["rows"][0]["history"]["state"]=json!("ok");
+        d["resources"]["rows"][0]["history"]["points"]=json!([point(now-3000,1),point(now-2700,2),point(now-2400,3)]);
+        let mut stale=String::new();host_grid(&mut stale,&d,now);
+        assert!(stale.contains("No recent data") && !stale.contains("Warmup") && stale.contains("fewer than 3 real samples in last 30 min"));
+        d["resources"]["rows"][0]["history"]["state"]=json!("warmup");
+        let mut warmup=String::new();host_grid(&mut warmup,&d,now);
+        assert!(warmup.contains("Warmup · collecting 3 real samples"),"only producer history warmup is labelled warmup");
     }
 
     /// #170 A1/A2, D8: hosts precede actions; telemetry gaps never imply health or a human request.

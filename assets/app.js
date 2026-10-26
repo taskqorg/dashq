@@ -130,7 +130,7 @@ async function refresh() {
     const elapsed = Math.floor((Date.now() - ageUpdatedAt) / 1000);
     document.querySelectorAll('main [data-age-s]').forEach(e => {
       e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
-      e.textContent = 'Last observation ' + e.dataset.ageS + ' s old · unconfirmed';
+      e.textContent = (e.closest('.overview-age') ? '' : 'Last observation ') + e.dataset.ageS + ' s old · unconfirmed';
     });
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');

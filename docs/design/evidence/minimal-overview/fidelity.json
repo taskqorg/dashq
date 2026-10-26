@@ -3,13 +3,13 @@
   "browser": "141.0.7390.37",
   "platform": "win32",
   "inputs": {
-    "src/page.rs": "cd7124166a9301281699ee52d802f493402bcfd76bec2b00cb5e6225f630e8e8",
-    "assets/app.js": "053e4661b7ae06d5e9c71deef2ea36333ef87a17644ffd1b7bb40b28709402b2",
+    "src/page.rs": "e043dfe7dda5550ff2576b1e43773cec8efa2ac88ea44a076592de02e438b666",
+    "assets/app.js": "5a4fc1b4b088615466ddeffd3312d7064bfcf4ce71da10910ede6969e1effb0b",
     "assets/style.css": "867057da2031df0a9bf3f80ef0fa89d8c403fb4765790c8e9808eca70796a604",
     "assets/overview-icons.svg": "01c0b4e0947726c60dd5bbc4607df234b99e0feb300c217d5006453070206dd0",
-    "tests/overview-browser.cjs": "72e682f27f982345e764cfb61914498d70cd1622b272c24ab6be2ebbf7c243f9"
+    "tests/overview-browser.cjs": "b5516266c966d3768abc2856a6477ef87275e30320d63c51f6f2c9155e7527c2"
   },
-  "rendered": "6f1a7a0990d865a47023d6e03936af3ce7b97f8d1818534215f402fe540b2d64",
+  "rendered": "9b4ca404b8b0ed599d388edb0becb52bf8cb5c3064b37e7bb97b395167704cf4",
   "cells": [
     {
       "width": 1280,
@@ -25,7 +25,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 3
+        "columns": 3,
+        "order": [
+          273.59375,
+          334.875,
+          372.875,
+          571.546875
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 320,
@@ -36,7 +43,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 3
+        "columns": 3,
+        "order": [
+          196.78125,
+          253,
+          291,
+          463
+        ],
+        "chartAfterNumber": true
       }
     },
     {
@@ -53,7 +67,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 3
+        "columns": 3,
+        "order": [
+          273.59375,
+          334.875,
+          372.875,
+          571.546875
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 320,
@@ -64,7 +85,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 3
+        "columns": 3,
+        "order": [
+          196.78125,
+          253,
+          291,
+          463
+        ],
+        "chartAfterNumber": true
       }
     },
     {
@@ -81,7 +109,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 1
+        "columns": 1,
+        "order": [
+          837.125,
+          910.75,
+          949.390625,
+          1180.3125
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 320,
@@ -92,7 +127,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 1
+        "columns": 1,
+        "order": [
+          623.265625,
+          690.5625,
+          728.5625,
+          900.5625
+        ],
+        "chartAfterNumber": true
       }
     },
     {
@@ -109,7 +151,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 1
+        "columns": 1,
+        "order": [
+          837.125,
+          910.75,
+          949.390625,
+          1180.3125
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 320,
@@ -120,7 +169,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 1
+        "columns": 1,
+        "order": [
+          623.265625,
+          690.5625,
+          728.5625,
+          900.5625
+        ],
+        "chartAfterNumber": true
       }
     },
     {
@@ -137,7 +193,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 2
+        "columns": 2,
+        "order": [
+          351.203125,
+          437.140625,
+          480.71875,
+          743.84375
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 486,
@@ -148,7 +211,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 2
+        "columns": 2,
+        "order": [
+          196.78125,
+          275.140625,
+          317.703125,
+          489.703125
+        ],
+        "chartAfterNumber": true
       }
     },
     {
@@ -165,7 +235,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 2
+        "columns": 2,
+        "order": [
+          351.203125,
+          437.140625,
+          480.71875,
+          743.84375
+        ],
+        "chartAfterNumber": true
       },
       "expected": {
         "width": 486,
@@ -176,7 +253,14 @@
         "chartWidth": 64,
         "chartHeight": 36,
         "chartRight": 0,
-        "columns": 2
+        "columns": 2,
+        "order": [
+          196.78125,
+          275.140625,
+          317.703125,
+          489.703125
+        ],
+        "chartAfterNumber": true
       }
     }
   ],

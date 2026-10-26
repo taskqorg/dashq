@@ -31,11 +31,18 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
    assert.deepEqual(await page.locator('.overview-name').allTextContents(),await ref.locator('.ds-name').allTextContents(),'identical host scenarios');
    const measures=async(p,card,name,metric,chart)=>p.evaluate(({card,name,metric,chart})=>{
     const cards=[...document.querySelectorAll(card)],r=cards[1].getBoundingClientRect(),m=document.querySelector(metric)?.getBoundingClientRect(),c=document.querySelector(chart)?.getBoundingClientRect();
-    const style=getComputedStyle(cards[1]);return {width:r.width,padding:parseFloat(style.paddingLeft),radius:parseFloat(style.borderRadius),name:parseFloat(getComputedStyle(document.querySelector(name)).fontSize),metricWidth:m?.width,chartWidth:c?.width,chartHeight:c?.height,chartRight:m?.right-c?.right,columns:new Set(cards.map(e=>Math.round(e.getBoundingClientRect().x))).size};
+    const style=getComputedStyle(cards[1]);
+    const order=['.ds-name,.overview-name','.ds-state,.overview-state','.ds-metrics,.overview-metrics','.ds-open,.overview-open'].map(s=>cards[1].querySelector(s).getBoundingClientRect().top);
+    const number=cards[1].querySelector('.ds-number,.overview-number').getBoundingClientRect();
+    return {width:r.width,padding:parseFloat(style.paddingLeft),radius:parseFloat(style.borderRadius),name:parseFloat(getComputedStyle(document.querySelector(name)).fontSize),metricWidth:m?.width,chartWidth:c?.width,chartHeight:c?.height,chartRight:m?.right-c?.right,columns:new Set(cards.map(e=>Math.round(e.getBoundingClientRect().x))).size,order,chartAfterNumber:c.left>=number.right};
    },{card,name,metric,chart});
    const expected=await measures(ref,'[data-cards]>article','.ds-name','[data-scenario="warning"] .ds-metric','.ds-spark');
    const actual=await measures(page,'#host-grid .overview-host','.overview-name','#host-FRA .overview-metric','#host-FRA .overview-metric svg.trend');
    for(const key of ['width','padding','radius','name','metricWidth','chartWidth','chartHeight','chartRight','columns'])assert(Math.abs(actual[key]-expected[key])<=1,`${width}/${size}/${theme} reference ${key}: ${JSON.stringify({actual,expected})}`);
+   for(const measured of [expected,actual]) {
+    assert(measured.order.every((top,i)=>i===0||top>measured.order[i-1]),'identity → scoped state → facts → action');
+    assert(measured.chartAfterNumber,'trend stays to the right of its current value');
+   }
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'ordinary text reflows');
    assert.equal(await page.locator('#host-grid .products:visible').count(),0,'versions stay in detail');
    assert.equal(await page.locator('#host-grid .overview-summary').evaluateAll(es=>es.some(e=>e.textContent.includes('?'))),false,'no repeated question-mark cells');
@@ -48,6 +55,7 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
    const details=page.locator('#host-FRA > details');await details.locator(':scope > summary').click();await details.locator(':scope > summary').focus();
    offline=true;await page.evaluate(()=>refresh());
    assert((await page.locator('#host-FRA .overview-state').innerText()).includes('Unconfirmed resource data'),'outage marks retained resources: '+await page.locator('#host-FRA .overview-state').innerText());
+   assert.equal(await page.locator('#host-FRA .overview-metrics').getAttribute('data-state'),'unconfirmed');
    assert(await details.evaluate(e=>e.open),'failed refresh retains disclosure');
    assert(await details.locator(':scope > summary').evaluate(e=>e===document.activeElement),'failed refresh retains focus');
    await page.evaluate(()=>document.querySelector('#host-FRA .overview-summary').dataset.resourceValidFor='1');
@@ -67,7 +75,7 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
    await page.close();await ref.close();
   }
   report.checks=['hierarchy','reference geometry','honest missing history','disclosure/focus across outage/recovery','direct finding and Back','no writes'];
-  fs.writeFileSync(path.join(dir,'fidelity.json'),JSON.stringify(report,null,2)+'\n');
+  if(dir)fs.writeFileSync(path.join(dir,'fidelity.json'),JSON.stringify(report,null,2)+'\n');
   console.log(`PASS Overview fidelity: ${report.cells.length} size/text/theme cells; pinned reference, trends, detail, refresh and return`);
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
