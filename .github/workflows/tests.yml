@@ -37,5 +37,6 @@ jobs:
           DASHQ_TELEMETRY_EVIDENCE="$RUNNER_TEMP/telemetry" node tests/telemetry-browser.cjs
           DASHQ_AGENTS_EVIDENCE="$RUNNER_TEMP/agents" node tests/agents-browser.cjs
           DASHQ_REPORTS_EVIDENCE="$RUNNER_TEMP/reports" node tests/reports-browser.cjs
+          DASHQ_QUALIFY_EVIDENCE="$RUNNER_TEMP/telemetry" node tests/qualification-browser.cjs
           node tests/task-controls-browser.cjs
           node tests/workspace-browser.cjs

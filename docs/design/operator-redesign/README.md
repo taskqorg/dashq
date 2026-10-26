@@ -12,6 +12,7 @@ Owner accepted the consolidated design and authorized a PM planning/decompositio
 - [Telemetry runtime evidence](../evidence/telemetry/README.md): #222 delivery stages, bounded coverage/evidence and fixture browser checks; production and owner acceptance remain separate.
 - [Attempt-first Agents runtime evidence](../evidence/agents-attempts/README.md): #220 selected attempt, interval/coverage and refresh/return checks; accounting destinations stay separate.
 - [Scoped Reports runtime evidence](../evidence/reports/README.md): #221 time/wait totals, estimate price basis and attempt drill-down; coverage and fixture browser checks stay distinct from live qualification.
+- [Qualification on real scoped data](../evidence/qualification-223/README.md): #223 fidelity across all redesigned views, DQ-01–DQ-10 on deployed 0.17.1 data, ledger/T-row checks and producer gaps.
 
 ## Private input and authority
 

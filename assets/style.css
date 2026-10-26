@@ -3,6 +3,7 @@ header { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px sol
 h1 { font-size: 1.25rem; margin: 12px 0; }
 h2 { font-size: 1.1rem; margin: 24px 0 8px; }
 h3 { font-size: 1rem; margin: 16px 0 6px; }
+code { overflow-wrap: anywhere; }
 table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
 th, td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid #eceef1; }
 th { font-weight: 600; color: #55606b; }
