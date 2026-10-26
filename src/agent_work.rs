@@ -201,7 +201,7 @@ pub fn build(inp: &Value) -> Value {
     let tele = inp["agent_telemetry"].as_array().filter(|t| !t.is_empty());
     let logs = inp["agent_work"].as_object();
     if tele.is_none() && logs.is_none() {
-        return json!({"source": crate::data::source(&Value::Null, now, LIMIT, None), "window_s": period, "from": from, "to": now, "hosts": [], "rows": [], "attempts": [], "attempts_total": 0});
+        return json!({"source": crate::data::source(&Value::Null, now, LIMIT, None), "window_s": period, "from": from, "to": now, "hosts": [], "rows": [], "attempts": [], "attempts_total": 0, "totals": totals(&[])});
     }
     let want = |h: &str| inp["filters"]["host"].as_str().is_none_or(|x| x == h);
     // hosts in source order (telemetry rows, then configured logs)
@@ -320,6 +320,7 @@ pub fn build(inp: &Value) -> Value {
         .collect();
     attempts.sort_by_key(|a| std::cmp::Reverse(a.0));
     let total = attempts.len();
+    let totals = totals(&attempts);
     // D23: `cursor` pages the newest-first list
     let cursor = inp["filters"]["cursor"].as_str().and_then(|c| c.parse().ok()).unwrap_or(0);
     let attempts: Vec<Value> = attempts.into_iter().skip(cursor).take(ATTEMPTS).map(|(_, a)| a).collect();
@@ -336,7 +337,21 @@ pub fn build(inp: &Value) -> Value {
     };
     // one host with skipped or uncovered records makes the block's counts a lower bound too
     src["incomplete"] = json!(hosts.iter().any(|h| h["source"]["incomplete"] == true));
-    json!({"source": src, "window_s": period, "from": from, "to": now, "hosts": hosts, "rows": rows, "attempts": attempts, "attempts_total": total})
+    json!({"source": src, "window_s": period, "from": from, "to": now, "hosts": hosts, "rows": rows, "attempts": attempts, "attempts_total": total, "totals": totals})
+}
+
+/// D22: sum unique attempts before pagination, never host/runtime rows that can share an attempt.
+fn totals(attempts: &[(u64, Value)]) -> Value {
+    let mut totals = json!({});
+    for field in ["elapsed_ms", "execution_ms", "queue_wait_s"] {
+        let values: Vec<f64> = attempts.iter().filter_map(|(_, a)| a[field].as_f64()).collect();
+        let mut reasons: BTreeSet<&str> = attempts.iter().filter(|(_, a)| a[field].is_null()).map(|(_, a)| {
+            a[if field == "queue_wait_s" { "queue_wait_reason" } else { "reason" }].as_str().unwrap_or("not reported")
+        }).collect();
+        if attempts.is_empty() { reasons.insert("no attempt measurements"); }
+        totals[field] = json!({"sum": (!values.is_empty()).then(|| values.iter().sum::<f64>()), "known": values.len(), "of": attempts.len(), "reasons": reasons});
+    }
+    totals
 }
 
 fn attempt((task, id): (u64, u64), v: &[&Value], (state, why): &(&str, String), projects: &[&str], wait: Option<u64>) -> Value {

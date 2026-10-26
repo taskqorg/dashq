@@ -218,21 +218,26 @@ pub fn build(inp: &Value, agent_work: &Value) -> Value {
     json!({"source": src, "label": LABEL, "prices": prices, "runtimes": runtimes, "rows": rows, "estimate": priced.json()})
 }
 
+pub(crate) fn subtotal(s: &Value) -> String {
+    let sums: Vec<String> = s["amounts"].as_object().into_iter().flatten().map(|(c, a)| format!("{} {c}", a.as_f64().map_or("—".into(), |a| if a > 0.0 && a < 0.01 { format!("{a:.6}") } else { format!("{a:.2}") }))).collect();
+    if sums.is_empty() { "—".into() } else { format!("{}{}", if s["known"] == s["of"] { "" } else { "≥" }, sums.join(" + ")) }
+}
+
 fn amounts(s: &Value) -> String {
     let reasons: Vec<&str> = s["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-    let why = crate::page::esc(&reasons.join("; "));
-    let sums: Vec<String> = s["amounts"].as_object().into_iter().flatten().map(|(c, a)| format!("{} {c}", a.as_f64().map_or("—".into(), |a| format!("{a:.2}")))).collect();
-    match (sums.is_empty(), s["known"] == s["of"]) {
+    let why = crate::page::esc(&if reasons.is_empty() { "no priced calls read".into() } else { reasons.join("; ") });
+    let total = subtotal(s);
+    match (s["amounts"].as_object().is_none_or(|s| s.is_empty()), s["known"] == s["of"]) {
         (true, _) => format!("<span class=\"unknown\" title=\"unknown: {why}\">—</span> <small>unknown: {why}</small>"),
-        (false, true) => sums.join(" + "),
-        (false, false) => format!("≥{} <small>({} of {} calls; {why})</small>", sums.join(" + "), s["known"], s["of"]),
+        (false, true) => total,
+        (false, false) => format!("{total} <small>({} of {} calls; {why})</small>", s["known"], s["of"]),
     }
 }
 
-fn known(f: &Value) -> String {
+pub(crate) fn known(f: &Value) -> String {
     let reasons: Vec<&str> = f["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let tail = if reasons.is_empty() { String::new() } else { format!(" <small>({})</small>", crate::page::esc(&reasons.join("; "))) };
-    format!("{} of {}{tail}", f["known"], f["of"])
+    format!("{} of {}{tail}", f["known"].as_u64().unwrap_or(0), f["of"].as_u64().unwrap_or(0))
 }
 
 pub fn render(w: &mut String, doc: &Value) {

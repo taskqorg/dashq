@@ -2967,7 +2967,36 @@
         }
       }
     ],
-    "attempts_total": 8
+    "attempts_total": 8,
+    "totals": {
+      "elapsed_ms": {
+        "sum": 5235000.0,
+        "known": 6,
+        "of": 8,
+        "reasons": [
+          "adopted",
+          "attempt start not retained"
+        ]
+      },
+      "execution_ms": {
+        "sum": 6141280.0,
+        "known": 6,
+        "of": 8,
+        "reasons": [
+          "adopted",
+          "attempt start not retained"
+        ]
+      },
+      "queue_wait_s": {
+        "sum": null,
+        "known": 0,
+        "of": 8,
+        "reasons": [
+          "ready transition not retained",
+          "reviewer wait not recorded"
+        ]
+      }
+    }
   },
   "model_use": {
     "source": {
