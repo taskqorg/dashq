@@ -923,7 +923,7 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
 fn telemetry_json(t: &store::Telemetry) -> Value {
     if t.blocks == 0 && t.pruned.is_empty() {
         return json!({"state": "unknown", "blocks": 0, "last_synced": null, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "no telemetry block yet",
-            "sender": {"state": "unknown", "reason": "no telemetry block yet"}, "retained": null, "pruned": [], "holes": [], "holes_total": 0, "hole_rows": 0, "restarts": 0});
+            "sender": {"state": "unknown", "reason": "no telemetry block yet"}, "retained": null, "pruned": [], "holes": [], "holes_total": 0, "hole_rows": 0, "restarts": 0, "evidence": []});
     }
     let status = t.status.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()).unwrap_or(Value::Null);
     let count = |k: &str| status.get(k).cloned().unwrap_or(Value::Null);
@@ -940,7 +940,7 @@ fn telemetry_json(t: &store::Telemetry) -> Value {
         "reason": if t.blocks == 0 { json!("every stored block was pruned") } else { json!(why) }, "sender": sender, "retained": retained,
         "pruned": t.pruned.iter().map(|(cause, blocks, rows, through)| json!({"cause": cause, "blocks": blocks, "rows": rows, "through_seq": through})).collect::<Vec<_>>(),
         "holes": t.holes.iter().map(|(a, b)| json!({"from_seq": a, "to_seq": b, "rows": b - a + 1})).collect::<Vec<_>>(),
-        "holes_total": t.holes_total, "hole_rows": t.hole_rows, "restarts": t.restarts})
+        "holes_total": t.holes_total, "hole_rows": t.hole_rows, "restarts": t.restarts, "evidence": t.evidence})
 }
 
 /// `/data.telemetry_block` for `block=ID` (#181 A6): the stored block named `id` among the projected installation

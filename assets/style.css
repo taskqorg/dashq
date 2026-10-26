@@ -225,6 +225,23 @@ body[data-view="/hosts"] #host-grid,body[data-view="/hosts"] #servers,body[data-
 body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #modeluse,body[data-view="/agents"] #aqresults,
 body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
 body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
+body[data-view="/telemetry"] #telemetry { display:block; }
+.telemetry-sender { border-top:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere; }
+.delivery-stages { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:8px;padding:0;list-style:none;counter-reset:delivery; }
+.delivery-stages li { border:1px solid var(--line);border-radius:7px;padding:10px;counter-increment:delivery;min-width:0; }
+.delivery-stages strong::before { content:counter(delivery) ". ";color:var(--muted); }
+.delivery-stages strong,.delivery-stages span,.delivery-stages small { display:block; }
+.delivery-stages small { color:var(--muted);font-size:.875rem;margin-top:8px; }
+.delivery-stages [data-state=unknown] { border-style:dashed; }
+.delivery-stages [data-state=not_applicable] { background:var(--track); }
+.telemetry-coverage { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px; }
+.telemetry-coverage p { margin:6px 0; }
+.telemetry-ranges { display:flex;flex-wrap:wrap;gap:6px 20px;padding-left:20px;color:var(--warn); }
+.telemetry-blocks { padding-left:20px; }
+.telemetry-blocks li { margin:10px 0; }
+#telemetry summary,#telemetry a { min-height:32px; }
+#telemetry :focus-visible { outline:2px solid currentColor;outline-offset:3px; }
+@media(max-width:38em) { .telemetry-coverage { grid-template-columns:1fr; } }
 .grid-head,.host { display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.6fr) minmax(0,1.15fr) minmax(0,1.25fr) minmax(0,1fr);gap:14px; }
 .grid-head { font-size:.875rem;color:#55606b;margin:12px 0 6px; }
 .host { border-top:1px solid var(--line);padding:16px 0; }

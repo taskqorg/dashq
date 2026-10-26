@@ -4,7 +4,7 @@
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agents', 'agentwork', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
-  '/integrations': ['installations', 'integrations']};
+  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
@@ -38,7 +38,7 @@ function navigateView(url, pop = false) {
   const position = viewPositions.get(viewURL);
   if (position?.focus) document.getElementById(position.focus)?.focus({preventScroll: true});
   window.scrollTo(0, position?.y || 0);
-  if (previous.search === location.search && pendingAnchor) { document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
+  if (previous.search === location.search && pendingAnchor) { revealConnection(); document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   if (previous.search !== location.search) refresh();
 }
 addEventListener('popstate', () => navigateView(location.href, true));
@@ -122,7 +122,7 @@ async function refresh() {
     currentBanner.hidden = data.ok;
     currentBanner.textContent = data.ok ? '' : 'All source reads failed. Current state unknown; retained evidence is not confirmed.';
     window.scrollTo(0, y);
-    if (pendingAnchor) { document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
+    if (pendingAnchor) { revealConnection(); document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   } catch (e) {
     const readingY = scrollY;
     expireHostObservations(true);

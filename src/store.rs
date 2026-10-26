@@ -215,6 +215,8 @@ pub struct Telemetry {
     pub hole_rows: i64,
     /// Blocks whose seq went back: the sender's store was replaced and counts again from 1.
     pub restarts: i64,
+    /// Newest 200 retained block descriptors, without payload content (#222).
+    pub evidence: Vec<serde_json::Value>,
 }
 
 /// One stored block read back by event ID (#181 A6).
@@ -492,6 +494,11 @@ fn coverage(c: &Connection, installation: &str, workspace: &str) -> Result<Telem
     t.holes.truncate(HOLES);
     let mut q = c.prepare_cached("SELECT cause, blocks, rows, through_seq FROM telemetry_pruned WHERE installation = ?1 AND workspace = ?2 ORDER BY cause")?;
     t.pruned = q.query_map(params![installation, workspace], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<Result<_, _>>()?;
+    let mut q = c.prepare_cached("SELECT event_id, generation, observed, received, first_seq, last_seq, rows FROM telemetry WHERE installation = ?1 AND workspace = ?2 ORDER BY id DESC LIMIT 200")?;
+    t.evidence = q.query_map(params![installation, workspace], |r| Ok(serde_json::json!({
+        "event_id": r.get::<_, String>(0)?, "generation": r.get::<_, i64>(1)?, "observed_at": r.get::<_, i64>(2)?,
+        "received_at": r.get::<_, i64>(3)?, "first_seq": r.get::<_, Option<i64>>(4)?, "last_seq": r.get::<_, Option<i64>>(5)?, "rows": r.get::<_, Option<i64>>(6)?
+    })))?.collect::<Result<_, _>>()?;
     Ok(t)
 }
 
@@ -1590,6 +1597,24 @@ mod tests {
         assert_eq!(full.accept(b"va", &[tel("f1", &tblock(1, 1))], NOW).unwrap(), [Outcome::Rejected("store_full")]);
         assert_eq!(full.receipt(b"va", "f1").unwrap(), None);
         assert_eq!(cover(&full, "tq-a"), Telemetry::default());
+    }
+
+    /// #222 / D11: evidence is bounded metadata for this installation/workspace; totals still cover all blocks.
+    #[test]
+    fn telemetry_evidence_is_scoped_and_bounded() {
+        let s = Store::open(&dir("tevidence").join("dashq.db"), LIMITS).unwrap();
+        for (id, verifier) in [("tq-a", b"va"), ("tq-b", b"vb")] {
+            s.grant(&Installation { id, product: "taskq", runtime: "native", label: "win" }, "w", "x", r#"["taskq-telemetry/1"]"#, verifier, NOW).unwrap();
+        }
+        for seq in 1..=202 {
+            s.accept(b"va", &[tel(&format!("a-{seq}"), &tblock(seq, seq))], NOW).unwrap();
+        }
+        s.accept(b"vb", &[tel("other-sender", &tblock(1, 1))], NOW).unwrap();
+        let t = cover(&s, "tq-a");
+        assert_eq!((t.blocks, t.evidence.len()), (202, 200));
+        assert_eq!((&t.evidence[0]["event_id"], &t.evidence[199]["event_id"]), (&serde_json::json!("a-202"), &serde_json::json!("a-3")));
+        assert!(t.evidence.iter().all(|b| b.get("payload").is_none() && b["event_id"] != "other-sender"));
+        assert!(s.write(|c| coverage(c, "tq-a", "other-workspace")).unwrap().evidence.is_empty());
     }
 
     // Chain: blocks stored by an older format or a rolled-back binary -> reopen; backup -> more blocks -> restore.
