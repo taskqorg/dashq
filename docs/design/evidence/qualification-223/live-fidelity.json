@@ -1,0 +1,194 @@
+{
+  "rules": [
+    "#223 A1/A2",
+    "D8/D10/D22",
+    "R12/R13",
+    "F1–F3/F7"
+  ],
+  "mode": "live",
+  "browser": "141.0.7390.37",
+  "platform": "darwin",
+  "reference": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "inputs": {
+    "src/page.rs": "5d341b820aac641e244d15e1c84e4423336f3a839d67242d13010ae4c54cb3b6",
+    "assets/app.js": "86c07270e5671dd4a8e9d0b0d59702eff0619e19b290c53af101e7129ea451d3",
+    "assets/style.css": "e801a836950948b40e2ff5c1eacbf6fd9370b824a3e02e52e7d08aadc858045f",
+    "tests/qualification-browser.cjs": "b3530e377060a1a828cd9407d4d3171c56d5baac94a9464cee96f54b44deb43b"
+  },
+  "cells": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "light",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "dark",
+      "views": {
+        "overview": {
+          "hosts": 4
+        },
+        "agents": {
+          "attempts": 1,
+          "total": 1
+        },
+        "reports": {
+          "elapsed_known": 0,
+          "of": 1
+        },
+        "telemetry": {
+          "senders": 14
+        },
+        "tasks": {
+          "boards": 6,
+          "tasks": 4
+        },
+        "system": {
+          "destinations": 6
+        }
+      },
+      "result": "PASS"
+    }
+  ]
+}
