@@ -62,7 +62,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 8] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry")];
+pub const VIEWS: [(&str, &str); 9] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -125,6 +125,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
         let _ = writeln!(w, "<p class=\"note\" id=\"source-context\">Not configured: {}. Independent installations can connect without these sources.</p>", unconfigured.join(" · "));
     }
     let first_launch = unconfigured.len() == 3 && !has_rows(&doc["installations"]["rows"]);
+    reports(w, doc, &query);
     if first_launch {
         let _ = writeln!(w, "<section id=\"startup\"><h2>Connect an existing installation</h2><p>Connect TaskQ, AgentQ or ServerQ using its existing service and identity.</p><a id=\"add-service\" href=\"/connect\">＋ Add service</a><p class=\"note\">Approval waits for credential activation, a durable first snapshot and dashboard readback. No observations received yet.</p></section></main></body></html>");
         return h;
@@ -251,6 +252,65 @@ pub fn render(doc: &Value, links: &Value) -> String {
     }
     let _ = writeln!(w, "</main>\n</body>\n</html>");
     h
+}
+
+/// D22/D24: presentation of the shared report document, without another collector or price calculation.
+fn reports(w: &mut String, doc: &Value, query: &str) {
+    let a = &doc["agent_work"];
+    let m = &doc["model_use"];
+    let q = &doc["query"];
+    let stamp = |v: &Value| v.as_u64().map_or("unknown".into(), crate::source::iso);
+    let reasons = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(esc).collect::<Vec<_>>().join("; ");
+    let source = |label: &str, s: &Value| format!("<p class=\"report-source note\">{label} source: <span data-report-state>{} · {}</span> · source time {} · <span data-age-s=\"{}\">{}</span></p>", esc(s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("observed records")), stamp(&s["at"]), s["age_s"].as_u64().map_or(String::new(),|n|n.to_string()), s["age_s"].as_u64().map_or("age unknown".into(),|n|format!("{n} s old")));
+    let lower = a["source"]["incomplete"] == true;
+    let count = |n: u64| if lower { format!("at least {n}") } else { n.to_string() };
+    let _ = write!(w, "<section id=\"reports\"><h2>Reports</h2><p class=\"report-scope\">{} → {} · UTC · host {} · agent {} · session {}</p><p class=\"note\">Time: host scope only; agent/session filters apply to model use. Attempts are selected by stage end time; whole-attempt durations are not clipped to the query window.</p><div class=\"report-grid\"><div><h3>Agent time</h3>{}", stamp(&q["from"]), stamp(&q["to"]), esc(doc["filters"]["host"].as_str().unwrap_or("all")), esc(doc["filters"]["agent"].as_str().unwrap_or("all")), esc(doc["filters"]["session"].as_str().unwrap_or("all")), source("Stage",&a["source"]));
+    for (field, label) in [("elapsed_ms", "Wall time (sum of attempts)"), ("execution_ms", "Summed execution"), ("queue_wait_s", "Ready-queue wait")] {
+        let t = &a["totals"][field];
+        let value = t["sum"].as_f64().map_or("—".into(), |n| format!("{}{:.3} s", if lower || t["known"] != t["of"] { "≥" } else { "" }, n / if field == "queue_wait_s" { 1.0 } else { 1000.0 }));
+        let why = reasons(&t["reasons"]);
+        let detail = if t["sum"].is_null() { format!("unknown: {why}{}", a["source"]["reason"].as_str().map_or(String::new(),|r|format!(" · {}",esc(r)))) } else if why.is_empty() { "all observed attempts measured".into() } else { why };
+        let _ = write!(w, "<div class=\"report-metric\" id=\"report-{field}\"><strong>{label}</strong><span class=\"report-number\">{value}</span><small>{} of {} retained attempts known · {detail}</small></div>", t["known"].as_u64().unwrap_or(0), count(t["of"].as_u64().unwrap_or(0)));
+    }
+    let _ = write!(w, "<p class=\"note\">Nested stages count once in each complete attempt's wall time; execution adds overlapping stages. Parallel attempts add in both totals. Queue waits are separate. No useful-work, idle, waste or savings figure is inferred.</p><details id=\"report-retention\"><summary id=\"report-retention-summary\">Time sources &amp; retained range</summary>");
+    if a["hosts"].as_array().is_none_or(|h| h.is_empty()) { w.push_str("<p>Retained range unknown: no stage source in this scope.</p>"); }
+    for h in a["hosts"].as_array().into_iter().flatten() {
+        let mut notes: Vec<&str> = h["source"]["reason"].as_str().into_iter().collect();
+        notes.extend(h["coverage"].as_str().filter(|c| !h["source"]["reason"].as_str().is_some_and(|r| r.contains(c))));
+        let _ = write!(w, "<p>{} · retained from {} · end watermark unknown · {}{}</p>", text(&h["host"]), stamp(&h["retained_from"]), text(&h["source"]["state"]), if notes.is_empty() {String::new()} else {format!(" · {}",esc(&notes.join(" · ")))});
+    }
+    let _ = write!(w, "</details></div><div><h3>API-equivalent estimate</h3>{}<div id=\"report-estimate\" class=\"report-metric\"><span class=\"report-number\">{}</span><small>Known calls: {}</small></div><p class=\"note\">Reported tokens × configured list prices on each call's day. Currencies stay separate. Model-source retained range unknown: not reported. TaskQ context tokens are not split by cache and cannot be priced.</p>", source("Model",&m["source"]), crate::model_use::subtotal(&m["estimate"]), crate::model_use::known(&m["estimate"]));
+    if m["estimate"]["of"].as_u64().unwrap_or(0) == 0 { w.push_str("<p>Estimate unknown: no model calls read in this scope.</p>"); }
+    for r in m["rows"].as_array().into_iter().flatten() {
+        let _ = write!(w, "<p class=\"report-model\"><strong>{} · {}</strong><br>API-equivalent estimate {}<br><small>Known calls: {}</small></p>", text(&r["host"]), text(&r["model"]), crate::model_use::subtotal(&r["estimate"]), crate::model_use::known(&r["estimate"]));
+    }
+    let _ = write!(w, "<details id=\"report-prices\"><summary id=\"report-prices-summary\">Price source &amp; effective date</summary>");
+    if m["prices"]["entries"].as_array().is_none_or(|e| e.is_empty()) {
+        let _ = write!(w, "<p>Prices unknown: {}</p>", esc(m["prices"]["reason"].as_str().unwrap_or("not reported")));
+    }
+    for p in m["prices"]["entries"].as_array().into_iter().flatten() {
+        let rates = ["input", "output", "cache_read", "cache_write"].iter().map(|k| format!("{k} {}", if p[*k].is_null() { "unknown".into() } else { text(&p[*k]) })).collect::<Vec<_>>().join(" · ");
+        let _ = write!(w, "<p>{} · effective {} · {} per million tokens · {rates}<br><a href=\"{}\">{}</a></p>", text(&p["model"]), text(&p["effective"]), text(&p["currency"]), text(&p["source"]), text(&p["source"]));
+    }
+    let _ = write!(w, "</details><a data-view-link data-view-inherit href=\"/agents{}#modeluse\">Model-use coverage &amp; evidence</a></div></div><h3>Attempt evidence</h3><p>Totals include all retained attempts in scope; this list is paged. Unknown coverage remains beside each attempt.</p>", esc(query));
+    let cursor = q["cursor"].as_u64().unwrap_or(0);
+    let attempt_query = if cursor == 0 { query.to_string() } else { format!("{query}&cursor={cursor}") };
+    let shown = a["attempts"].as_array().map_or(0, Vec::len) as u64;
+    let total = a["attempts_total"].as_u64().unwrap_or(0);
+    let _ = write!(w, "<p id=\"reports-status\" tabindex=\"-1\">{shown} shown of {} retained attempts · offset {cursor}</p><div class=\"report-attempts\">", count(total));
+    for t in a["attempts"].as_array().into_iter().flatten() {
+        let id = format!("attempt-{}-{}", t["task"], t["attempt"]);
+        let _ = write!(w, "<div class=\"report-record\"><a id=\"report-{id}\" data-view-link href=\"/agents{}#{id}\">{}#{} · attempt {} · stage intervals</a><span>{} · {}</span></div>", esc(&attempt_query), esc(t["project"].as_str().unwrap_or("Unlinked task ")), t["task"], t["attempt"], text(&t["state"]), esc(t["reason"].as_str().unwrap_or("complete stage coverage")));
+    }
+    w.push_str("</div>");
+    if cursor > 0 { let _ = write!(w, "<a id=\"reports-previous\" data-view-link href=\"/reports{}&amp;cursor={}\">Previous attempts</a> ", esc(query), cursor.saturating_sub(200)); }
+    if cursor + shown < total { let _ = write!(w, "<a id=\"reports-next\" data-view-link href=\"/reports{}&amp;cursor={}\">Next attempts</a>", esc(query), cursor + 200); }
+    let c = &doc["changes"];
+    let _ = write!(w, "<details id=\"report-changes\"><summary id=\"report-changes-summary\">Change comparison coverage</summary><p>Comparison: {} · {}</p>", text(&c["comparison"]["state"]), text(&c["comparison"]["reason"]));
+    for row in c["coverage"].as_array().into_iter().flatten() {
+        let _ = write!(w, "<p>{} · {}</p>", text(&row["source"]), if row["baseline"] == true { "baseline retained".into() } else { text(&row["reason"]) });
+    }
+    w.push_str("</details></section>");
 }
 
 /// D18 V1–V4: render only the safe version projection; unavailable producer receipts stay unknown.
@@ -1212,6 +1272,67 @@ fn resources(w: &mut String, res: &Value, now: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #221 A1–A3: unique-attempt totals survive paging; unknown time/prices never become zero.
+    #[test]
+    fn reports_view() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        let now = inp["now"].as_u64().unwrap();
+        inp["filters"] = json!({"host":"mac", "agent":"claude", "session":"s1"});
+        inp["agent_work"] = Value::Null;
+        let record = |stage: &str, id: u64, end: u64, us: Value, open: bool| json!({"stage":stage,"task":221,"attempt":id,"project":"taskqorg/dashq","host":"mac","rt":"claude","at_ms":end*1000,"us":us,"open":open,"unknown":if open {json!("open-stage")} else {Value::Null},"outcome":"ok","error":"none"});
+        let mut records = vec![];
+        for id in 1..=201 {
+            records.extend([record("claim",id,now-150,json!(1_000_000),false),record("build",id,now-30,json!(120_000_000),false),record("checks",id,now-40,json!(20_000_000),false)]);
+        }
+        records.push(record("build",202,now-10,Value::Null,true));
+        records.push(json!({"transition":true,"from":"ready","task":221,"entry":1,"prev_s":7}));
+        inp["agent_telemetry"] = json!([{"installation":"invented","label":"mac","telemetry":{"state":"ok","last_synced":now},"records":records}]);
+        let call = |id: &str, model: &str, output: Value| json!({"id":id,"startTime":crate::source::iso(now-20),"metadata":{
+            "attributes.host.name":"mac","attributes.agentq.runtime":"macos","attributes.agentq.agent":"claude","attributes.agentq.session":"s1",
+            "attributes.agentq.model.name":model,"attributes.agentq.model.input_tokens":1_000_000,"attributes.agentq.model.output_tokens":output,
+            "attributes.agentq.model.cache_read_tokens":0,"attributes.agentq.model.cache_creation_tokens":0}});
+        inp["langfuse"]["value"]["agentq.model"] = json!([call("invented-1","example-usd",json!(0)),call("invented-2","example-usd",Value::Null),call("invented-3","example-eur",json!(0))]);
+        inp["prices"] = json!([
+            {"model":"example-usd","source":"https://example.com/invented-usd","effective":"2026-01-01","currency":"USD","input":5,"output":25},
+            {"model":"example-eur","source":"https://example.com/invented-eur","effective":"2026-01-01","currency":"EUR","input":2,"output":10}]);
+        let doc = crate::data::build(&inp);
+        let totals = &doc["agent_work"]["totals"];
+        assert_eq!(totals["elapsed_ms"],json!({"sum":24321000.0,"known":201,"of":202,"reasons":["open-stage"]}));
+        assert_eq!(totals["execution_ms"]["sum"],json!(28341000.0));
+        assert_eq!(totals["queue_wait_s"],json!({"sum":7.0,"known":1,"of":202,"reasons":["ready transition not retained"]}));
+        assert_eq!(doc["model_use"]["estimate"]["amounts"],json!({"USD":5.0,"EUR":2.0}));
+        let html = render_view(&doc,&json!({}),"/reports");
+        assert!(html.contains("id=\"reports\""),"#221: Reports view missing");
+        assert!(html.contains("24321.000 s") && html.contains("28341.000 s") && html.contains("7.000 s"));
+        assert!(!html.split("id=\"reports\"").nth(1).unwrap().split("</section>").next().unwrap().contains("Actual expenses"));
+        inp["filters"]["cursor"] = json!("200");
+        let paged = crate::data::build(&inp);
+        assert_eq!(paged["agent_work"]["totals"],*totals,"totals must include attempts outside the evidence page");
+        assert_eq!(paged["agent_work"]["attempts"].as_array().unwrap().len(),2);
+        inp["filters"]["host"] = json!("absent");
+        let empty = crate::data::build(&inp);
+        assert!(empty["agent_work"]["totals"]["elapsed_ms"]["sum"].is_null());
+        assert!(empty["model_use"]["estimate"]["amounts"].is_null());
+        let mut states = vec![];
+        for state in ["incomplete", "stale", "unconfirmed"] {
+            let mut retained = doc.clone();
+            retained["agent_work"]["source"] = json!({"state":state,"incomplete":state=="incomplete","at":now-900,"age_s":900,"reason":"invented retained-source gap"});
+            let h = render_view(&retained,&json!({}),"/reports");
+            assert!(h.contains("≥24321.000 s"),"#221: partial time must read as a lower bound");
+            if state == "incomplete" { assert!(h.contains("201 of at least 202 retained attempts known"),"#221: incomplete attempt denominator must read as a lower bound"); }
+            assert!(h.contains("invented retained-source gap"));
+            states.push((state,retained));
+        }
+        assert_eq!(crate::model_use::subtotal(&json!({"amounts":{"USD":0.004},"known":1,"of":1})),"0.004000 USD","small known estimates must not round to zero");
+        if let Some(dir) = std::env::var_os("DASHQ_REPORTS_EVIDENCE") {
+            let dir=std::path::PathBuf::from(dir); std::fs::create_dir_all(&dir).unwrap();
+            for (name,d) in [("page",doc),("page2",paged),("empty",empty)].into_iter().chain(states) {
+                std::fs::write(dir.join(format!("{name}.html")),render_view(&d,&json!({}),"/reports")).unwrap();
+                std::fs::write(dir.join(format!("{name}.json")),serde_json::to_string_pretty(&d).unwrap()).unwrap();
+            }
+        }
+    }
 
     /// #222 A1–A4 / D11,D22,D23: real renderer fixtures protect unknown/false stages, scoped evidence and gaps.
     #[test]

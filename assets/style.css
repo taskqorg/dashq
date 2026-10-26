@@ -226,6 +226,19 @@ body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data
 body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
 body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
 body[data-view="/telemetry"] #telemetry { display:block; }
+body[data-view="/reports"] #reports { display:block; }
+body[data-view="/reports"]{max-width:1024px;box-sizing:border-box;padding:20px;background:light-dark(#fafbfc,#252b32);color:light-dark(#243039,#eef2f5)}
+.report-scope{font-size:.85em;color:light-dark(#59636e,#b9c3cd)}
+.report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:36px;margin-top:26px}
+#reports{overflow-wrap:anywhere}
+#reports h3{font-size:1em;font-weight:500}
+.report-metric{display:flex;flex-direction:column;gap:7px;margin:14px 0}
+.report-number{font-size:2em;line-height:1.2;font-weight:500;font-variant-numeric:tabular-nums}
+.report-metric small,.report-record span{font-size:.85em;color:light-dark(#59636e,#b9c3cd)}
+.report-record{display:flex;flex-direction:column;gap:6px;padding:9px 0;border-bottom:1px solid var(--line)}
+#reports a,#reports summary{min-height:32px}
+#reports :focus-visible{outline:2px solid currentColor;outline-offset:3px}
+@media(max-width:720px){.report-grid{grid-template-columns:1fr;gap:28px}}
 .telemetry-sender { border-top:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere; }
 .delivery-stages { display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:8px;padding:0;list-style:none;counter-reset:delivery; }
 .delivery-stages li { border:1px solid var(--line);border-radius:7px;padding:10px;counter-increment:delivery;min-width:0; }

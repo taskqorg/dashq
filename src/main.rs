@@ -875,7 +875,7 @@ mod tests {
         assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
         assert_eq!(route(&app, "GET", "/projects", "period=5", None).0, "400 Bad Request");
         // D22 / F7: direct shared view URLs must resolve, not become 404 or JSON.
-        for path in ["/projects", "/hosts", "/agents", "/services", "/checks", "/integrations", "/telemetry"] {
+        for path in ["/projects", "/hosts", "/agents", "/services", "/checks", "/integrations", "/telemetry", "/reports"] {
             let r = route(&app, "GET", path, "period=7200&host=fixture", None);
             assert_eq!(r.0, "200 OK", "{path}");
             assert!(String::from_utf8(r.2).unwrap().contains(&format!("data-view=\"{path}\"")));
@@ -993,6 +993,7 @@ mod tests {
         }
         let (a, r) = (&data["agent_work"], &report["agent_work"]);
         assert_eq!((&a["attempts"], &a["rows"], &a["hosts"]), (&r["attempts"], &r["rows"], &r["hosts"]));
+        assert_eq!(a["totals"], r["totals"], "#221: browser and CLI Reports totals agree");
         // D23 A6: the same projection names the same window, cursor, cap, changes and requests
         for k in ["query", "changes"] { assert_eq!(data[k], report[k], "{k}"); }
         assert_eq!((&data["attention"]["requests"], &data["query"]["timezone"], &data["query"]["cap"]), (&report["attention"]["requests"], &json!("UTC"), &json!(200)));

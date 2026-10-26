@@ -1,0 +1,106 @@
+{
+  "rules": [
+    "#221 A1–A4",
+    "D21/D22/D24",
+    "R12/R13",
+    "F3/F7"
+  ],
+  "platform": "win32",
+  "browser": "141.0.7390.37",
+  "reference": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "rendered": "1b113db320e4d0c10c203b145da487f1ee7a4bf737c30d2876eadfe6c9c7f249",
+  "inputs": {
+    "src/page.rs": "5d341b820aac641e244d15e1c84e4423336f3a839d67242d13010ae4c54cb3b6",
+    "src/agent_work.rs": "90360e25f97108541213e103449e8fe34c9ac3a436443c2062fa3464f53f8d62",
+    "src/model_use.rs": "cda12ef921006c22369e153087bccad67f76977a97fcdaa500ceafad92e948f4",
+    "assets/app.js": "86c07270e5671dd4a8e9d0b0d59702eff0619e19b290c53af101e7129ea451d3",
+    "assets/style.css": "7f21211e64cec13067ff7285d998c5989f0e77572e16b4a3d35175983376e0ad",
+    "tests/reports-browser.cjs": "9e3f9f1827885702889ea64e662b8c17fac354976821e59288afb7a04c85365d"
+  },
+  "cells": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 36
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 36
+      }
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 36
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 36
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 1,
+        "gap": 28
+      },
+      "expected": {
+        "columns": 1,
+        "gap": 28
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 1,
+        "gap": 28
+      },
+      "expected": {
+        "columns": 1,
+        "gap": 28
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 36
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 36
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 36
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 36
+      }
+    }
+  ]
+}

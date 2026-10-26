@@ -4,7 +4,7 @@
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
-  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry']};
+  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
@@ -73,17 +73,20 @@ function applyAttempts() {
     selectedAttempt = buttons[0].dataset.attempt;
     history.replaceState({...history.state, attempt: selectedAttempt}, '');
   }
-  selectedAttempt = history.state?.attempt || selectedAttempt;
+  selectedAttempt = location.hash.startsWith('#attempt-') ? location.hash.slice(1) : history.state?.attempt || selectedAttempt;
   buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.attempt === selectedAttempt)));
   document.querySelectorAll('.attempt-inspector').forEach(p => { p.hidden = p.id !== selectedAttempt; });
   const unavailable = document.getElementById('attempt-missing');
   if (unavailable) unavailable.hidden = !selectedAttempt || !!document.getElementById(selectedAttempt);
+  if (location.pathname === '/agents' && pendingAnchor?.startsWith('#attempt-')) {
+    document.getElementById('heading-' + selectedAttempt)?.focus({preventScroll: true});
+  }
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-attempt]');
   if (b) {
     rememberView(); selectedAttempt = b.dataset.attempt;
-    history.pushState({attempt: selectedAttempt}, '', location.href);
+    history.pushState({attempt: selectedAttempt}, '', location.hash.startsWith('#attempt-') ? location.pathname + location.search + '#' + selectedAttempt : location.href);
     applyAttempts();
     const heading = document.getElementById('heading-' + selectedAttempt);
     heading?.focus({preventScroll: true}); heading?.scrollIntoView({block: 'start'});
@@ -159,7 +162,7 @@ async function refresh() {
       if (e) { e.value = draft.value; if ('checked' in e) e.checked = draft.checked; }
     });
     if (focus) {
-      const e = document.getElementById(focus) || (focus.startsWith('attempts-') ? document.getElementById('attempts-status') : null);
+      const e = document.getElementById(focus) || (focus.startsWith('attempts-') ? document.getElementById('attempts-status') : /^(reports-|report-attempt-)/.test(focus) ? document.getElementById('reports-status') : null);
       e?.focus({ preventScroll: true });
       if (selection && selection[0] !== null && e?.setSelectionRange) e.setSelectionRange(...selection);
     }
@@ -173,7 +176,7 @@ async function refresh() {
   } catch (e) {
     const readingY = scrollY;
     expireHostObservations(true);
-    document.querySelectorAll('.attempt-source').forEach(e => {
+    document.querySelectorAll('.attempt-source,.report-source [data-report-state]').forEach(e => {
       e.dataset.retained ||= e.textContent;
       e.textContent = 'Unconfirmed after refresh failure. Retained: ' + e.dataset.retained;
     });
