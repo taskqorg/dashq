@@ -41,7 +41,7 @@ pub(crate) fn badge(state: &str, label: &str) -> String {
 }
 
 fn at(v: &Value, now: u64) -> String {
-    v.as_u64().map_or("—".into(), |a| format!("{} ({} ago)", clock(a, now), dur(now.saturating_sub(a))))
+    crate::findings::time(v).map_or("—".into(), |a| format!("{} ({} ago)", clock(a, now), dur(now.saturating_sub(a))))
 }
 
 fn trace(id: &Value, base: &str) -> String {
@@ -1095,6 +1095,25 @@ mod tests {
             let example = host_first_review_doc();
             std::fs::write(dir.join("page.html"), render(&example, &json!({}))).unwrap();
             std::fs::write(dir.join("data.json"), example.to_string()).unwrap();
+        }
+    }
+
+    /// #218 F7: a ServerQ episode's fractional `first_seen` keeps its time and age in Attention, as an integer does.
+    #[test]
+    fn fractional_epoch_seconds_keep_time_and_age() {
+        let now = 1_000_000u64;
+        assert_eq!(at(&json!(999_400.75), now), at(&json!(999_400), now));
+        assert!(!at(&json!(999_400.75), now).contains('—'));
+        for since in [json!(999_400.75), json!(999_400)] {
+            let mut d = json!({"generated_at": now, "period": 1800, "checks": {"installations": [{"installation": "sq-1", "host": "fra/native", "at": now,
+                "results": [{"check": "failed-services", "status": "warn", "detail": "1 failed"}],
+                "findings": [{"rule": "failed-services", "state": "open", "workspace": "ws", "installation": "sq-1", "first_seen": since}]}]}});
+            d["attention"]["requests"] = crate::explain::requests(&d, now).into();
+            let r = &d["attention"]["requests"][0];
+            assert_eq!((&r["since"], &r["age_s"]), (&since, &json!(600)), "/data and dashq report print this document");
+            let mut html = String::new();
+            actions(&mut html, &d, now);
+            assert!(html.contains(&format!(" · {}", at(&json!(999_400), now))), "{html}");
         }
     }
 

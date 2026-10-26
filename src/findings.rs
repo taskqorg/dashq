@@ -6,7 +6,8 @@ const CATALOG: &[u8] = include_bytes!("../fixture/serverq/rules.json");
 pub fn catalog_hash() -> String {
     ring::digest::digest(&ring::digest::SHA256, CATALOG).as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
-fn time(v: &Value) -> Option<u64> {
+/// Epoch seconds sent as an integer or a fraction (whole seconds kept); anything else is `None`.
+pub(crate) fn time(v: &Value) -> Option<u64> {
     v.as_f64().filter(|t| t.is_finite() && *t >= 0.0 && *t < u64::MAX as f64).map(|t| t as u64)
 }
 fn id(s: &str) -> bool {

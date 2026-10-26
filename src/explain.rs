@@ -52,7 +52,7 @@ pub fn requests(doc: &Value, now: u64) -> Vec<Value> {
     let enc = crate::source::enc;
     let item = |kind: &str, source: &str, host: &Value, project: &Value, task: &Value, rule: &Value, inst: &Value, reason: Value, since: &Value, action: &str, target: String| {
         json!({"kind": kind, "source": source, "host": host, "project": project, "task": task, "rule": rule, "installation": inst, "reason": reason,
-            "since": since, "age_s": since.as_u64().filter(|t| *t <= now).map(|t| now - t), "action": action, "target": target})
+            "since": since, "age_s": crate::findings::time(since).filter(|t| *t <= now).map(|t| now - t), "action": action, "target": target})
     };
     let mut out = Vec::new();
     for b in doc["boards"].as_array().into_iter().flatten() {
