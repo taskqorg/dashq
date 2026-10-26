@@ -327,3 +327,30 @@ body[data-view="/"] #overview-title { display:block; }
 .overview-hosts a:focus-visible,.overview-hosts summary:focus-visible { outline:2px solid currentColor;outline-offset:3px; }
 @media(max-width:660px) { .overview-hosts { grid-template-columns:1fr; }.overview-hosts .host { max-width:340px;width:100%;box-sizing:border-box;justify-self:center; } }
 @media(pointer:coarse) { .overview-open,.host-facts > summary { min-height:44px; } }
+
+/* #220: the approved list/inspector grammar; accounting remains on-demand. */
+body[data-view="/agents"] {max-width:1024px;box-sizing:border-box;padding:20px;background:light-dark(#fafbfc,#252b32);color:light-dark(#243039,#eef2f5)}
+body[data-view="/agents"] :is(#agents,#agenttotals,#modeluse,#aqresults,#agentwork){display:none}
+body[data-view="/agents"][data-agent-view="agentwork"] #agentwork,
+body[data-view="/agents"][data-agent-view="agents"] #agents,
+body[data-view="/agents"][data-agent-view="agenttotals"] #agenttotals,
+body[data-view="/agents"][data-agent-view="modeluse"] #modeluse,
+body[data-view="/agents"][data-agent-view="aqresults"] #aqresults {display:block}
+.attempt-layout{display:grid;grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);gap:26px;margin-top:20px}
+.attempt-list,.attempt-inspectors{min-width:0;overflow-wrap:anywhere}
+.attempt-select{display:flex;flex-direction:column;gap:4px;width:100%;font:inherit;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;color:inherit;padding:10px 6px;min-height:64px;box-sizing:border-box}
+.attempt-select[aria-pressed="true"]{background:light-dark(#e9edf1,#37424c);border-radius:8px}
+.attempt-select small,.attempt-select>span{font-size:.85em;color:light-dark(#59636e,#b9c3cd)}
+.attempt-inspectors{border-left:1px solid var(--line);padding-left:24px}
+.attempt-inspector h3{font-size:1.25em;font-weight:500;margin:0 0 10px}
+.attempt-inspector h4{font-size:1em;font-weight:500;margin:18px 0 8px}
+.attempt-inspector p{margin:8px 0;overflow-wrap:anywhere}
+.attempt-inspector[hidden],#attempt-missing[hidden],#attempts-home[hidden]{display:none}
+.attempt-timeline{padding:0;list-style:none}
+.attempt-timeline li{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.attempt-timeline small{color:light-dark(#59636e,#b9c3cd)}
+.attempt-back{display:inline-block;margin-bottom:14px}
+.attempt-select:focus-visible,.attempt-inspector :focus-visible{outline:2px solid currentColor;outline-offset:2px}
+@media(max-width:800px){.attempt-layout{grid-template-columns:1fr}.attempt-inspectors{border-left:0;border-top:1px solid var(--line);padding:18px 0 0}.attempt-back{display:inline-block;margin-bottom:14px}}
+
+body[data-view="/agents"]:not([data-agent-view]) :is(#agentwork,#agents,#agenttotals,#modeluse,#aqresults){display:block}

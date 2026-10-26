@@ -10,6 +10,7 @@ Owner accepted the consolidated design and authorized a PM planning/decompositio
 - [Approval fingerprints](approval.json): exact owner-accepted mock and private packet manifest hashes. Hashes distinguish accepted input from the public derivative.
 - [Minimal Overview runtime evidence](../evidence/minimal-overview/README.md): #219 fixture comparison and retained detail/navigation coverage; other redesign surfaces remain separately gated.
 - [Telemetry runtime evidence](../evidence/telemetry/README.md): #222 delivery stages, bounded coverage/evidence and fixture browser checks; production and owner acceptance remain separate.
+- [Attempt-first Agents runtime evidence](../evidence/agents-attempts/README.md): #220 selected attempt, interval/coverage and refresh/return checks; accounting destinations stay separate.
 
 ## Private input and authority
 

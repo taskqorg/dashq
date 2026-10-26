@@ -2116,6 +2116,49 @@
         "project": null,
         "task": 140,
         "attempt": 6181339003,
+        "last_stage_at_ms": 1791874399000,
+        "last_completed_stage": {
+          "stage": "build",
+          "at_ms": 1791874399000,
+          "outcome": "failed"
+        },
+        "timeline": [
+          {
+            "stage": "build",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873079000.0,
+            "end_ms": 1791874399000,
+            "duration_ms": 1320000.0,
+            "reason": "no-usage",
+            "outcome": "failed"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791874336890.0,
+            "end_ms": 1791874339000,
+            "duration_ms": 2110.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791874339870.0,
+            "end_ms": 1791874341000,
+            "duration_ms": 1130.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 3,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2174,6 +2217,71 @@
         "project": null,
         "task": 138,
         "attempt": 6181339012,
+        "last_stage_at_ms": 1791874294000,
+        "last_completed_stage": {
+          "stage": "close",
+          "at_ms": 1791874294000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "close",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873934000.0,
+            "end_ms": 1791874294000,
+            "duration_ms": 360000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "checks",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873989000.0,
+            "end_ms": 1791874289000,
+            "duration_ms": 300000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791874236900.0,
+            "end_ms": 1791874239000,
+            "duration_ms": 2100.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791874239400.0,
+            "end_ms": 1791874242000,
+            "duration_ms": 2600.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "review",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": null,
+            "end_ms": 1791874279000,
+            "duration_ms": null,
+            "reason": "adopted",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 5,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2236,6 +2344,27 @@
         "project": null,
         "task": 139,
         "attempt": 6181339020,
+        "last_stage_at_ms": 1791874239000,
+        "last_completed_stage": {
+          "stage": "review",
+          "at_ms": 1791874239000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "review",
+            "host": "macbook-m2",
+            "runtime": "codex-app",
+            "open": false,
+            "start_ms": 1791873579000.0,
+            "end_ms": 1791874239000,
+            "duration_ms": 660000.0,
+            "reason": "app-turn",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 1,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2294,6 +2423,49 @@
         "project": null,
         "task": 139,
         "attempt": 6181339002,
+        "last_stage_at_ms": 1791874099000,
+        "last_completed_stage": {
+          "stage": "build",
+          "at_ms": 1791874099000,
+          "outcome": "ask"
+        },
+        "timeline": [
+          {
+            "stage": "build",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873559000.0,
+            "end_ms": 1791874099000,
+            "duration_ms": 540000.0,
+            "reason": null,
+            "outcome": "ask"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791874036980.0,
+            "end_ms": 1791874039000,
+            "duration_ms": 2020.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791874039910.0,
+            "end_ms": 1791874041000,
+            "duration_ms": 1090.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 3,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2350,6 +2522,71 @@
         "project": null,
         "task": 137,
         "attempt": 6181339011,
+        "last_stage_at_ms": 1791873994000,
+        "last_completed_stage": {
+          "stage": "close",
+          "at_ms": 1791873994000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "close",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873694000.0,
+            "end_ms": 1791873994000,
+            "duration_ms": 300000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "review",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873739000.0,
+            "end_ms": 1791873979000,
+            "duration_ms": 240000.0,
+            "reason": null,
+            "outcome": "ok"
+          },
+          {
+            "stage": "checks",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873749000.0,
+            "end_ms": 1791873989000,
+            "duration_ms": 240000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873936900.0,
+            "end_ms": 1791873939000,
+            "duration_ms": 2100.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873939500.0,
+            "end_ms": 1791873942000,
+            "duration_ms": 2500.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 5,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2410,6 +2647,49 @@
         "project": null,
         "task": 136,
         "attempt": 6181339001,
+        "last_stage_at_ms": 1791873799000,
+        "last_completed_stage": {
+          "stage": "build",
+          "at_ms": 1791873799000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "build",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791871939000.0,
+            "end_ms": 1791873799000,
+            "duration_ms": 1860000.0,
+            "reason": null,
+            "outcome": "ok"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873737070.0,
+            "end_ms": 1791873739000,
+            "duration_ms": 1930.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873739950.0,
+            "end_ms": 1791873741000,
+            "duration_ms": 1050.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 3,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2466,6 +2746,71 @@
         "project": null,
         "task": 131,
         "attempt": 6181339010,
+        "last_stage_at_ms": 1791873694000,
+        "last_completed_stage": {
+          "stage": "close",
+          "at_ms": 1791873694000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "review",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873319000.0,
+            "end_ms": 1791873679000,
+            "duration_ms": 360000.0,
+            "reason": null,
+            "outcome": "ok"
+          },
+          {
+            "stage": "close",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873454000.0,
+            "end_ms": 1791873694000,
+            "duration_ms": 240000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "checks",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873509000.0,
+            "end_ms": 1791873689000,
+            "duration_ms": 180000.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873636900.0,
+            "end_ms": 1791873639000,
+            "duration_ms": 2100.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "codex",
+            "open": false,
+            "start_ms": 1791873639600.0,
+            "end_ms": 1791873642000,
+            "duration_ms": 2400.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 5,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
@@ -2526,6 +2871,49 @@
         "project": null,
         "task": 131,
         "attempt": 6181339000,
+        "last_stage_at_ms": 1791873499000,
+        "last_completed_stage": {
+          "stage": "build",
+          "at_ms": 1791873499000,
+          "outcome": "ok"
+        },
+        "timeline": [
+          {
+            "stage": "build",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791872659000.0,
+            "end_ms": 1791873499000,
+            "duration_ms": 840000.0,
+            "reason": null,
+            "outcome": "ok"
+          },
+          {
+            "stage": "claim",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873437160.0,
+            "end_ms": 1791873439000,
+            "duration_ms": 1840.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          },
+          {
+            "stage": "start",
+            "host": "macbook-m2",
+            "runtime": "claude",
+            "open": false,
+            "start_ms": 1791873439990.0,
+            "end_ms": 1791873441000,
+            "duration_ms": 1010.0,
+            "reason": "no-model",
+            "outcome": "ok"
+          }
+        ],
+        "timeline_total": 3,
+        "timeline_incomplete": false,
         "link": null,
         "hosts": [
           "macbook-m2"
