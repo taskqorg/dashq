@@ -1000,7 +1000,7 @@ mod tests {
         assert_eq!((a["attempts_total"].as_u64(), data["sources"]["agent_work"]["state"].as_str()), (Some(7), Some("incomplete")));
         let page = String::from_utf8(route(&app, "GET", "/agents", "period=7200", Some(store::Scope::All)).2).unwrap();
         for t in a["attempts"].as_array().unwrap() {
-            assert!(page.contains(&format!("<td>{}</td>", t["attempt"])), "attempt {} on the page", t["attempt"]);
+            assert!(page.contains(&format!("data-attempt=\"attempt-{}-{}\"", t["task"], t["attempt"])), "attempt {} on the page", t["attempt"]);
         }
         let _ = std::fs::remove_dir_all(&d);
     }

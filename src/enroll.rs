@@ -1706,7 +1706,7 @@ mod tests {
         assert_eq!(row("win", "codex")["elapsed"], json!({"known": 1, "of": 2, "reasons": ["adopted"]}));
         let mut html = String::new();
         crate::agent_work::render(&mut html, &json!({"agent_work": a, "generated_at": now}));
-        assert!(html.contains("<a href=\"https://github.com/taskqorg/dashq/issues/101\">taskqorg/dashq#101</a>") && html.contains("title=\"unknown: adopted\">—</span> <small>adopted</small>") && html.contains("partial: rows not received") && html.contains(">#401<"), "{html}");
+        assert!(html.contains("<a href=\"https://github.com/taskqorg/dashq/issues/101\">Open task on board</a>") && html.contains("adopted: adopted") && html.contains("partial: rows not received") && html.contains("Unlinked task #401"), "{html}");
         let solo = crate::agent_work::build(&json!({"now": now, "period": 7200, "filters": {"host": "win"}, "agent_telemetry": stages}));
         assert_eq!((solo["hosts"].as_array().unwrap().len(), &solo["source"]["state"]), (1, &json!("ok")), "host filter; telemetry alone configures the block");
     }

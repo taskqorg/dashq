@@ -3,14 +3,17 @@
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
-  '/agents': ['agents', 'agentwork', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
+  '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
 let pendingAnchor = location.hash;
+function positionKey() { return viewURL + (new URL(viewURL).pathname === '/agents' ? ':' + selectedAttempt : ''); }
 function rememberView() {
-  viewPositions.set(viewURL, {y: scrollY, focus: document.activeElement?.id});
+  const active = document.activeElement;
+  const focus = active?.dataset.attempt && active.dataset.attempt !== selectedAttempt ? 'select-' + selectedAttempt : active?.id;
+  viewPositions.set(positionKey(), {y: scrollY, focus});
 }
 function applyView() {
   if (!(location.pathname in viewSections)) return;
@@ -27,6 +30,7 @@ function applyView() {
     missing.hidden = location.pathname === '/' || viewSections[location.pathname].some(id => document.getElementById(id));
     missing.querySelector('a').href = '/' + location.search;
   }
+  applyAttempts();
 }
 function navigateView(url, pop = false) {
   rememberView();
@@ -35,17 +39,60 @@ function navigateView(url, pop = false) {
   viewURL = location.href;
   pendingAnchor = location.hash;
   applyView();
-  const position = viewPositions.get(viewURL);
+  const position = viewPositions.get(positionKey());
   if (position?.focus) document.getElementById(position.focus)?.focus({preventScroll: true});
   window.scrollTo(0, position?.y || 0);
   if (previous.search === location.search && pendingAnchor) { revealConnection(); document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   if (previous.search !== location.search) refresh();
 }
 addEventListener('popstate', () => navigateView(location.href, true));
+addEventListener('hashchange', applyView);
 document.addEventListener('click', e => {
   const a = e.target.closest('[data-view-link], .bar a');
   if (!a || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault(); navigateView(a.href);
+});
+
+// #220 / F3: local attempt selection follows history; refresh never selects a substitute.
+let selectedAttempt = null;
+function applyAttempts() {
+  const destinations = ['agents', 'agenttotals', 'aqresults', 'modeluse'];
+  const destination = destinations.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'agentwork';
+  document.body.dataset.agentView = destination;
+  let back = document.getElementById('attempts-home');
+  if (!back) {
+    back = document.createElement('a'); back.id = 'attempts-home'; back.dataset.viewLink = ''; back.dataset.viewInherit = '';
+    back.textContent = 'Back to attempts'; document.getElementById('view-unavailable')?.after(back);
+  }
+  back.href = '/agents' + location.search;
+  back.hidden = location.pathname !== '/agents' || destination === 'agentwork';
+  const missing = document.getElementById('view-unavailable');
+  if (location.pathname === '/agents' && missing) missing.hidden = !!document.getElementById(destination);
+  const buttons = [...document.querySelectorAll('[data-attempt]')];
+  if (!selectedAttempt && buttons.length) {
+    selectedAttempt = buttons[0].dataset.attempt;
+    history.replaceState({...history.state, attempt: selectedAttempt}, '');
+  }
+  selectedAttempt = history.state?.attempt || selectedAttempt;
+  buttons.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.attempt === selectedAttempt)));
+  document.querySelectorAll('.attempt-inspector').forEach(p => { p.hidden = p.id !== selectedAttempt; });
+  const unavailable = document.getElementById('attempt-missing');
+  if (unavailable) unavailable.hidden = !selectedAttempt || !!document.getElementById(selectedAttempt);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-attempt]');
+  if (b) {
+    rememberView(); selectedAttempt = b.dataset.attempt;
+    history.pushState({attempt: selectedAttempt}, '', location.href);
+    applyAttempts();
+    const heading = document.getElementById('heading-' + selectedAttempt);
+    heading?.focus({preventScroll: true}); heading?.scrollIntoView({block: 'start'});
+  }
+  const back = e.target.closest('.attempt-back');
+  if (back) {
+    e.preventDefault(); const row = document.getElementById(back.hash.slice(1));
+    row?.focus({preventScroll: true}); row?.scrollIntoView({block: 'center'});
+  }
 });
 
 let busy = false;
@@ -112,7 +159,7 @@ async function refresh() {
       if (e) { e.value = draft.value; if ('checked' in e) e.checked = draft.checked; }
     });
     if (focus) {
-      const e = document.getElementById(focus);
+      const e = document.getElementById(focus) || (focus.startsWith('attempts-') ? document.getElementById('attempts-status') : null);
       e?.focus({ preventScroll: true });
       if (selection && selection[0] !== null && e?.setSelectionRange) e.setSelectionRange(...selection);
     }
@@ -126,11 +173,17 @@ async function refresh() {
   } catch (e) {
     const readingY = scrollY;
     expireHostObservations(true);
+    document.querySelectorAll('.attempt-source').forEach(e => {
+      e.dataset.retained ||= e.textContent;
+      e.textContent = 'Unconfirmed after refresh failure. Retained: ' + e.dataset.retained;
+    });
+    document.querySelectorAll('[data-admission-state]').forEach(e => { e.textContent = 'unconfirmed after refresh failure'; });
     DashqResources.bind();
     const elapsed = Math.floor((Date.now() - ageUpdatedAt) / 1000);
     document.querySelectorAll('main [data-age-s]').forEach(e => {
+      if (e.dataset.ageS === '') { e.textContent = 'age unknown'; return; }
       e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
-      e.textContent = (e.closest('.overview-age') ? '' : 'Last observation ') + e.dataset.ageS + ' s old · unconfirmed';
+      e.textContent = (e.closest('.overview-age,.attempt-select') ? '' : 'Last observation ') + e.dataset.ageS + ' s old · unconfirmed';
     });
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');

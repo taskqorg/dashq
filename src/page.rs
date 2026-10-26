@@ -194,6 +194,8 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     versions(w, &doc["versions"], now);
 
+    crate::agent_work::render(w, doc);
+
     // 4. Agents
     if configured("langfuse") {
         let ag = &doc["agents"];
@@ -233,7 +235,6 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     // 5. Server checks
     }
-    crate::agent_work::render(w, doc);
     if configured("langfuse") { crate::model_use::render(w, doc); }
     if configured("serverq") || enrolled_checks {
         let _ = writeln!(w, "<section id=\"checks\">\n<h2>Server checks</h2>");

@@ -348,8 +348,22 @@ fn attempt((task, id): (u64, u64), v: &[&Value], (state, why): &(&str, String), 
     let complete = *state == "complete";
     // a reviewer is spawned inside `review`, so its wait is no state transition
     let wait_why = if v.iter().any(|r| r["stage"] == "review") { "reviewer wait not recorded" } else { "ready transition not retained" };
+    let mut timeline: Vec<Value> = v.iter().map(|r| {
+        let end = r["at_ms"].as_u64();
+        let duration = if open(r) {None} else {r["us"].as_u64().map(|us| us as f64/1000.0)};
+        json!({"stage":r["stage"],"host":r["host"],"runtime":r["rt"],"open":open(r),
+            "start_ms":end.and_then(|end| if open(r) {Some(end as f64)} else {duration.map(|d|(end as f64-d).max(0.0))}),
+            "end_ms":if open(r) {None} else {end},"duration_ms":duration,"reason":r["unknown"],"outcome":r["outcome"]})
+    }).collect();
+    timeline.sort_by(|a,b| a["start_ms"].as_f64().or(a["end_ms"].as_f64()).unwrap_or(0.0).total_cmp(&b["start_ms"].as_f64().or(b["end_ms"].as_f64()).unwrap_or(0.0)));
+    let timeline_total=timeline.len();
+    let timeline: Vec<Value> = timeline.into_iter().skip(timeline_total.saturating_sub(ATTEMPTS)).collect();
+    let last = closed.iter().max_by_key(|r|r["at_ms"].as_u64());
     json!({
         "project": project, "task": task, "attempt": id,
+        "last_stage_at_ms":v.iter().filter_map(|r|r["at_ms"].as_u64()).max(),
+        "last_completed_stage":last.map(|r|json!({"stage":r["stage"],"at_ms":r["at_ms"],"outcome":r["outcome"]})),
+        "timeline":timeline,"timeline_total":timeline_total,"timeline_incomplete":timeline_total>ATTEMPTS,
         // only a configured board names an issue; an attempt without a project stays unlinked
         "link": project.filter(|p| projects.contains(p)).map(|p| format!("https://github.com/{p}/issues/{task}")),
         "hosts": set("host"), "runtimes": set("rt"),
@@ -474,13 +488,82 @@ fn map(v: &Value) -> String {
     if m.is_empty() { "—".into() } else { m.join(" · ") }
 }
 
+/// #220: inspection links reuse the released workspace; no second control dispatcher.
 pub fn render(w: &mut String, doc: &Value) {
+    let a=&doc["agent_work"];
+    if a["hosts"].as_array().is_none_or(|h|h.is_empty()) && a["source"]["reason"]=="not configured"
+        && (!doc["sources"]["langfuse"].is_object() || doc["sources"]["langfuse"]["reason"]=="not configured") { return; }
+    let now=doc["generated_at"].as_u64().unwrap_or(0);
+    let list=a["attempts"].as_array();
+    let mut query=format!("?period={}",doc["period"].as_u64().unwrap_or(1800));
+    for key in ["host","agent","session"] {
+        if let Some(value)=doc["filters"][key].as_str() { let _=write!(query,"&{key}={}",crate::source::enc(value)); }
+    }
+    let view_query=esc(&query);
+    let _=write!(w,"<section id=\"agentwork\"><h2>Agents</h2><nav aria-label=\"Agent evidence\"><a data-view-link data-view-inherit href=\"/agents{view_query}#agents\">Client activity</a> · <a data-view-link data-view-inherit href=\"/agents{view_query}#agenttotals\">Stage totals</a> · <a data-view-link data-view-inherit href=\"/agents{view_query}#aqresults\">Optimization</a> · <a data-view-link data-view-inherit href=\"/agents{view_query}#modeluse\">Model use</a></nav><p class=\"note\">TaskQ attempts · stage observations, not client activity or log age. Useful progress is unknown without producer evidence.</p>");
+    if a["source"]["reason"]=="not configured" {
+        let _=write!(w,"</section>"); return;
+    }
+    let total=a["attempts_total"].as_u64().unwrap_or(0);
+    let offset=doc["query"]["cursor"].as_u64().unwrap_or(0);
+    let shown=list.map_or(0,Vec::len) as u64;
+    let count=if a["source"]["incomplete"]==true {format!("at least {total}")} else {total.to_string()};
+    if shown>0 || a["source"]["state"]=="ok" {
+        let label=if a["source"]["state"]=="ok" {"Attempts"} else {"Retained attempts"};
+        let _=write!(w,"<p id=\"attempts-status\" tabindex=\"-1\" class=\"attempt-coverage\">{label}: {shown} shown of {count}; offset {offset}; cap {ATTEMPTS} per page</p>");
+    } else {let _=write!(w,"<p id=\"attempts-status\" tabindex=\"-1\" class=\"attempt-coverage\">Attempt count unknown: {}</p>",esc(a["source"]["reason"].as_str().unwrap_or("no stage evidence")));}
+    if offset>0 {let _=write!(w,"<a id=\"attempts-previous\" data-view-link href=\"/agents{}&amp;cursor={}\">Previous attempts</a> ",esc(&query),offset.saturating_sub(ATTEMPTS as u64));}
+    if offset+shown<total {let _=write!(w,"<a id=\"attempts-next\" data-view-link href=\"/agents{}&amp;cursor={}\">Next attempts</a>",esc(&query),offset+ATTEMPTS as u64);}
+    let state=a["source"]["state"].as_str().unwrap_or("unknown");
+    let _=write!(w,"<p class=\"attempt-source note\">Stage source: {} · {}</p>",esc(state),esc(a["source"]["reason"].as_str().unwrap_or("observed stage records")));
+    let _=write!(w,"<div class=\"attempt-layout\"><div class=\"attempt-list\" role=\"region\" aria-label=\"TaskQ attempts\">");
+    let join=|v:&Value|v.as_array().into_iter().flatten().filter_map(Value::as_str).map(esc).collect::<Vec<_>>().join(", ");
+    for t in list.into_iter().flatten() {
+        let id=format!("attempt-{}-{}",t["task"],t["attempt"]);
+        let age=t["last_stage_at_ms"].as_u64().map_or("Stage observation age unknown".into(),|at|format!("Last stage observation <span data-age-s=\"{}\">{} old</span>",now.saturating_sub(at/1000),crate::data::dur(now.saturating_sub(at/1000))));
+        let _=write!(w,"<button type=\"button\" class=\"attempt-select\" id=\"select-{id}\" data-attempt=\"{id}\" aria-controls=\"{id}\" aria-pressed=\"false\"><strong>{}#{}</strong><span>Attempt {} · {} · {}</span><span>{} · {}</span><small>{age}</small></button>",esc(t["project"].as_str().unwrap_or("Unlinked task ")),t["task"],t["attempt"],join(&t["hosts"]),join(&t["runtimes"]),esc(t["state"].as_str().unwrap_or("unknown")),esc(t["reason"].as_str().unwrap_or("complete stage coverage")));
+    }
+    let _=write!(w,"</div><div class=\"attempt-inspectors\"><p id=\"attempt-missing\" hidden>Selected attempt is unavailable in this window/page. Choose an attempt from the list; no replacement is selected automatically.</p>");
+    for t in list.into_iter().flatten() {
+        let id=format!("attempt-{}-{}",t["task"],t["attempt"]);
+        let _=write!(w,"<article class=\"attempt-inspector\" id=\"{id}\" aria-labelledby=\"heading-{id}\"><a class=\"attempt-back\" href=\"#select-{id}\">Back to attempts</a><h3 id=\"heading-{id}\" tabindex=\"-1\">{}#{} · attempt {}</h3><p>{} · {} · {}: {}</p><h4>Last meaningful progress</h4><p>Unknown: stage boundaries do not establish useful progress.</p>",esc(t["project"].as_str().unwrap_or("Unlinked task ")),t["task"],t["attempt"],join(&t["hosts"]),join(&t["runtimes"]),esc(t["state"].as_str().unwrap_or("unknown")),esc(t["reason"].as_str().unwrap_or("complete stage coverage")));
+        let last=&t["last_completed_stage"];
+        let last_at=last["at_ms"].as_u64().map_or("unknown".into(),|at|format!("{} UTC",clock(at/1000,now)));
+        let _=write!(w,"<p>Last completed stage: {} · {last_at}. This is stage evidence, not a current task state.</p><h4>Timeline · stage intervals (UTC)</h4><p class=\"note\">Overlapping stages remain separate; gaps are unobserved, never idle. Open intervals have no known end; adopted/untimed intervals have no known start.</p><p>Queue wait before attempt: {}</p><ol class=\"attempt-timeline\">",esc(&format!("{} ({})",last["stage"].as_str().unwrap_or("unknown"),last["outcome"].as_str().unwrap_or("unknown"))),t["queue_wait_s"].as_u64().map_or_else(||format!("unknown · {}",esc(t["queue_wait_reason"].as_str().unwrap_or("not reported"))),|s|crate::data::dur(s)));
+        if t["timeline_incomplete"]==true {let _=write!(w,"<p class=\"note\">Timeline incomplete: newest {ATTEMPTS} of {} stage records shown; earlier intervals not displayed.</p>",t["timeline_total"]);}
+        for event in t["timeline"].as_array().into_iter().flatten() {
+            let time=|v:&Value|v.as_f64().map_or("unknown".into(),|ms|clock((ms/1000.0) as u64,now));
+            let _=write!(w,"<li><strong>{}</strong><span>{} → {} · {}</span><small>{} · {} · {}</small></li>",if event["stage"]=="ask" {"ask (wait)".into()} else {esc(event["stage"].as_str().unwrap_or("unknown"))},time(&event["start_ms"]),if event["open"]==true{"open · end unknown".into()}else{time(&event["end_ms"])},event["duration_ms"].as_f64().map_or("duration unknown".into(),|_|n(&event["duration_ms"])),esc(event["host"].as_str().unwrap_or("host unknown")),esc(event["runtime"].as_str().unwrap_or("runtime unknown")),esc(event["reason"].as_str().or(event["outcome"].as_str()).unwrap_or("unknown")));
+        }
+        let _=write!(w,"</ol><h4>Next action</h4>");
+        // Admission is task-scoped current evidence: it cannot describe a previous attempt's wait.
+        let board=doc["boards"].as_array().into_iter().flatten().find(|b|b["project"]==t["project"] && !t["project"].is_null());
+        let task=board.and_then(|b|b["tasks"].as_array()).into_iter().flatten().find(|r|r["n"]==t["task"]);
+        if let Some(r)=task.filter(|r|r["admission"].is_object()) {
+            let adm=&r["admission"];
+            let _=write!(w,"<p class=\"attempt-admission\">Current task admission (not this attempt's wait): {} · {} · source {} · <span data-admission-state>{}</span> · <span data-age-s=\"{}\">age {}</span></p>",esc(adm["meaning"].as_str().unwrap_or("unknown")),esc(adm["reason"].as_str().unwrap_or("not reported")),esc(adm["source"].as_str().unwrap_or("unknown")),esc(board.unwrap()["source"]["state"].as_str().unwrap_or("unknown")),adm["age_s"].as_u64().map_or(String::new(),|s|s.to_string()),adm["age_s"].as_u64().map_or("unknown".into(),|s|crate::data::dur(s)));
+        }
+        if let Some(link)=t["link"].as_str() {
+            let project=t["project"].as_str().unwrap_or("");
+            let _=write!(w,"<a data-view-link data-view-inherit href=\"/projects#board-{}\">Open project in TaskQ workspace</a> · <a href=\"{}\">Open task on board</a><p class=\"note\">Answers and controls are offered only by the released TaskQ workspace with its existing authority and freshness gates.</p>",esc(&crate::source::enc(project)),esc(link));
+        } else { let _=write!(w,"<p>No action link: attempt has no configured project.</p>"); }
+        let _=write!(w,"<details id=\"metrics-{id}\"><summary id=\"metrics-summary-{id}\">Attempt measurements</summary><p>Wall time {} · summed execution {} · outcome {}</p><p>Model calls {} · context tokens {} · output tokens {} · models {}</p><p>API-equivalent estimate: unknown · {}</p></details></article>",n(&t["elapsed_ms"]),n(&t["execution_ms"]),esc(t["outcome"].as_str().unwrap_or("unknown")),use_cell(&t["calls"]),use_cell(&t["tokens"]),use_cell(&t["output_tokens"]),model_cell(&t["models"]),esc(t["estimate"]["reason"].as_str().unwrap_or("not reported")));
+    }
+    if list.is_none_or(|l|l.is_empty()) {
+        let line=if state=="ok" {"No attempt stages in this period.".into()} else {format!("Attempt stages in this period unknown: {}.",esc(a["source"]["reason"].as_str().unwrap_or("no reason")))};
+        let _=write!(w,"<p>{line}</p>");
+    }
+    let _=write!(w,"</div></div></section>");
+    render_totals(w,doc);
+}
+
+fn render_totals(w: &mut String, doc: &Value) {
     let a = &doc["agent_work"];
     if a["hosts"].as_array().is_none_or(|h| h.is_empty()) && a["source"]["reason"] == "not configured" {
         return;
     }
     let now = doc["generated_at"].as_u64().unwrap_or(0);
-    let _ = writeln!(w, "<section id=\"agentwork\">\n<h2>Agent work</h2>\n<p class=\"note\">taskq attempt stages ended in the period, per host and runtime; slowest stage (p95) first. Wall time is each complete attempt's elapsed time (nested stages count once); summed execution adds overlapping stages; queue wait is the time in ready before the worker started. Budgets unknown. Model use counts build and review only.</p>");
+    let _ = writeln!(w, "<section id=\"agenttotals\">\n<h2>Stage totals</h2>\n<p class=\"note\">taskq attempt stages ended in the period, per host and runtime; slowest stage (p95) first. Wall time is each complete attempt's elapsed time (nested stages count once); summed execution adds overlapping stages; queue wait is the time in ready before the worker started. Budgets unknown. Model use counts build and review only.</p>");
     for h in a["hosts"].as_array().into_iter().flatten() {
         let s = &h["source"];
         let state = s["state"].as_str().unwrap_or("unknown");
@@ -510,36 +593,6 @@ pub fn render(w: &mut String, doc: &Value) {
         let _ = writeln!(w, "</table>");
     }
     let attempts = a["attempts"].as_array().filter(|x| !x.is_empty());
-    if let Some(list) = attempts {
-        let more = a["attempts_total"].as_u64().filter(|t| *t > list.len() as u64).map(|t| format!(", newest {} of {t}", list.len())).unwrap_or_default();
-        let _ = writeln!(w, "<h3>Attempts{more}</h3>\n<table>\n<tr><th>Task</th><th>Attempt</th><th>Hosts</th><th>Runtime</th><th>Stages</th><th>Outcome</th><th>Wall time</th><th>Summed execution</th><th>Queue wait</th><th>Model calls</th><th>Context tokens</th><th>Output tokens</th><th>Models</th><th>API-equivalent estimate</th></tr>");
-        let join = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(esc).collect::<Vec<_>>().join(", ");
-        for t in list {
-            let name = format!("{}#{}", t["project"].as_str().unwrap_or(""), t["task"]);
-            let task = match t["link"].as_str() {
-                Some(l) => format!("<a href=\"{}\">{}</a>", esc(l), esc(&name)),
-                None => esc(&name),
-            };
-            // elapsed only for complete coverage; otherwise the state and taskq's reason, never a partial sum
-            let elapsed = match t["elapsed_ms"].as_f64() {
-                Some(_) => n(&t["elapsed_ms"]),
-                None => {
-                    let (state, reason) = (t["state"].as_str().unwrap_or("unknown"), t["reason"].as_str().unwrap_or(""));
-                    let why = if reason.is_empty() || reason == state { state.to_string() } else { format!("{state}: {reason}") };
-                    format!("<span class=\"unknown\" title=\"unknown: {0}\">—</span> <small>{0}</small>", esc(&why))
-                }
-            };
-            let execution = if t["execution_ms"].is_null() { unknown(t["reason"].as_str().or(t["state"].as_str()).unwrap_or("unknown")) } else { n(&t["execution_ms"]) };
-            let wait = match t["queue_wait_s"].as_f64() {
-                Some(s) => n(&json!(s * 1000.0)),
-                None => unknown(t["queue_wait_reason"].as_str().unwrap_or("unknown")),
-            };
-            let _ = writeln!(w, "<tr><td>{task}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{elapsed}</td><td>{execution}</td><td>{wait}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                t["attempt"], join(&t["hosts"]), join(&t["runtimes"]), join(&t["stages"]), esc(t["outcome"].as_str().unwrap_or("—")), use_cell(&t["calls"]), use_cell(&t["tokens"]),
-                use_cell(&t["output_tokens"]), model_cell(&t["models"]), unknown(t["estimate"]["reason"].as_str().unwrap_or("unknown")));
-        }
-        let _ = writeln!(w, "</table>");
-    }
     if a["rows"].as_array().is_none_or(|r| r.is_empty()) && attempts.is_none() {
         // a zero is shown only when every log covers the period; else what is missing reads unknown
         let line = match (a["source"]["state"].as_str(), a["source"]["reason"].as_str()) {
@@ -554,6 +607,67 @@ pub fn render(w: &mut String, doc: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #220 A1/A2: boundaries remain evidence, missing timing/progress never becomes healthy work.
+    #[test]
+    fn attempt_inspector() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        let now = inp["now"].as_u64().unwrap();
+        let record = |stage: &str, id: u64, at: u64, us: Value, opened: bool, why: Value| json!({
+            "stage":stage,"task":220,"attempt":id,"project":"taskqorg/dashq","host":"win","rt":"codex",
+            "at_ms":at*1000,"us":us,"open":opened,"unknown":why,"outcome":"ok","error":"none"});
+        let records = json!([
+            record("claim",1,now-150,json!(1000000),false,Value::Null),
+            record("build",1,now-30,json!(120000000),false,Value::Null),
+            record("checks",1,now-40,json!(20000000),false,Value::Null),
+            record("build",2,now-20,Value::Null,true,json!("open-stage")),
+            record("review",3,now-50,Value::Null,false,json!("adopted")),
+            record("build",4,now-60,Value::Null,false,json!("app-turn")),
+            record("build",5,now-70,json!(1000000),false,Value::Null)
+        ]);
+        inp["agent_work"] = json!({"win":{"at":now,"value":{"records":records,"retained_from":now-1800,"corrupt":0}}});
+        inp["projects"] = json!(["taskqorg/dashq"]);
+        let mut d = crate::data::build(&inp);
+        d["boards"] = json!([{"project":"taskqorg/dashq","url":"https://github.com/taskqorg/dashq/issues","source":{"state":"stale","age_s":600,"reason":"invented stale observation"},
+            "counts":{},"tasks":[{"n":220,"state":"ready","title":"Invented attempt task","url":"https://github.com/taskqorg/dashq/issues/220","admission":{"meaning":"waiting for capacity","reason":"invented capacity wait","age_s":600,"source":"taskq-board/1"}}],"questions":[],"failed":[],"attempts":[]}]);
+        let html = crate::page::render_view(&d, &json!({}), "/agents");
+        if let Some(dir) = std::env::var_os("DASHQ_AGENTS_EVIDENCE") {
+            let dir=std::path::PathBuf::from(dir); std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("page.html"),&html).unwrap();
+            std::fs::write(dir.join("data.json"),d.to_string()).unwrap();
+        }
+        let attempts = d["agent_work"]["attempts"].as_array().unwrap();
+        let complete=attempts.iter().find(|a|a["attempt"]==1).unwrap();
+        assert!(complete["timeline"].is_array(), "#220: attempt stage intervals are missing");
+        assert_eq!(complete["timeline"][1]["start_ms"].as_f64(),Some(((now-150)*1000) as f64));
+        assert_eq!(complete["last_completed_stage"]["stage"],"build");
+        assert_eq!(complete["elapsed_ms"].as_f64(),Some(121000.0),"overlap counts once");
+        assert_eq!(complete["execution_ms"].as_f64(),Some(141000.0),"summed execution retains overlaps");
+        assert_eq!(attempts.iter().find(|a|a["attempt"]==2).unwrap()["timeline"][0]["end_ms"],Value::Null);
+        assert!(html.contains("Current task admission (not this attempt's wait)") && html.contains("invented capacity wait"));
+        assert_eq!(complete["last_stage_at_ms"],json!((now-30)*1000));
+        for (id,state) in [(2,"open"),(3,"adopted"),(4,"untimed"),(5,"partial")] {
+            let a=attempts.iter().find(|a|a["attempt"]==id).unwrap();
+            assert_eq!(a["state"],state); assert!(a["elapsed_ms"].is_null());
+        }
+        assert!(html.contains("class=\"attempt-layout\""), "#220: selected attempt inspector missing");
+        assert!(html.find("id=\"agentwork\"").unwrap()<html.find("id=\"agents\"").unwrap(),"#220: attempts precede clients");
+        let missing_clock=json!({"stage":"build","open":true,"at_ms":null,"us":null});
+        let clockless=attempt((220,9),&[&missing_clock],&("open","open-stage".into()),&[],None);
+        assert!(clockless["timeline"][0]["start_ms"].is_null() && clockless["timeline"][0]["end_ms"].is_null(),"missing clock never becomes 1970");
+        let dense: Vec<Value>=(0..=ATTEMPTS).map(|i|record("checks",1,now-i as u64,json!(1000),false,Value::Null)).collect();
+        let dense=attempt((220,1),&dense.iter().collect::<Vec<_>>(),&("complete",String::new()),&[],None);
+        assert_eq!(dense["timeline"].as_array().unwrap().len(),ATTEMPTS);
+        assert_eq!(dense["timeline_total"],ATTEMPTS+1); assert_eq!(dense["timeline_incomplete"],true);
+        let mut capped=d.clone(); capped["agent_work"]["attempts_total"]=json!(205);
+        capped["agent_work"]["attempts"][0]["timeline_incomplete"]=json!(true); capped["agent_work"]["attempts"][0]["timeline_total"]=json!(201);
+        let cap_html=crate::page::render(&capped,&json!({}));
+        assert!(cap_html.contains("5 shown of at least 205") && cap_html.contains("cursor=200"));
+        assert!(cap_html.contains("Timeline incomplete: newest 200 of 201"));
+        capped["agent_work"]=build(&json!({"now":now}));
+        let nav=crate::page::render(&capped,&json!({}));
+        assert!(nav.contains("Agent evidence") && !nav.contains("class=\"attempt-source"),"unconfigured stages retain navigation, not an empty panel");
+    }
 
     // chain: taskq-stage lines in a local taskq.log -> /data.agent_work per host and runtime -> page; missing,
     // adopted, unreported and corrupt data stays unknown with a reason, never zero (D21)

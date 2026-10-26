@@ -1,0 +1,111 @@
+{
+  "reference": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "browser": "141.0.7390.37",
+  "platform": "win32",
+  "inputs": {
+    "src/agent_work.rs": "9e2b4b78fbcbd9e372cb6adbac3d11d5421531334ba8af8c362899d159231d59",
+    "src/page.rs": "e79265e1c53a827fb331287190baf78a74455ab9e1b3581e9ba233846dbfed96",
+    "assets/app.js": "a6add8319d73e8966a5f981d8fa91f3dfca6a79160d9f61693d6a2cbb29c07d4",
+    "assets/style.css": "6643ab30e0b6419da73c19fb0472cd7f1842e1e117d8185179acdbe02ee59cb4",
+    "tests/agents-browser.cjs": "2d1b65720f2856993e8a9df36dede89c70277ea0de817aec8c19e036e9ad71dd"
+  },
+  "rendered": "0bd4280a804045664ff98b7a3eea106de9c464ec490a30300e29d0c64239de3e",
+  "cells": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      }
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 1,
+        "gap": 26,
+        "padding": 0
+      },
+      "expected": {
+        "columns": 1,
+        "gap": 26,
+        "padding": 0
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 1,
+        "gap": 26,
+        "padding": 0
+      },
+      "expected": {
+        "columns": 1,
+        "gap": 26,
+        "padding": 0
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      },
+      "expected": {
+        "columns": 2,
+        "gap": 26,
+        "padding": 24
+      }
+    }
+  ]
+}
