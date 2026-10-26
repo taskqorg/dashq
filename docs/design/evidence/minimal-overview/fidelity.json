@@ -1,0 +1,275 @@
+{
+  "reference": "dd904406d81a819064d43ed1a850cab49de580a3af2d77265268db1d163402ee",
+  "browser": "141.0.7390.37",
+  "platform": "win32",
+  "inputs": {
+    "src/page.rs": "e043dfe7dda5550ff2576b1e43773cec8efa2ac88ea44a076592de02e438b666",
+    "assets/app.js": "5a4fc1b4b088615466ddeffd3312d7064bfcf4ce71da10910ede6969e1effb0b",
+    "assets/style.css": "867057da2031df0a9bf3f80ef0fa89d8c403fb4765790c8e9808eca70796a604",
+    "assets/overview-icons.svg": "01c0b4e0947726c60dd5bbc4607df234b99e0feb300c217d5006453070206dd0",
+    "tests/overview-browser.cjs": "b5516266c966d3768abc2856a6477ef87275e30320d63c51f6f2c9155e7527c2"
+  },
+  "rendered": "9b4ca404b8b0ed599d388edb0becb52bf8cb5c3064b37e7bb97b395167704cf4",
+  "cells": [
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3,
+        "order": [
+          273.59375,
+          334.875,
+          372.875,
+          571.546875
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3,
+        "order": [
+          196.78125,
+          253,
+          291,
+          463
+        ],
+        "chartAfterNumber": true
+      }
+    },
+    {
+      "width": 1280,
+      "size": 16,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3,
+        "order": [
+          273.59375,
+          334.875,
+          372.875,
+          571.546875
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 18,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 3,
+        "order": [
+          196.78125,
+          253,
+          291,
+          463
+        ],
+        "chartAfterNumber": true
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1,
+        "order": [
+          837.125,
+          910.75,
+          949.390625,
+          1180.3125
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1,
+        "order": [
+          623.265625,
+          690.5625,
+          728.5625,
+          900.5625
+        ],
+        "chartAfterNumber": true
+      }
+    },
+    {
+      "width": 360,
+      "size": 20,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1,
+        "order": [
+          837.125,
+          910.75,
+          949.390625,
+          1180.3125
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 320,
+        "padding": 16,
+        "radius": 14,
+        "name": 22.5,
+        "metricWidth": 286,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 1,
+        "order": [
+          623.265625,
+          690.5625,
+          728.5625,
+          900.5625
+        ],
+        "chartAfterNumber": true
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "light",
+      "result": "PASS",
+      "actual": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2,
+        "order": [
+          351.203125,
+          437.140625,
+          480.71875,
+          743.84375
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2,
+        "order": [
+          196.78125,
+          275.140625,
+          317.703125,
+          489.703125
+        ],
+        "chartAfterNumber": true
+      }
+    },
+    {
+      "width": 1280,
+      "size": 24,
+      "theme": "dark",
+      "result": "PASS",
+      "actual": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2,
+        "order": [
+          351.203125,
+          437.140625,
+          480.71875,
+          743.84375
+        ],
+        "chartAfterNumber": true
+      },
+      "expected": {
+        "width": 486,
+        "padding": 16,
+        "radius": 14,
+        "name": 27,
+        "metricWidth": 452,
+        "chartWidth": 64,
+        "chartHeight": 36,
+        "chartRight": 0,
+        "columns": 2,
+        "order": [
+          196.78125,
+          275.140625,
+          317.703125,
+          489.703125
+        ],
+        "chartAfterNumber": true
+      }
+    }
+  ],
+  "checks": [
+    "hierarchy",
+    "reference geometry",
+    "honest missing history",
+    "disclosure/focus across outage/recovery",
+    "direct finding and Back",
+    "no writes"
+  ]
+}

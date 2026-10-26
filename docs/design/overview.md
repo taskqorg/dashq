@@ -4,7 +4,7 @@ Approved #169 design under [D8–D10](../../dashq.md#d8-page); [first screen](fi
 
 ## Overview and detail
 
-Initial grid: current CPU percent, RAM used/total, each filesystem used/total. A zero-based capacity bar needs a known total. Keep units, per-field source age, warnings and accessible missing-data reasons, with one visible legend. History plots move to detail.
+The #219 amendment to [D8/D10](../../dashq.md#d10-dashboard-redesign-target) adopts the [operator redesign](operator-redesign/README.md): compact host cards with current CPU percent, RAM used/total, each filesystem used/total and small right-hand 30 min trends. A zero-based capacity bar needs a known total. Keep units, scoped state/age and readable missing-data reasons; supporting explanations move to a collapsed legend. Versions, login/queue probes and receipts stay in expandable host detail. Detailed history remains reachable through the existing host route.
 
 Host detail: CPU/RAM 30 min trends on a shared 0–100% scale, disk history, filesystem roles and evidence. Label endpoints/window; three real samples establish history under U1. Warmup, gaps, resets, stale tails, capped reads and unsupported metrics retain D4.4 semantics. Unknown total has no bar; missing history no continuous line. Identity follows H1–H7. Only producer/approved policy thresholds establish warnings; no new threshold here.
 

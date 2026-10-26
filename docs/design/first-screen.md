@@ -4,6 +4,8 @@ Approved design: #169 A1–A5, replacing the previous Attention/servers/Boards c
 
 ## First screen
 
+#219 amends the composition below under [D8/D10](../../dashq.md#d8-page) and the approved [operator redesign](operator-redesign/README.md): Overview uses compact host cards, readable scoped states, right-hand resource trends and a collapsed evidence legend. Versions, login/queue probes and receipts move to expandable host detail; existing routes and the preservation ledger remain binding. The original #169 approval below records the earlier baseline.
+
 Header: Hosts, Tasks and More; Attention count links directly to the action list. Hosts is the initial view. More exposes existing supporting routes, Connect and Langfuse links. One full-width host grid comes first, followed by short Attention. No board totals, installation inventory, charts or diagnostic tables precede the hosts.
 
 Each row shares these columns at 1280 px: host/kind and online evidence/age; TaskQ, AgentQ and ServerQ running versions with update state; Claude/Codex sign-in and probe age; CPU; RAM used/total; every disk used/total; running and host-assigned queued tasks. Selecting the name opens host detail; selecting a count opens Tasks filtered to that host. Queue includes only explicitly assigned pending work; unassigned board work stays separately visible in Tasks. Running means current attempt evidence, not responsive execution. Preserve identities under [H1–H7](hosts.md); never join by friendly label.
@@ -32,7 +34,7 @@ Current section inventory checked against src/page.rs, resource.rs, clients.rs, 
 | Current section / capability | Destination and retained behavior |
 |---|---|
 | First launch | No installations: one Connect entry, U1/L2; no invented hosts/empty product panels. |
-| Hosts / server resources | First screen: identity, ages, resources, versions, tasks. Host detail: real 30 min CPU/RAM trends, disk history, gaps/resets/warmup and evidence. |
+| Hosts / server resources | #219 first screen: identity, scoped state/age, current resources and real 30 min CPU/RAM/filesystem trends. Expandable host detail: versions, login/queue probes, task counts and receipts. Host/resource routes retain detailed history, gaps/resets/warmup and evidence. |
 | Attention current problems | First screen only with person/action; coverage/routing/hook records remain host → Agent use until actionable intervention is identified. |
 | Observation gaps / source summary | Collapsed Source status with non-ok count; affected host values retain unknown/stale meaning and age. |
 | Incidents / findings | Host → Checks or /checks; deduplicated, separate from current problems, same episode identity/evidence. Linked tasks retained; creation D15-gated. |
@@ -43,7 +45,7 @@ Current section inventory checked against src/page.rs, resource.rs, clients.rs, 
 | Agents / Clients | Host → Agent use or /agents; activity, per-model sample counts, reported costs, routing/hooks/MCP and #116/#131 observations. Login is separate. |
 | Optimization | /agents; P1–P3 accounting, coverage, event-time buckets, separate unqualified whole-task experiments. |
 | Agent work | /agents; D21 attempt stages, host/runtime, timing, usage coverage and unknowns; configured logs only. |
-| Services / host updates | Grid summaries; /services or host detail for selected/available/running/health/lifecycle, libraries and source times. No lifecycle control. |
+| Services / host updates | #219 expandable host detail; /services for selected/available/running/health/lifecycle, libraries and source times. No lifecycle control. |
 | Server checks | Host detail or /checks; per-rule details, manual rules not verified, incidents, catalog-qualified evidence. |
 | Diagnostics / process counters / export / telemetry | Relevant host/installation detail, reset/coverage semantics, no raw commands/output/secrets. D20 profile retained; stored TaskQ telemetry analysis still unimplemented. |
 | Header filters / Langfuse links / JSON / report | More and detail retain D7 filters/links; API/report, periods, cadence, cache and caps unchanged. |

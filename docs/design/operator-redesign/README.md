@@ -8,6 +8,7 @@ Owner accepted the consolidated design and authorized a PM planning/decompositio
 - [Public reference](overview-candidate.html): synthetic derivative of the accepted mock; no real operational counts or financial amounts. Build with `python3 docs/design/operator-redesign/build-overview.py`.
 - [Review](review/README.md): independent/mutual review and final correction dispositions.
 - [Approval fingerprints](approval.json): exact owner-accepted mock and private packet manifest hashes. Hashes distinguish accepted input from the public derivative.
+- [Minimal Overview runtime evidence](../evidence/minimal-overview/README.md): #219 fixture comparison and retained detail/navigation coverage; other redesign surfaces remain separately gated.
 
 ## Private input and authority
 
