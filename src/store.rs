@@ -979,6 +979,23 @@ impl Store {
         credential(&*self.lock()?, verifier)
     }
 
+    /// Host link (D25): the workspace of a TaskQ installation's live connection, its newest acknowledged and
+    /// unrevoked grant; `None` when it is not connected.
+    pub fn link_workspace(&self, installation: &str) -> Result<Option<String>, Error> {
+        Ok(self
+            .lock()?
+            .query_row(
+                "SELECT g.workspace FROM grants g JOIN installations i ON i.id = g.installation
+                 WHERE g.installation = ?1 AND i.product = 'taskq'
+                   AND EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation)
+                   AND NOT EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation)
+                 ORDER BY g.generation DESC LIMIT 1",
+                [installation],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
     /// `/machine/connect/ack`: activates the generation and erases its sealed token response. Repeats are the same.
     pub fn ack(&self, verifier: &[u8], now: i64) -> Result<Option<Credential>, Error> {
         self.write(|tx| {

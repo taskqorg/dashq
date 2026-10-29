@@ -1899,7 +1899,7 @@ mod tests {
         let paths: Vec<&str> = head.lines().filter_map(|l| l.trim().strip_prefix("path ")).flat_map(str::split_whitespace).collect();
         // one prefix for every machine route, the resource exchange (D14) included (#110)
         assert_eq!(paths, ["/machine/*"]);
-        assert!(MACHINE.iter().chain(&[crate::policy::EXCHANGE]).all(|p| p.starts_with("/machine/")));
+        assert!(MACHINE.iter().chain(&[crate::policy::EXCHANGE, crate::link::SEND, crate::link::RECV]).all(|p| p.starts_with("/machine/")));
         assert!(head.contains("method POST") && !head.contains("/data"));
         assert!(guarded.contains("copy_headers") && guarded.contains(">X-Dashq-Subject") && guarded.contains("reverse_proxy 127.0.0.1:18882"));
     }
@@ -2178,7 +2178,7 @@ mod tests {
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
         let cfg = crate::Config { prices: Value::Null, langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
-        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() }
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }
     }
 
     fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {
