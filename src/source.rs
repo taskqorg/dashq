@@ -79,20 +79,38 @@ pub fn send(url: &str, headers: &[String], body: Option<&str>) -> Result<Resp, F
     }
     // plain HTTP only for in-process test receivers; production config accepts only https:// bases
     let proto = if cfg!(test) && url.starts_with("http://127.0.0.1:") { "=http" } else { "=https" };
+    // URL, headers and body go on stdin, so the logged command never holds a secret
+    let cmd = format!("curl -sS -i --max-time 10 --proto {proto} -K -");
+    let log = |e: &str| eprintln!("{cmd} failed: {e}");
     let mut child = coreq::quiet(Command::new("curl").args(["-sS", "-i", "--max-time", "10", "--proto", proto, "-K", "-"]))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| ("curl not found".to_string(), None))?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|_| ("curl input failed".to_string(), None))?;
-    let out = child.wait_with_output().map_err(|_| ("curl failed".to_string(), None))?;
+        .map_err(|e| {
+            log(&e.to_string());
+            ("curl not found".to_string(), None)
+        })?;
+    child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| {
+        log(&e.to_string());
+        ("curl input failed".to_string(), None)
+    })?;
+    let out = child.wait_with_output().map_err(|e| {
+        log(&e.to_string());
+        ("curl failed".to_string(), None)
+    })?;
+    if !out.status.success() {
+        log(&format!("{}: {}", out.status, crate::doctor::first_line(&String::from_utf8_lossy(&out.stderr))));
+    }
     match out.status.code() {
         Some(0) => {}
         Some(28) => return Err(("timeout".into(), None)),
         c => return Err((format!("curl exit {}", c.unwrap_or(-1)), None)),
     }
-    parse_response(&String::from_utf8_lossy(&out.stdout)).ok_or(("invalid response".into(), None))
+    parse_response(&String::from_utf8_lossy(&out.stdout)).ok_or_else(|| {
+        log("unreadable response");
+        ("invalid response".into(), None)
+    })
 }
 
 fn parse_response(raw: &str) -> Option<Resp> {
@@ -345,6 +363,9 @@ fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: 
     std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
+    // answer text is user content: the logged command names `--text` but never its value
+    let shown: Vec<&str> = args.iter().enumerate().map(|(i, a)| if i > 0 && args[i - 1] == "--text" { "<text>" } else { a }).collect();
+    let log = |e: &str| eprintln!("{bin} {} failed: {e}", shown.join(" "));
     let mut child = coreq::quiet(Command::new(bin).args(args))
         .current_dir(dir)
         .env_clear()
@@ -353,28 +374,40 @@ fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: 
         .env("TASKQ_INCIDENT_REPORTS", "off")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| fail("taskq binary not found"))?;
-    let mut out = child.stdout.take().unwrap();
-    // read in a thread: a full pipe must not stall the timeout loop
-    let reader = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = std::io::Read::read_to_string(&mut out, &mut s);
-        s
-    });
+        .map_err(|e| {
+            log(&e.to_string());
+            fail("taskq binary not found")
+        })?;
+    // read in threads: a full pipe must not stall the timeout loop
+    let read = |mut p: Box<dyn std::io::Read + Send>| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = p.read_to_string(&mut s);
+            s
+        })
+    };
+    let (reader, errors) = (read(Box::new(child.stdout.take().unwrap())), read(Box::new(child.stderr.take().unwrap())));
     let start = std::time::Instant::now();
     let status = loop {
-        if let Some(s) = child.try_wait().map_err(|_| fail("taskq wait failed"))? {
+        if let Some(s) = child.try_wait().map_err(|e| {
+            log(&e.to_string());
+            fail("taskq wait failed")
+        })? {
             break s;
         }
         if start.elapsed() > std::time::Duration::from_secs(secs) {
             let _ = child.kill();
             let _ = child.wait();
+            log(&format!("timeout after {secs} s"));
             return Err(fail("taskq timeout"));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
+    if !status.success() {
+        log(&format!("{status}: {}", crate::doctor::first_line(&errors.join().unwrap_or_default())));
+    }
     Ok((status, reader.join().unwrap_or_default()))
 }
 
