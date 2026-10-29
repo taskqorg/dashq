@@ -13,6 +13,7 @@ mod enroll;
 mod explain;
 mod export;
 mod findings;
+mod link;
 mod optimization;
 mod page;
 mod policy;
@@ -211,6 +212,7 @@ struct App {
     answers: answer::Answers,
     resources: policy::State,
     export: export::Last,
+    link: link::Relay,
 }
 
 impl App {
@@ -368,7 +370,10 @@ fn handle(app: &App, mut s: TcpStream) {
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.link", x.status)
+    } else if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.pm", x.status)
     } else if let Some(x) = configure::route(&cctx, &req, source::now() as i64) {
@@ -461,7 +466,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -608,7 +613,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() }.doc(1800, json!({}), None);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -691,7 +696,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
             let enroll = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -906,7 +911,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         let missing = route(&app, "GET", "/nope", "", None);
         assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
@@ -937,7 +942,7 @@ mod tests {
         s.grant(&store::Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" }, "ws", "github|1", r#"["taskq-telemetry/1"]"#, b"v1", now).unwrap();
         let payload = r#"{"schema":1,"first":{"seq":1,"id":"a"},"last":{"seq":2,"id":"b"},"rows":2,"bytes":1,"gzip":"x"}"#;
         s.accept(b"v1", &[store::Event { id: "t-1", schema: "taskq-telemetry/1", observed: now, kind: store::Kind::Telemetry, payload }], now).unwrap();
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "block=t-1", Some(store::Scope::All));
         let data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--block=t-1"]).unwrap();
@@ -1007,7 +1012,7 @@ mod tests {
         let mut cfg = load_config_fixture();
         cfg.projects = vec!["taskqorg/dashq".into()];
         cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
-        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
         let mut data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--period=7200"]).unwrap();
@@ -1052,7 +1057,7 @@ mod tests {
         let p = PathBuf::from(std::env::var("DASHQ_LIVE_CONFIG").expect("DASHQ_LIVE_CONFIG"));
         let cfg = load_config(&p).unwrap();
         let enroll = enroll::Enroll::open_with(p.parent().unwrap(), &cfg.public_host, cfg.limits);
-        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=86400&cursor=0", Some(store::Scope::All));
         let (period, filters) = report_query(&["--period=86400", "--cursor=0"]).unwrap();
         fn calm(v: &mut Value) {
@@ -1091,7 +1096,7 @@ mod tests {
         std::fs::write(&path, report.to_string()).unwrap();
         let mut cfg = load_config_fixture();
         cfg.serverq_report = path.to_string_lossy().into();
-        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default() };
+        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let good = app.doc(1800, json!({}), None);
         assert_eq!(good["sources"]["serverq"]["state"], "ok");
         std::fs::write(&path, "invalid").unwrap();
