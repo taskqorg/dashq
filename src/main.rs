@@ -559,14 +559,6 @@ fn doctor_lines(t: &Tool) -> Vec<(bool, String)> {
     lines
 }
 
-/// The doctor of a release just installed by `update`: its own requirement table, not this binary's.
-fn release_doctor(exe: &Path) -> Vec<(bool, String)> {
-    match std::process::Command::new(exe).arg("doctor").output() {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).lines().map(|l| (l.contains(": FAILED "), l.to_string())).collect(),
-        Err(e) => vec![(true, format!("doctor: FAILED `{} doctor`: {e}", exe.display()))],
-    }
-}
-
 /// Install, update and service start report each unmet requirement with its fix; `dashq doctor` stays failed (D2).
 fn report_requirements(lines: &[(bool, String)]) {
     for l in doctor::failures(lines) {
@@ -785,7 +777,7 @@ fn main() {
                 Err(e) => t.die(&e),
             }
             if !check {
-                report_requirements(&applied.map_or_else(|| doctor_lines(&t), |v| release_doctor(&t.release_exe(&v))));
+                report_requirements(&applied.map_or_else(|| doctor_lines(&t), |v| doctor::release(&t.release_exe(&v))));
             }
             // the running service keeps the old release until its unit is reloaded (#83)
             if restart {

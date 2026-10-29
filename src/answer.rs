@@ -392,7 +392,10 @@ fn dispatch(g: &Guarded, op: &AnswerOp, answer: Write<'_>, token: &str) -> Value
     match crate::source::taskq(g.bin, &op.board, token, &args, WRITE_SECS) {
         Ok((_, stdout)) => match serde_json::from_str::<Value>(stdout.trim()) {
             Ok(v) => sanitize(&v, op, g.controls),
-            Err(_) => receipt_of(op, "unknown", "TaskQ returned no readable receipt", "Retry with the same operation ID"),
+            Err(_) => {
+                eprintln!("{} failed: no readable receipt", crate::source::taskq_cmd(g.bin, &args));
+                receipt_of(op, "unknown", "TaskQ returned no readable receipt", "Retry with the same operation ID")
+            }
         },
         Err((why, _)) if ["taskq timeout", "taskq wait failed"].contains(&why.as_str()) => receipt_of(op, "unknown", "TaskQ did not finish; the operation may be written", "Retry with the same operation ID"),
         // never started: nothing was written

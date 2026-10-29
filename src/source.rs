@@ -328,8 +328,13 @@ pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool),
     if !status.success() {
         return Err((format!("taskq exit {}", status.code().unwrap_or(-1)), None));
     }
-    let v: Value = serde_json::from_str(&text).map_err(|_| (String::from("taskq output invalid"), None))?;
+    let log = |e: &str| eprintln!("{} failed: {e}", taskq_cmd(bin, &["status", "--json"]));
+    let v: Value = serde_json::from_str(&text).map_err(|_| {
+        log("output invalid");
+        (String::from("taskq output invalid"), None)
+    })?;
     if v["schema"] != 1 || !v["tasks"].is_array() {
+        log("snapshot schema unsupported");
         return Err(("taskq snapshot schema unsupported".into(), None));
     }
     if v["complete"] != true {
@@ -357,15 +362,19 @@ pub fn taskq(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64) -> Re
     r
 }
 
+/// A taskq command for the service log: answer text is user content, so `--text` shows no value.
+pub fn taskq_cmd(bin: &str, args: &[&str]) -> String {
+    let shown: Vec<&str> = args.iter().enumerate().map(|(i, a)| if i > 0 && args[i - 1] == "--text" { "<text>" } else { a }).collect();
+    format!("{bin} {}", shown.join(" "))
+}
+
 fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: &std::path::Path) -> Result<(std::process::ExitStatus, String), Fail> {
     let fail = |e: &str| (e.to_string(), None);
     let install = dir.join("install");
     std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
-    // answer text is user content: the logged command names `--text` but never its value
-    let shown: Vec<&str> = args.iter().enumerate().map(|(i, a)| if i > 0 && args[i - 1] == "--text" { "<text>" } else { a }).collect();
-    let log = |e: &str| eprintln!("{bin} {} failed: {e}", shown.join(" "));
+    let log = |e: &str| eprintln!("{} failed: {e}", taskq_cmd(bin, args));
     let mut child = coreq::quiet(Command::new(bin).args(args))
         .current_dir(dir)
         .env_clear()
@@ -439,6 +448,11 @@ mod tests {
         assert_eq!(dec("fra%2Fnative").as_deref(), Some("fra/native"));
         assert_eq!(enc("a b/c"), "a%20b%2Fc");
         assert_eq!(iso_secs("2026-1€-13T07:05:39Z"), None, "non-ASCII never panics");
+    }
+
+    #[test]
+    fn logged_taskq_command_hides_answer_text() {
+        assert_eq!(taskq_cmd("tq", &["answer", "5", "--text", "private words", "--json"]), "tq answer 5 --text <text> --json");
     }
 
     #[test]

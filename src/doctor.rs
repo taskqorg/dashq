@@ -56,6 +56,21 @@ pub fn failures(lines: &[(bool, String)]) -> Vec<&str> {
     lines.iter().filter(|(f, _)| *f).map(|(_, l)| l.as_str()).collect()
 }
 
+/// The doctor of a release just installed by `update`: its own requirement table, not this binary's.
+/// A failed run without a FAILED line (no `doctor` command, crash) still fails, naming command, status and error.
+pub fn release(exe: &Path) -> Vec<(bool, String)> {
+    let cmd = format!("{} doctor", exe.display());
+    let o = match coreq::quiet(Command::new(exe).arg("doctor")).stdin(Stdio::null()).output() {
+        Ok(o) => o,
+        Err(e) => return vec![(true, format!("doctor: FAILED `{cmd}`: {e}"))],
+    };
+    let mut lines: Vec<(bool, String)> = String::from_utf8_lossy(&o.stdout).lines().map(|l| (l.contains(": FAILED "), l.to_string())).collect();
+    if !o.status.success() && failures(&lines).is_empty() {
+        lines.push((true, format!("doctor: FAILED `{cmd}`: {}: {}", o.status, first_line(&String::from_utf8_lossy(&o.stderr)))));
+    }
+    lines
+}
+
 fn verdict(r: &Req, found: Result<String, String>) -> (bool, String) {
     match found {
         Ok(v) if !coreq::update::newer(r.min, &v) => (false, format!("{} {v}: ok (minimum {}; {})", r.tool, r.min, r.need)),
@@ -185,6 +200,22 @@ mod tests {
             let chrome = fake(&d, "chrome-old", "Chromium 58.0.3029.110", 0);
             assert!(check(&new, None, Some(&chrome))[2].1.contains("found 58.0.3029.110, minimum 59"));
         }
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    // defect: update read only the new release's stdout, so a doctor that failed without a FAILED line reported nothing
+    #[test]
+    fn release_doctor_fails_when_its_run_fails() {
+        let d = std::env::temp_dir().join(format!("dashq-release-doctor-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let silent = release(&fake(&d, "dashq-old", "usage: dashq serve", 2));
+        let f = failures(&silent);
+        assert!(f.len() == 1 && f[0].contains("dashq-old") && f[0].contains(" doctor`") && f[0].contains('2'), "{silent:?}");
+        let listed = release(&fake(&d, "dashq-new", "curl: FAILED found 7.19.7, minimum 7.20.2", 1));
+        assert_eq!(failures(&listed), ["curl: FAILED found 7.19.7, minimum 7.20.2"], "a listed failure needs no extra line");
+        assert!(failures(&release(&fake(&d, "dashq-ok", "curl 8.9.1: ok", 0))).is_empty());
+        assert!(release(&d.join("absent-dashq"))[0].1.contains("absent-dashq doctor`"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
