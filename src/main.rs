@@ -8,6 +8,7 @@ mod pm;
 mod clients;
 mod configure;
 mod data;
+mod doctor;
 mod enroll;
 mod explain;
 mod export;
@@ -33,7 +34,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -437,6 +438,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     // loopback only (D2): the address is a constant, never configured
     let l = TcpListener::bind(ADDR).unwrap_or_else(|e| t.die(&format!("bind {ADDR}: {e}")));
     eprintln!("dashq {} listening on {ADDR}", t.version);
+    report_requirements(&doctor::check(Path::new("curl"), cfg.taskq_bin.as_deref().map(Path::new), chrome().as_deref()));
     if service {
         let healthy = t.install.join("releases").join(t.version).join("healthy");
         std::thread::spawn(move || {
@@ -546,6 +548,24 @@ fn chrome() -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// D2 doctor: this release's host tool requirements; `taskq.binary` from the config when one loads.
+fn doctor_lines(t: &Tool) -> Vec<(bool, String)> {
+    let p = config_path(t);
+    let cfg = if p.exists() { load_config(&p).map(|c| c.taskq_bin) } else { Ok(None) };
+    let mut lines = doctor::check(Path::new("curl"), cfg.as_ref().ok().and_then(|b| b.as_deref()).map(Path::new), chrome().as_deref());
+    if let Err(e) = cfg {
+        lines[1] = (true, format!("taskq: FAILED not checked, {e}; fix: correct the config"));
+    }
+    lines
+}
+
+/// Install, update and service start report each unmet requirement with its fix; `dashq doctor` stays failed (D2).
+fn report_requirements(lines: &[(bool, String)]) {
+    for l in doctor::failures(lines) {
+        eprintln!("requirement: {l}");
+    }
+}
+
 fn snapshot(dir: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("snapshot: {e}"))?;
     let dir = dir.canonicalize().map_err(|e| format!("snapshot: {e}"))?;
@@ -566,7 +586,7 @@ fn snapshot(dir: &std::path::Path) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&profile);
     let out = out.map_err(|e| format!("snapshot: run {}: {e}", c.display()))?;
     if !png.is_file() {
-        return Err(format!("snapshot: no page.png ({})", out.status));
+        return Err(format!("snapshot: no page.png (`{} --headless --screenshot`: {}: {})", c.display(), out.status, doctor::first_line(&String::from_utf8_lossy(&out.stderr))));
     }
     println!("snapshot: {} {}", html.display(), png.display());
     Ok(())
@@ -730,6 +750,16 @@ fn main() {
             println!("{}", profile::report(text.as_deref(), source::now(), window));
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
+        ["doctor"] => {
+            let lines = doctor_lines(&t);
+            for (_, l) in &lines {
+                println!("{l}");
+            }
+            let failed = doctor::failures(&lines).len();
+            if failed > 0 {
+                t.die(&format!("doctor: {failed} requirement(s) failed"));
+            }
+        }
         ["--snapshot", dir] => snapshot(std::path::Path::new(dir)).unwrap_or_else(|e| t.die(&e)),
         ["update", rest @ ..] if rest.iter().all(|x| *x == "--check") => {
             let check = !rest.is_empty();
@@ -740,10 +770,14 @@ fn main() {
             profile::record(if check { "update.check" } else { "update" }, t0, r.as_ref().err().map(|_| "failed"));
             let u = coreq::service::unit(&t, std::path::Path::new("."), "dashq");
             let restart = restarts(&r, check, u.path.exists());
+            let applied = r.as_ref().ok().cloned().flatten().filter(|_| !check);
             match r {
                 Ok(Some(v)) => println!("update: {v}"),
                 Ok(None) => println!("update: up to date"),
                 Err(e) => t.die(&e),
+            }
+            if !check {
+                report_requirements(&applied.map_or_else(|| doctor_lines(&t), |v| doctor::release(&t.release_exe(&v))));
             }
             // the running service keeps the old release until its unit is reloaded (#83)
             if restart {
@@ -764,6 +798,9 @@ fn main() {
             };
             r.unwrap_or_else(|e| t.die(&e));
             println!("service {op}: ok ({})", u.path.display());
+            if *op == "install" {
+                report_requirements(&doctor_lines(&t));
+            }
         }
         ["version"] => println!("dashq {}", t.version),
         _ => t.die(USAGE),

@@ -79,20 +79,38 @@ pub fn send(url: &str, headers: &[String], body: Option<&str>) -> Result<Resp, F
     }
     // plain HTTP only for in-process test receivers; production config accepts only https:// bases
     let proto = if cfg!(test) && url.starts_with("http://127.0.0.1:") { "=http" } else { "=https" };
+    // URL, headers and body go on stdin, so the logged command never holds a secret
+    let cmd = format!("curl -sS -i --max-time 10 --proto {proto} -K -");
+    let log = |e: &str| eprintln!("{cmd} failed: {e}");
     let mut child = coreq::quiet(Command::new("curl").args(["-sS", "-i", "--max-time", "10", "--proto", proto, "-K", "-"]))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| ("curl not found".to_string(), None))?;
-    child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|_| ("curl input failed".to_string(), None))?;
-    let out = child.wait_with_output().map_err(|_| ("curl failed".to_string(), None))?;
+        .map_err(|e| {
+            log(&e.to_string());
+            ("curl not found".to_string(), None)
+        })?;
+    child.stdin.take().unwrap().write_all(cfg.as_bytes()).map_err(|e| {
+        log(&e.to_string());
+        ("curl input failed".to_string(), None)
+    })?;
+    let out = child.wait_with_output().map_err(|e| {
+        log(&e.to_string());
+        ("curl failed".to_string(), None)
+    })?;
+    if !out.status.success() {
+        log(&format!("{}: {}", out.status, crate::doctor::first_line(&String::from_utf8_lossy(&out.stderr))));
+    }
     match out.status.code() {
         Some(0) => {}
         Some(28) => return Err(("timeout".into(), None)),
         c => return Err((format!("curl exit {}", c.unwrap_or(-1)), None)),
     }
-    parse_response(&String::from_utf8_lossy(&out.stdout)).ok_or(("invalid response".into(), None))
+    parse_response(&String::from_utf8_lossy(&out.stdout)).ok_or_else(|| {
+        log("unreadable response");
+        ("invalid response".into(), None)
+    })
 }
 
 fn parse_response(raw: &str) -> Option<Resp> {
@@ -310,8 +328,13 @@ pub fn taskq_status(bin: &str, repo: &str, token: &str) -> Result<(Value, bool),
     if !status.success() {
         return Err((format!("taskq exit {}", status.code().unwrap_or(-1)), None));
     }
-    let v: Value = serde_json::from_str(&text).map_err(|_| (String::from("taskq output invalid"), None))?;
+    let log = |e: &str| eprintln!("{} failed: {e}", taskq_cmd(bin, &["status", "--json"]));
+    let v: Value = serde_json::from_str(&text).map_err(|_| {
+        log("output invalid");
+        (String::from("taskq output invalid"), None)
+    })?;
     if v["schema"] != 1 || !v["tasks"].is_array() {
+        log("snapshot schema unsupported");
         return Err(("taskq snapshot schema unsupported".into(), None));
     }
     if v["complete"] != true {
@@ -339,12 +362,19 @@ pub fn taskq(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64) -> Re
     r
 }
 
+/// A taskq command for the service log: answer text is user content, so `--text` shows no value.
+pub fn taskq_cmd(bin: &str, args: &[&str]) -> String {
+    let shown: Vec<&str> = args.iter().enumerate().map(|(i, a)| if i > 0 && args[i - 1] == "--text" { "<text>" } else { a }).collect();
+    format!("{bin} {}", shown.join(" "))
+}
+
 fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: &std::path::Path) -> Result<(std::process::ExitStatus, String), Fail> {
     let fail = |e: &str| (e.to_string(), None);
     let install = dir.join("install");
     std::fs::create_dir(&install).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(install.join("token"), token).map_err(|_| fail("scratch folder unwritable"))?;
     std::fs::write(dir.join("taskq.json"), json!({"board": "github", "repo": repo}).to_string()).map_err(|_| fail("scratch folder unwritable"))?;
+    let log = |e: &str| eprintln!("{} failed: {e}", taskq_cmd(bin, args));
     let mut child = coreq::quiet(Command::new(bin).args(args))
         .current_dir(dir)
         .env_clear()
@@ -353,28 +383,40 @@ fn taskq_run(bin: &str, repo: &str, token: &str, args: &[&str], secs: u64, dir: 
         .env("TASKQ_INCIDENT_REPORTS", "off")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| fail("taskq binary not found"))?;
-    let mut out = child.stdout.take().unwrap();
-    // read in a thread: a full pipe must not stall the timeout loop
-    let reader = std::thread::spawn(move || {
-        let mut s = String::new();
-        let _ = std::io::Read::read_to_string(&mut out, &mut s);
-        s
-    });
+        .map_err(|e| {
+            log(&e.to_string());
+            fail("taskq binary not found")
+        })?;
+    // read in threads: a full pipe must not stall the timeout loop
+    let read = |mut p: Box<dyn std::io::Read + Send>| {
+        std::thread::spawn(move || {
+            let mut s = String::new();
+            let _ = p.read_to_string(&mut s);
+            s
+        })
+    };
+    let (reader, errors) = (read(Box::new(child.stdout.take().unwrap())), read(Box::new(child.stderr.take().unwrap())));
     let start = std::time::Instant::now();
     let status = loop {
-        if let Some(s) = child.try_wait().map_err(|_| fail("taskq wait failed"))? {
+        if let Some(s) = child.try_wait().map_err(|e| {
+            log(&e.to_string());
+            fail("taskq wait failed")
+        })? {
             break s;
         }
         if start.elapsed() > std::time::Duration::from_secs(secs) {
             let _ = child.kill();
             let _ = child.wait();
+            log(&format!("timeout after {secs} s"));
             return Err(fail("taskq timeout"));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     };
+    if !status.success() {
+        log(&format!("{status}: {}", crate::doctor::first_line(&errors.join().unwrap_or_default())));
+    }
     Ok((status, reader.join().unwrap_or_default()))
 }
 
@@ -406,6 +448,11 @@ mod tests {
         assert_eq!(dec("fra%2Fnative").as_deref(), Some("fra/native"));
         assert_eq!(enc("a b/c"), "a%20b%2Fc");
         assert_eq!(iso_secs("2026-1€-13T07:05:39Z"), None, "non-ASCII never panics");
+    }
+
+    #[test]
+    fn logged_taskq_command_hides_answer_text() {
+        assert_eq!(taskq_cmd("tq", &["answer", "5", "--text", "private words", "--json"]), "tq answer 5 --text <text> --json");
     }
 
     #[test]
