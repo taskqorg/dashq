@@ -1,6 +1,6 @@
 # Task controls
 
-DashQ embeds TaskQ v4.6.30's `taskq.task-controls/1` renderer unchanged and transports only its start, stop, later and retry operations. [D13](../../dashq.md#d13-taskq-answer-card) authorizes this narrow exception to D1/D2/D7. Close remains a board link; answers and resource policies retain their existing authority. #186 also renders these operations inside the unchanged v4.6.34 workspace; this route keeps its fixed v4.6.30 command fixtures and separate authority.
+DashQ embeds TaskQ v4.6.30's `taskq.task-controls/1` renderer unchanged and transports only its start, stop, later and retry operations. [D13](../../dashq.md#d13-taskq-answers-task-controls-and-pm-requests) authorizes this narrow exception to R3/D2/D7. Close remains a board link; answers and resource policies retain their existing authority. #186 also renders these operations inside the unchanged v4.6.34 workspace; this route keeps its fixed v4.6.30 command fixtures and separate authority.
 
 ## Authority and route
 
