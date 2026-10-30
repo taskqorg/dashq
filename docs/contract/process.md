@@ -1,6 +1,11 @@
 # Process detail
 
-Linked detail of [dashq.md](../../dashq.md) D2 (Process), D4.2 (snapshot adapter run) and D20 (Profiling). The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them.
+Linked detail of [dashq.md](../../dashq.md) D2 (Process), D4.2 (snapshot adapter run), D12 (workflow permissions) and D20 (Profiling). The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them.
+
+## Commands
+
+- `dashq profile [--window=S]` prints the profile report (D20); the default window is 86400 s.
+- `dashq doctor` checks the [host requirements](#host-requirements); `dashq --snapshot DIR` writes the fixture page for review ([snapshot command](#snapshot-command)).
 
 ## Config
 
@@ -49,11 +54,13 @@ Source rule: [specq host requirements](https://github.com/taskqorg/specq/blob/ma
 - Each artifact passes `selftest` with `DASHQ_SELFTEST_OFFLINE=1` before publishing; a failure publishes nothing.
 - Every pull request runs the same two builds and selftests without publishing; `main` requires them with `tests`.
 - Only owners push tags. Installed services take a release on their own (above), other hosts with `dashq update`; rollback is coreq `previous`.
+- Every workflow declares top-level `permissions: contents: read`; a publishing job adds only what it writes (`release.yml` `publish`: `contents: write`).
 
 ## Profiling
 
 Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md).
 
+- Counters are always on in `serve`, `service run`, `report` and `update`: one record per finished operation `{at, op, ms, outcome, error}`. `selftest` and tests write nothing.
 - Measured operations, p95 budget and error budget (initial values; revise from the first production report):
   - `http.page` and `http.data` 3 s, 1 %; `http.enroll` (D11 routes) 500 ms, 1 %; `http.answer` and `http.control` 15 s, 5 %.
   - `http.resources` (D14 routes), `http.configure` (D16) and `http.pm` (D13 PM routes) 500 ms, 1 %; `http.link` (D25 routes, receive waits up to 25 s) 30 s, 1 %.

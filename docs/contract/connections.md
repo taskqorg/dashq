@@ -1,6 +1,13 @@
 # Connections detail
 
-Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Independent product connections), D16 (AgentQ operations) and D25 (Host link relay). The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them. [Enrollment C1–C7](../design/enrollment.md) and [connections L1–L4](../design/connections.md) own the accepted design.
+Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Independent product connections: registry, scope and lifecycle), D16 (AgentQ operations) and D25 (Host link relay). The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them. [Enrollment C1–C7](../design/enrollment.md) and [connections L1–L4](../design/connections.md) own the accepted design.
+
+## Registry and scope
+
+- The enrollment registry supplies expected installations even without recent events.
+- Requests to the public name see their verified subject's workspaces: administrator, all installations there; member, those it approved.
+- One projection function serves `/data`, `dashq report` and a 2 s service pass.
+- Data rows keep the workspace of the grant that sent them; after revoke a new approval may pick another workspace, which starts empty.
 
 ## Enrolled ServerQ reports
 
@@ -126,6 +133,7 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 
 Source: coreq v0.11.0 [operations](https://github.com/taskqorg/coreq/blob/v0.11.0/docs/design/enrollment.md).
 
+- Release of the D16 adapter stays gated by real host and consumer qualification. `/agentq/configure` is its [browser adapter](../design/agentq-settings.md#browser-adapter-63).
 - `/machine/connect/device` may request `capabilities`: only AgentQ's `agentq.configure`. Malformed, duplicate or another product's is `invalid_request`.
 - The approval page lists each capability as a separate unticked effect. Approving the connection alone grants none; the grant and token reply keep only the ticked subset. Observation grants stay read-only.
 - Queued operations ([delivery](../design/agentq-settings.md#delivery-96)): store, `POST /machine/operations`, `/machine/operations/result`, internal typed enqueue and readback; browser review/apply is the D16 adapter.
@@ -136,6 +144,9 @@ Source: coreq v0.11.0 [operations](https://github.com/taskqorg/coreq/blob/v0.11.
 
 ## Host link relay
 
+- Routes: `POST /machine/link/v1/send` `{protocol 1, to, id, body}` and `POST /machine/link/v1/recv` `{protocol 1, wait?}` behind the existing `/machine/*` exemption, authenticated by the enrollment credential.
+- Caller and receiver must be TaskQ installations with an acknowledged, unrevoked grant in the same workspace; else 401 `invalid_credential`/`revoked`, 403 `not_active` or `scope` (unknown, disconnected and foreign receivers answer the same).
+- Per installation 5 requests/s, burst 20, apart from the C5 ingest budget.
 - Send: `to` and `id` are short identifiers; `body` is standard padded base64 of at most 256 KiB decoded, else 413 `too_large`. One pending message per (from, to, id); a resend replaces it.
 - Receive returns `{messages: [{from, id, body}]}` addressed to the caller, each taken once, waiting up to `wait` s (default and most 25, inside Cloudflare's 100 s); empty on timeout.
 - A newer receive of the same installation ends the older wait empty, so one host holds one thread.
