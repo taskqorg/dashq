@@ -13,6 +13,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # specq engineering/contracts.md: contract shape and budget lint at a pinned specq commit.
+      - uses: actions/checkout@v4
+        with:
+          repository: taskqorg/specq
+          ref: 7e9adf57287553176d8b3be61c2b22565543dc51
+          path: .specq
+      - run: python3 .specq/engineering/scripts/contract_lint.py dashq.md
       - uses: actions/setup-node@v4
         with:
           node-version: 22

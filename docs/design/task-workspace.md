@@ -1,6 +1,6 @@
 # TaskQ workspace and PM requests
 
-[D13](../../dashq.md#d13-taskq-answer-card), #186, adopts the unchanged TaskQ v4.6.34 workspace, detail popover, menus and PM composer. [workspace-provenance.json](../../assets/taskq/workspace-provenance.json) pins the eight release assets against [SHA256SUMS](https://github.com/taskqorg/taskq/releases/download/v4.6.34/SHA256SUMS). [TaskQ workspace](https://github.com/taskqorg/taskq/blob/v4.6.34/docs/design/task-workspace.md) and [PM wire](https://github.com/taskqorg/taskq/blob/v4.6.34/docs/design/pm-requests.md) own their APIs. The older project/answer/control and resource assets keep their separate pins and conformance checks.
+[D13](../../dashq.md#d13-taskq-answers-task-controls-and-pm-requests), #186, adopts the unchanged TaskQ v4.6.34 workspace, detail popover, menus and PM composer. [workspace-provenance.json](../../assets/taskq/workspace-provenance.json) pins the eight release assets against [SHA256SUMS](https://github.com/taskqorg/taskq/releases/download/v4.6.34/SHA256SUMS). [TaskQ workspace](https://github.com/taskqorg/taskq/blob/v4.6.34/docs/design/task-workspace.md) and [PM wire](https://github.com/taskqorg/taskq/blob/v4.6.34/docs/design/pm-requests.md) own their APIs. The older project/answer/control and resource assets keep their separate pins and conformance checks.
 
 ## Workspace adapter
 

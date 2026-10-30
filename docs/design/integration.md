@@ -1,6 +1,6 @@
 # Independent products, one dashboard
 
-Owner requirement: TaskQ, AgentQ and ServerQ remain independently installable and useful. DashQ integrates whichever products the owner connects. The accepted [enrollment contract](enrollment.md) and [D11](../../dashq.md#d11-independent-product-connections) amend D1–D8. This inventory supplies context; enrollment owns the connection lifecycle.
+Owner requirement: TaskQ, AgentQ and ServerQ remain independently installable and useful. DashQ integrates whichever products the owner connects. The accepted [enrollment contract](enrollment.md) and [D11](../../dashq.md#d11-independent-product-connections) amend R1–R9 and D2–D8. This inventory supplies context; enrollment owns the connection lifecycle.
 
 ## Existing common ground
 

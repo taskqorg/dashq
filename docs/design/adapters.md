@@ -1,6 +1,6 @@
 # Service adapters and owner answers
 
-Design proposal for [dashq #24](https://github.com/taskqorg/dashq/issues/24), for owner review. It does not amend [D1–D7](../../dashq.md), add a write endpoint, change auth, tokens or deployment. Shared contract: [coreq dashboard contract](https://github.com/taskqorg/coreq/blob/056df1b466c21c7e30b974df83107a7eb3613595/docs/design/dashboard-contract.md) (coreq #22). Findings: [serverq dashboard findings](https://github.com/taskqorg/serverq/blob/74a7e97c3d695ce8eebf694143daf2e0ce4f66e4/docs/design/dashboard-findings.md) (serverq #21). Connection: [enrollment C1–C7](enrollment.md). Product boundaries: [integration](integration.md).
+Design proposal for [dashq #24](https://github.com/taskqorg/dashq/issues/24), for owner review. It does not amend [R1–R9 and D2–D7](../../dashq.md), add a write endpoint, change auth, tokens or deployment. Shared contract: [coreq dashboard contract](https://github.com/taskqorg/coreq/blob/056df1b466c21c7e30b974df83107a7eb3613595/docs/design/dashboard-contract.md) (coreq #22). Findings: [serverq dashboard findings](https://github.com/taskqorg/serverq/blob/74a7e97c3d695ce8eebf694143daf2e0ce4f66e4/docs/design/dashboard-findings.md) (serverq #21). Connection: [enrollment C1–C7](enrollment.md). Product boundaries: [integration](integration.md).
 
 Reviewed revisions (contract and source reading, not deployment evidence): taskq [`21bf7e5`](https://github.com/taskqorg/taskq/tree/21bf7e52f88f85916bc195b78a4786fa7aff64a5), agentq [`17d6a06`](https://github.com/taskqorg/agentq/tree/17d6a06b93e8f784ab18c139938be5a510209c3a), serverq [`74a7e97`](https://github.com/taskqorg/serverq/tree/74a7e97c3d695ce8eebf694143daf2e0ce4f66e4), coreq [`056df1b`](https://github.com/taskqorg/coreq/tree/056df1b466c21c7e30b974df83107a7eb3613595), specq [`4a1d088`](https://github.com/taskqorg/specq/tree/4a1d088b1bcd955df43157e3f7f9e6e8fc19cd7b), dashq [`f9f8413`](https://github.com/taskqorg/dashq/tree/f9f84139a944d600d8f3b7713842d61f660b357d).
 
@@ -68,7 +68,7 @@ Question shape per coreq § 3: `{id: issue url, revision, text, choices[{k, text
 
 ## S4. Accepted answer action
 
-The owner accepted reuse of the TaskQ card and ordinary real answers. [D13](../../dashq.md#d13-taskq-answer-card) and [answers](answers.md) now own this contract; the former S4 proposal is superseded. Shared presentation belongs to TaskQ. Observation enrollment remains separate. Other proposals on this research page are not implicitly approved.
+The owner accepted reuse of the TaskQ card and ordinary real answers. [D13](../../dashq.md#d13-taskq-answers-task-controls-and-pm-requests) and [answers](answers.md) now own this contract; the former S4 proposal is superseded. Shared presentation belongs to TaskQ. Observation enrollment remains separate. Other proposals on this research page are not implicitly approved.
 
 ## S5. Consequential operations (A4)
 
@@ -109,6 +109,6 @@ Cross-repository approvals (coreq decisions 1, 2, 4; serverq follow-ups) gate th
 
 1. dashq: `taskq-snapshot` adapter (R1), questions and failure reasons in `/data` and Boards, no answer control. Depends on #21.
 2. dashq: `serverq-findings` adapter over the local projection and the owner mapping. After serverq P2.
-3. dashq: answer route per S4, after D1–D4/D7 approval. Depends on task 1.
+3. dashq: answer route per S4, after R1–R9, D2–D4/D7 approval. Depends on task 1.
 
 Remaining deployment input: the authorized forge account and concrete minimum supported scope. S4 is accepted through D13/answers.md; R1/R2 source qualification remains separate.

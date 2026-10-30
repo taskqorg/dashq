@@ -1,6 +1,6 @@
 # Connect independent products
 
-Accepted implementation contract. Implements AgentQ PRODUCT R5/R9/R10 and amends dashq D1–D8 through D11. Follows [shared connection rules](https://github.com/taskqorg/specq/blob/main/engineering/product-connections.md). Supersedes the withdrawn source-selection proposal. Acceptance is not evidence that the feature is shipped; deployment changes require the scoped release task.
+Accepted implementation contract. Implements AgentQ PRODUCT R5/R9/R10 and amends dashq R1–R9 and D2–D8 through D11. Follows [shared connection rules](https://github.com/taskqorg/specq/blob/main/engineering/product-connections.md). Supersedes the withdrawn source-selection proposal. Acceptance is not evidence that the feature is shipped; deployment changes require the scoped release task.
 
 ## C1. User outcome
 
@@ -112,7 +112,7 @@ Chain tests cover enrollment → commit → projection → receipt and revoke �
 
 Canonical adoption boundaries:
 
-- DashQ D1–D3: narrow enrollment/ingestion writes, SQLite, actor authorization and machine routes; retain loopback listener and guarded browser data. D4/D6/D7: push source projection, durable expected installations and independent optional sources. D8: connection UI and scoped views.
+- DashQ R1–R9, D2–D3: narrow enrollment/ingestion writes, SQLite, actor authorization and machine routes; retain loopback listener and guarded browser data. D4/D6/D7: push source projection, durable expected installations and independent optional sources. D8: connection UI and scoped views.
 - AgentQ §§1/5/6/8 and INSTALL: real enroll/status/disconnect workflow, protected grant, immediate snapshot, destination ownership and recovery. Replace the ambiguous GitHub-device-flow wording with approval through the actual DashQ identity provider; preserve standalone mode.
 - coreq: shared client/state/storage API and two-consumer conformance fixtures; no product-specific state machine, telemetry catalog or additional process.
 - ServerQ/TaskQ: subsequent adoption tasks add the same enrollment client to existing services and their own allowlisted snapshot adapters. Queue actions remain a separately authorized contract.
