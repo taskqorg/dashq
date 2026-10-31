@@ -111,7 +111,7 @@ D10 detail.
 
 - Project/answer blocks and task controls: TaskQ v4.6.30, commit 09cb0d7db35d0de51bef83d9fa3ec803eafad42d, [shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.30/docs/design/shared-blocks.md), `assets/taskq/provenance.json`.
 - Resources: TaskQ v4.6.25, `assets/taskq/sources.json`.
-- Status snapshot fixture and schema (states, choices, telemetry codes): `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
+- Status snapshot fixture and schema (states, choices, telemetry codes): TaskQ v4.6.53, `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
 - Full workspace, detail, menus and PM composer: TaskQ v4.6.34, `assets/taskq/workspace-provenance.json`; unchanged released components through the [adapter](../design/task-workspace.md).
 
 ## Redesign target decisions
