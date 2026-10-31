@@ -2,7 +2,7 @@
 // twice, a stale draft sends to a new question, or a consequential choice is answerable outside the board.
 // Run: node tests/answer-card.test.cjs. Consumers (tray, DashQ) run the same replay over the same fixture file.
 const fs = require('node:fs'), crypto = require('node:crypto'), assert = require('node:assert/strict');
-// Published v4.6.30 assets are browser IIFEs; exercise the unmodified globals in this runner.
+// Published v4.6.52 assets are browser IIFEs; exercise the unmodified globals in this runner.
 const vm = require('node:vm');
 const bundle = (file, name) => vm.runInThisContext(fs.readFileSync('assets/taskq/' + file, 'utf8') + '\n;' + name, {filename: file});
 const card = bundle('answer-card.js', 'TaskqAnswerCard');
@@ -33,15 +33,15 @@ for (const [name, hash] of Object.entries(pin.files))
 console.log('PASS immutable asset checksums');
 // Chain: fixture /data boards -> boardProjects -> pinned TaskQ counters. Risk: DashQ loses TaskQ order, shows a zero,
 // reports an unread board as 0, or makes Closed loud; the old server renderer checked these before #43.
-const blocks = bundle('project-blocks.js', 'TaskqProjectBlocks'), {boardProjects} = require('../assets/boards.js');
+const blocks = bundle('project-blocks.js', 'TaskqProjectBlocks'), {boardProjects, boardCounts, TASKQ_STATES} = require('../assets/boards.js');
 const caps = html => [...html.matchAll(/class="([^"]*)" data-tqp="tasks"[^>]*data-state="(\w+)" aria-label="([^"]*)"/g)].map(m => [m[2], m[1], m[3]]);
 const [taskq, agentq] = boardProjects(require('../fixture/data.json').boards);
 assert.deepEqual(caps(blocks.summary(taskq)).map(c => c[2]), ['Doing', 'Review', 'Ask', 'Failed', 'Ready', 'Blocked'].map(s => 'taskqorg/taskq · ' + s + ': ' + (s === 'Closed' ? 'unknown' : 1)));
 assert(blocks.summary(taskq).includes('href="https://github.com/taskqorg/taskq/issues"') && blocks.summary(taskq).includes('data-icon="github"'), 'board link and provider icon');
-assert.deepEqual(caps(blocks.summary(agentq)).map(c => c[2].split(' · ')[1]), blocks.states.map(([, n]) => n + ': unknown'), 'unread board: every state unknown, none 0');
-const all = blocks.aggregate([taskq, agentq]);
+assert.deepEqual(caps(blocks.summary(agentq)).map(c => c[2].split(' · ')[1]), TASKQ_STATES.map(([, n]) => n + ': unknown'), 'unread board: every state unknown, none 0');
+const all = blocks.aggregate(boardCounts([taskq, agentq]));
 assert(all.includes('Partial: taskqorg/agentq') && caps(all).every(c => c[2].endsWith('unknown')), 'aggregate of a partial set is unknown');
-const done = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'doing')};
+const doing = {...taskq, closed: 7, tasks: taskq.tasks.filter(t => t.state === 'doing')}, done = {...doing, ...boardCounts([doing])};
 assert.deepEqual(caps(blocks.summary(done)).map(c => c.slice(0, 2)), [['doing', 'good']], 'zero hidden; Closed stays on the board');
 console.log('PASS counters: order, zero hidden, unknown, Closed quiet, partial aggregate');
 
@@ -55,9 +55,12 @@ assert.equal(scoped.closed,null); assert.equal(scoped.complete,false,'host assig
 console.log('PASS host scope: canonical identity, fresh attempts, no shared-queue multiplication');
 
 // B4: released long-title/count fixtures reach the same renderer as dashboard rows; catch dropped identity or counts.
+// Since TaskQ #1592 the caller supplies counts; DashQ must keep the released strip order and names.
 const shared = require('../assets/taskq/project-blocks.json');
+assert.deepEqual(shared.project.counts.map(c => [c.state, c.name]), TASKQ_STATES, 'released counter order and names');
 for (const count of shared.counts) {
-  const project = {...shared.project, tasks: Array.from({length:count}, (_,i)=>({n:i+1,state:'held',revision:1}))};
+  const rows = {...shared.project, tasks: Array.from({length:count}, (_,i)=>({n:i+1,state:'held',revision:1}))};
+  const project = {...rows, ...boardCounts([rows])};
   assert(blocks.summary(project).includes(project.name), 'released project identity');
   assert.equal(caps(blocks.summary(project)).length, count === 0 ? 0 : 1, 'released count ' + count);
 }
@@ -72,8 +75,8 @@ for (const c of cf.cases) {
   const html = controls.render(row, {key:'board/task',url:'https://example.invalid/7'});
   const offers = [...html.matchAll(/data-control="([^"]+)"/g)].map(m=>m[1]);
   assert.deepEqual(offers, row.controls);
-  assert(html.includes('Close on board'));
+  assert(html.includes('aria-label="Close #' + row.n + ' on the board"'), 'Close stays a board link');
 }
 assert.equal(controls.render({n:7,revision:1,controls:['unknown','close']}), '');
 assert.equal(controls.VERSION, cf.version);
-console.log('PASS released task controls: offers, op identity, Close on board');
+console.log('PASS released task controls: offers, op identity, Close on the board');

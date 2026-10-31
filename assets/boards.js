@@ -3,10 +3,32 @@ const boardCards = new Map();
 let boardFilter = null;
 const boardId = name => 'board-' + encodeURIComponent(name);
 const questionId = (name, n) => boardId(name) + '-q-' + n;
+// TaskQ strip order and names; since TaskQ #1592 project-blocks renders `counts`, `partial` and `open` from its caller.
+const TASKQ_STATES = [['doing', 'Doing'], ['review', 'Review'], ['ask', 'Ask'], ['failed', 'Failed'], ['ready', 'Ready'], ['waiting', 'Blocked'], ['later', 'Later'], ['held', 'Held']];
+const stateName = s => TASKQ_STATES.find(([id]) => id === s)?.[1] ?? (s === 'closed' ? 'Closed' : s);
+// Counters over observed rows: an incomplete board, or one row seen with two states, makes the set partial (`?`).
+function boardCounts(projects) {
+  const rows = new Map(), partial = new Set();
+  for (const p of projects) {
+    if (p.complete !== true) partial.add(p.name);
+    for (const row of p.tasks) {
+      const key = String(p.board.url).replace(/\/$/, '') + '/' + row.n, prev = rows.get(key);
+      if (prev && (prev.state !== row.state || prev.revision !== row.revision)) partial.add(p.name);
+      rows.set(key, row);
+    }
+  }
+  const all = [...rows.values()], unknown = partial.size > 0;
+  return {counts: TASKQ_STATES.map(([state, name]) => ({state, name, n: unknown ? null : all.filter(r => r.state === state).length})),
+    partial: [...partial], open: unknown ? null : all.filter(r => r.state !== 'closed').length};
+}
 // DashQ board rows -> TaskQ project model; a failed or incomplete read is partial, so counters read `?`.
-const boardProjects = (boards, host = null) => boards.map(b => ({id: b.project, name: b.project, board: {kind: 'github', url: b.url},
-  complete: !host && b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: host ? null : b.counts.closed,
-  tasks: (b.tasks || []).filter(t => !host || b.attempts?.some(a => a.current && a.task === t.n && a.host_id?.toLowerCase() === host.toLowerCase()))}));
+const boardProjects = (boards, host = null) => boards.map(b => {
+  const p = {id: b.project, name: b.project, board: {kind: 'github', url: b.url},
+    complete: !host && b.source.state === 'ok' && !b.source.incomplete && Array.isArray(b.tasks), closed: host ? null : b.counts.closed,
+    tasks: (b.tasks || []).filter(t => !host || b.attempts?.some(a => a.current && a.task === t.n && a.host_id?.toLowerCase() === host.toLowerCase()))
+      .map(t => ({...t, state_name: stateName(t.state)}))};
+  return {...p, ...boardCounts([p])};
+});
 // answers.md Route (#41): the server decides per board and account. GET /answer?board= returns a CSRF token when
 // this account may answer there, else the reason (503 while the deployment has no `answer` config). Read once per page.
 const answerAccess = new Map();
@@ -94,7 +116,7 @@ function renderTaskControls(el, board, row, source) {
   const field = document.createElement('fieldset');
   field.setAttribute('aria-label', 'Task controls #' + row.n);
   field.setAttribute('aria-describedby', id + '-reason');
-  field.innerHTML = TaskqTaskControls.render({...row, controls: Array.isArray(row.controls) ? row.controls : []}, {key: id, url: row.url});
+  field.innerHTML = TaskqTaskControls.render({...row, controls: Array.isArray(row.controls) ? row.controls : []}, {key: id, url: row.url, board: 'github'});
   const reason = document.createElement('p'); reason.id = id + '-reason'; reason.dataset.controlReason = ''; reason.className = 'detail';
   const status = document.createElement('p'); status.setAttribute('role', 'status');
   const retry = document.createElement('button'); retry.type = 'button'; retry.dataset.controlRetry = id; retry.textContent = 'Check delivery';
@@ -125,7 +147,7 @@ function renderBoards() {
   const shownBefore = new Set([...blocks.children].map(e => e.id));
   const kept = new Set(), fragments = document.createDocumentFragment();
   const aggregate = document.createElement('div');
-  aggregate.innerHTML = TaskqProjectBlocks.aggregate(projects);
+  aggregate.innerHTML = TaskqProjectBlocks.aggregate(boardCounts(projects));
   fragments.append(aggregate);
   aggregate.id = 'boards-all';
   if (host) {
@@ -155,7 +177,7 @@ function renderBoards() {
       const last = document.createElement('details');
       last.id = wrap.id + '-last-known';
       last.open = open.get(last.id) || false;
-      last.innerHTML = '<summary>Last-known counts · not current</summary>' + TaskqProjectBlocks.counters(b.counts, p.id, p.name + ' last known');
+      last.innerHTML = '<summary>Last-known counts · not current</summary>' + TaskqProjectBlocks.counters(TASKQ_STATES.map(([state, name]) => ({state, name, n: b.counts[state] ?? null})), p.id, p.name + ' last known');
       wrap.append(last);
     }
     const tasks = document.createElement('details');
@@ -241,7 +263,7 @@ function renderBoards() {
   root.querySelector('.board-fallback').hidden = true;
   updateTaskControls();
 }
-if (typeof module === 'object') module.exports = {boardProjects};
+if (typeof module === 'object') module.exports = {boardProjects, boardCounts, TASKQ_STATES};
 else document.addEventListener('click', e => {
   const action = e.target.closest('[data-a="control"],[data-control-retry]');
   if (action) {

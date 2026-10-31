@@ -186,8 +186,19 @@ var TaskqResources = (() => {
     "src/ui-runtime.js"(exports, module) {
       "use strict";
       var core = require_runtime();
-      var execution = core.shared();
+      var shared = core.shared();
       var events = /* @__PURE__ */ new WeakMap();
+      var execution = { ...shared, module(name, methods) {
+        const wrapped = {};
+        for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(methods))) {
+          let method;
+          Object.defineProperty(wrapped, key, { ...descriptor, value: function(...args) {
+            method ??= shared.module(name, { [key]: descriptor.value })[key];
+            return Reflect.apply(method, this, args);
+          } });
+        }
+        return Object.freeze(wrapped);
+      } };
       var frequent = /* @__PURE__ */ new Set(["scroll", "pointermove", "input"]);
       function send(message) {
         const context = execution.context();
@@ -216,13 +227,16 @@ var TaskqResources = (() => {
       function defer(callback, delay = 0) {
         return setTimeout(execution.bind(execution.action("ui.timer", callback)), delay);
       }
+      function repeat(callback, delay) {
+        return setTimeout(callback, delay);
+      }
       function cancel(timer) {
         clearTimeout(timer);
       }
       function effect(name, start, receive) {
         execution.effect(name, () => Promise.resolve().then(execution.bind(start)), (result) => receive(result.ok ? result.value : { state: "unknown", reason: result.unknown ? "Completion unknown" : String(result.value?.message || result.value) }));
       }
-      module.exports = { execution, connect, send, listen, defer, cancel, effect };
+      module.exports = { execution, connect, send, listen, defer, repeat, cancel, effect };
     }
   });
 
@@ -325,7 +339,7 @@ var TaskqResources = (() => {
           return fields(group).filter((f) => d.touched[f.key] && d.values[f.key] !== shown(f));
         },
         problem: function(group, d) {
-          const { n } = execution.module("resource-controls.problem", { n: (v, lo, hi) => /^\d+$/.test(v) && Number(v) >= lo && Number(v) <= hi });
+          const n = (v, lo, hi) => /^\d+$/.test(v) && Number(v) >= lo && Number(v) <= hi;
           for (const f of edited(group, d)) {
             const v = d.values[f.key];
             if (f.bool) {
@@ -345,10 +359,10 @@ var TaskqResources = (() => {
             if (f.lo != null && !n(v, f.lo, f.hi)) return f.label + ": an integer " + f.lo + ".." + f.hi;
           }
           if (!edited(group, d).length) return "No change";
-          const { now } = execution.module("resource-controls.problem", { now: (k) => {
+          const now = (k) => {
             const f = fields(group).find((x) => x.key === k);
             return f && (d.touched[k] ? d.values[k] : shown(f));
-          } });
+          };
           return now("host.mode") === "auto" && now("gate.enabled") === false ? "Auto keeps the load gate on" : null;
         },
         changes: function(group, d) {
@@ -367,7 +381,7 @@ var TaskqResources = (() => {
             else if (f.field === "maximum") c.maximum = d.values[f.key] === "" ? null : Number(d.values[f.key]);
             else {
               const g = fields(group).filter((x) => x.field === "load_gate");
-              const { v } = execution.module("resource-controls.changes.helpers", { v: (x) => d.touched[x.key] ? d.values[x.key] : shown(x) });
+              const v = (x) => d.touched[x.key] ? d.values[x.key] : shown(x);
               c.load_gate = { enabled: !!v(g[0]), cpu_max: Number(v(g[1])), memory_min: Number(v(g[2])) };
             }
           }
@@ -482,28 +496,25 @@ var TaskqResources = (() => {
           return h + '<input id="' + fid + '" type="number" inputmode="numeric" step="1" min="0" data-rsc-field="' + esc(x.key) + '" value="' + esc(v) + '"' + dis + (mixed ? ' placeholder="Mixed"' : x.value == null ? ' placeholder="' + esc(x.none || "none") + '"' : "") + ">";
         },
         mount: function(el, adapter) {
-          const { apply, paint } = execution.module("resource-controls.mount", {
-            apply: function(ev) {
-              const r = step(group, local, adapter.capability(group), ev, newId, now());
-              local = r.local;
-              if (ev.type !== "input") paint();
-              if (r.send) ui.effect("resource.send", () => adapter.send(group, r.send), (x) => apply({ type: "receipt", opId: r.send.id, ...x }));
-            },
-            paint: function() {
-              const a = document.activeElement, focus = a && el.contains(a) ? { sel: a.dataset.rscField ? '[data-rsc-field="' + a.dataset.rscField + '"]' : '[data-rsc="' + a.dataset.rsc + '"]', s: a.type === "number" ? null : a.selectionStart, e: a.selectionEnd } : null;
-              el.innerHTML = render(group, local, adapter.capability(group), now());
-              const t = focus && el.querySelector(focus.sel);
-              if (t) {
-                t.focus();
-                if (focus.s != null && t.setSelectionRange) try {
-                  t.setSelectionRange(focus.s, focus.e);
-                } catch (_) {
-                }
+          const apply = function(ev) {
+            const r = step(group, local, adapter.capability(group), ev, newId, now());
+            local = r.local;
+            if (ev.type !== "input") paint();
+            if (r.send) ui.effect("resource.send", () => adapter.send(group, r.send), (x) => apply({ type: "receipt", opId: r.send.id, ...x }));
+          }, paint = function() {
+            const a = document.activeElement, focus = a && el.contains(a) ? { sel: a.dataset.rscField ? '[data-rsc-field="' + a.dataset.rscField + '"]' : '[data-rsc="' + a.dataset.rsc + '"]', s: a.type === "number" ? null : a.selectionStart, e: a.selectionEnd } : null;
+            el.innerHTML = render(group, local, adapter.capability(group), now());
+            const t = focus && el.querySelector(focus.sel);
+            if (t) {
+              t.focus();
+              if (focus.s != null && t.setSelectionRange) try {
+                t.setSelectionRange(focus.s, focus.e);
+              } catch (_) {
               }
             }
-          });
+          };
           let group = null, local = fresh();
-          const { now } = execution.module("resource-controls.mount", { now: () => adapter.now ? adapter.now() : Math.floor(Date.now() / 1e3) });
+          const now = () => adapter.now ? adapter.now() : Math.floor(Date.now() / 1e3);
           const newId = adapter.newId || (() => root.crypto && root.crypto.randomUUID ? root.crypto.randomUUID() : "rsc-" + Date.now().toString(36) + Math.random().toString(36).slice(2));
           ui.listen(el, "click", (e) => {
             const b = e.target.closest("button[data-rsc]");
@@ -546,7 +557,7 @@ var TaskqResources = (() => {
         },
         workStep: function(groups, w, cap, ev, newId, now) {
           const st = workStatus(groups, w, cap, now).state, l = { ...w }, none = { local: w, send: [] };
-          const { values } = execution.module("resource-controls.workStep", { values: (gs) => Object.fromEntries(workFields(gs).map((f) => [f.key, f.mixed ? f.bool ? false : "" : f.values[0]])) });
+          const values = (gs) => Object.fromEntries(workFields(gs).map((f) => [f.key, f.mixed ? f.bool ? false : "" : f.values[0]]));
           switch (ev.type) {
             case "select": {
               if (!["view", "read-only", "editing"].includes(st)) return none;
@@ -643,25 +654,22 @@ var TaskqResources = (() => {
           return h + '<div class="rsc-actions">' + (st === "conflict" ? '<button type="button" data-rsc="rebase">Review new values</button>' : '<button type="button" data-rsc="review">Review changes</button>') + '<button type="button" data-rsc="cancel">Cancel</button></div></section>';
         },
         mountWork: function(el, adapter, selected) {
-          const { apply, paint } = execution.module("resource-controls.mountWork", {
-            apply: function(ev) {
-              const r = workStep(groups, w, adapter.capability, ev, newId, now());
-              w = r.local;
-              if (ev.type !== "input") paint();
-              for (const x of r.send) {
-                const g = groups.find((g2) => g2.key === x.key);
-                ui.effect("resource.work.send", () => adapter.send(g, x.op), (y) => apply({ type: "receipt", key: x.key, opId: x.op.id, ...y }));
-              }
-            },
-            paint: function() {
-              const a = document.activeElement, sel = a && el.contains(a) ? a.dataset.rscField ? '[data-rsc-field="' + a.dataset.rscField + '"]' : a.dataset.rscSelect ? '[data-rsc-select="' + CSS.escape(a.dataset.rscSelect) + '"]' : '[data-rsc="' + a.dataset.rsc + '"]' : null;
-              el.innerHTML = workRender(groups, w, adapter.capability, now(), adapter.host);
-              const t = sel && el.querySelector(sel);
-              if (t) t.focus();
+          const apply = function(ev) {
+            const r = workStep(groups, w, adapter.capability, ev, newId, now());
+            w = r.local;
+            if (ev.type !== "input") paint();
+            for (const x of r.send) {
+              const g = groups.find((g2) => g2.key === x.key);
+              ui.effect("resource.work.send", () => adapter.send(g, x.op), (y) => apply({ type: "receipt", key: x.key, opId: x.op.id, ...y }));
             }
-          });
+          }, paint = function() {
+            const a = document.activeElement, sel = a && el.contains(a) ? a.dataset.rscField ? '[data-rsc-field="' + a.dataset.rscField + '"]' : a.dataset.rscSelect ? '[data-rsc-select="' + CSS.escape(a.dataset.rscSelect) + '"]' : '[data-rsc="' + a.dataset.rsc + '"]' : null;
+            el.innerHTML = workRender(groups, w, adapter.capability, now(), adapter.host);
+            const t = sel && el.querySelector(sel);
+            if (t) t.focus();
+          };
           let groups = [], w = freshWork(selected || {});
-          const { now } = execution.module("resource-controls.mountWork", { now: () => adapter.now ? adapter.now() : Math.floor(Date.now() / 1e3) });
+          const now = () => adapter.now ? adapter.now() : Math.floor(Date.now() / 1e3);
           const newId = adapter.newId || (() => root.crypto && root.crypto.randomUUID ? root.crypto.randomUUID() : "rsc-" + Date.now().toString(36) + Math.random().toString(36).slice(2));
           ui.listen(el, "click", (e) => {
             const b = e.target.closest("button[data-rsc]");
@@ -686,7 +694,7 @@ var TaskqResources = (() => {
           let groups = fx.groups, w = freshWork(fx.selected || {}), n = 0;
           const sent = [];
           const out = [];
-          const { cap } = execution.module("resource-controls.replayWork.helpers", { cap: (g) => capability(g) || fx.capability });
+          const cap = (g) => capability(g) || fx.capability;
           for (const ev of fx.events || []) {
             if (ev.type === "refresh") {
               groups = ev.groups.map((i) => fx.refresh[i]);
@@ -708,7 +716,7 @@ var TaskqResources = (() => {
           let group = fx.groups[0], local = fresh(), n = 0;
           const sent = [];
           const out = [];
-          const { cap } = execution.module("resource-controls.replay.helpers", { cap: (g) => capability(g) || fx.capability });
+          const cap = (g) => capability(g) || fx.capability;
           for (const ev of fx.events || []) {
             if (ev.type === "refresh") {
               group = fx.groups[ev.group];
@@ -769,7 +777,7 @@ var TaskqResources = (() => {
         applied: "Applied: read back from the service",
         superseded: "Saved; replaced by a newer command",
         rejected: "Not saved",
-        unknown: "Delivery unknown: check again",
+        unknown: "Not confirmed; the new limits may not be saved. Check again",
         conflict: "Settings changed since you opened the editor"
       };
       var { RANK } = execution.module("resource-controls", { RANK: (k) => k.startsWith("host.") ? 0 : k.startsWith("rt:") ? 1 : 2 });

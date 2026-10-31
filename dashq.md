@@ -75,7 +75,7 @@ The [operator redesign package](docs/design/operator-redesign/README.md) owns th
 - D6's Source status is collapsed, with its non-ok count and all reasons; affected values retain state and age. Hiding stale, superseded or revoked installation records never hides a current host warning.
 - Production thresholds remain producer/policy-owned; no demo threshold becomes policy. Prototype fixtures prove layout only; real producer and action qualification stays open.
 - Refresh every 60 s. Preserve stable rows, selection, focus, drafts, disclosures, scroll and return position; never reorder hosts because a value changed. Freshness is producer or probe time; a page fetch is not a heartbeat.
-- TaskQ interiors come only from a published release pinned by version and hashes, never an unreleased source SHA; existing action gates stay separate. Pinned sets: [views detail](docs/contract/views.md#pinned-taskq-assets).
+- TaskQ interiors come only from a published release pinned by version and hashes, never an unreleased source SHA; existing action gates stay separate. Every pin set names one release, and a scheduled check fails while the latest TaskQ release has a newer asset (taskq#1981). Pinned sets: [views detail](docs/contract/views.md#pinned-taskq-assets).
 ## D9. ServiceQ views
 - The [preservation ledger](docs/design/first-screen.md#preservation-ledger) maps every current section and prior ServiceQ capability to its first-screen or detail destination. The host-first page deletes none of them; already retired Node-monitor features remain retired. D7 report/JSON, D4 periods/cache/caps and all source evidence remain available independently of page placement.
 ## D22. Shareable views
