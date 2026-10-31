@@ -23,6 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # dashq.md D10: every pin set names one TaskQ release; the scheduled taskq-assets job checks the latest.
+      - run: node scripts/taskq-assets.cjs
       - run: node tests/resources.cjs
       - name: cargo checks
         run: |

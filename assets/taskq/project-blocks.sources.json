@@ -23,12 +23,12 @@
   "schema": 1,
   "designRevision": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
   "files": {
-    "tests/fixtures/project-blocks.json": "948ba88778b7390e36867bee978b2afb2576eca09889183394562b5ba2465fc5",
-    "docs/design/visual-style.md": "a170804629cb87efa5f03c4a7029b8d77ef9fbb0cc7e80d019a4be9e9cf69e4c",
-    "src/project-blocks.js": "0a500e904865db945470bb0a78c4d7dc212070ac582ad4d148b57ce5b81d5a11",
-    "docs/design/menu-next-variants.html": "e4ca4bc36bcb25f451ce4cc3c75fa5de42bf4b6d37b9f77e60b187bfc49931cf",
+    "tests/fixtures/project-blocks.json": "0b049c5f09b368de869672b2b4bbe1b387c1b210e14afabb371ad7c0342794b8",
+    "docs/design/visual-style.md": "aad0eef98d027fb9d878b97a979d10e5d50194dc7b91639b7790b16e37317617",
+    "src/project-blocks.js": "cfe8ba919932130932e4b61de008290e92aa6432626457b75fcde5aa7c45349f",
+    "docs/design/menu-next-variants.html": "0cb616825c0f84703dbd19da67149aa9dceaaf4431f5fd193c2df7bae4e0f86c",
     "src/project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
     "src/project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0"
   },
-  "hashEncoding": "UTF-8, LF (canonical release source; checkout CRLF normalized)"
+  "hashEncoding": "UTF-8, LF; the build derives the hashes (scripts/design-sources.cjs); the tag workflow assigns the release version"
 }

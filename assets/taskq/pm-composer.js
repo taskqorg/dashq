@@ -593,6 +593,7 @@ var TaskqPmComposer = (() => {
       var { h: h2, render } = (init_preact(), __toCommonJS(preact_exports));
       var ui = require_ui_runtime();
       var { execution } = ui;
+      var measured = /* @__PURE__ */ new WeakMap();
       var api = execution.module("pm-composer", {
         request: function(context, text, op, now) {
           if (!text.trim() || new TextEncoder().encode(text).length > 65536) throw Error("Write 1\u201365536 UTF-8 bytes");
@@ -612,8 +613,28 @@ var TaskqPmComposer = (() => {
           const url = native.url, safe = typeof url === "string" && (/^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+$/.test(url) || local && /^codex:\/\/threads\/[A-Za-z0-9-]+$/.test(url));
           return h2("div", { class: "pm-handoff" }, h2("p", { role: "status" }, (native.kind || native.state || "unknown") + ": " + (native.reason || native.next || (native.state === "launched" && native.session ? "Continue in the native session" : "Native outcome unknown"))), h2("p", { class: "meta" }, (native.runtime || "Runtime unknown") + " \xB7 " + (native.host || "Host unknown") + (native.session ? " \xB7 " + native.session : "")), safe && h2("a", { href: url, "data-url": url, class: "native-session" }, "Open session"));
         },
-        composer: function({ text, disabled = false, id = "pm-draft", field = "text", reason = "", placeholder = "Ask AI\u2026", before, files, tools, after, onInput }) {
-          return h2("div", { class: "conversation-composer" }, before, h2("label", { for: id, class: "sr-only" }, "Request draft"), h2("textarea", { id, "data-c-field": field, rows: 3, value: text, disabled, "aria-describedby": id === "conversation-draft" ? "conversation-reason" : id + "-reason", placeholder, onInput }), files, tools, h2("p", { id: id === "conversation-draft" ? "conversation-reason" : id + "-reason", class: "meta" }, reason), after);
+        grow: function(root) {
+          const window = root.ownerDocument.defaultView;
+          for (const input of root.querySelectorAll(".conversation-composer textarea")) {
+            const style = window.getComputedStyle(input), width = input.getBoundingClientRect().width, key = JSON.stringify([input.value, width, style.font, style.lineHeight, style.minHeight]);
+            if (measured.get(input) === key) continue;
+            const mirror = input.cloneNode();
+            mirror.removeAttribute("id");
+            mirror.removeAttribute("data-c-field");
+            mirror.disabled = true;
+            mirror.tabIndex = -1;
+            mirror.setAttribute("aria-hidden", "true");
+            mirror.value = input.value;
+            Object.assign(mirror.style, { position: "absolute", visibility: "hidden", pointerEvents: "none", width: width + "px", height: "0", minHeight: "0", maxHeight: "none" });
+            input.after(mirror);
+            const height = mirror.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+            mirror.remove();
+            input.style.height = Math.max(parseFloat(style.minHeight) || 0, height) + "px";
+            measured.set(input, key);
+          }
+        },
+        composer: function({ text, disabled = false, id = "pm-draft", field = "text", label = "Request draft", reason = "", placeholder = "Ask AI\u2026", before, files, tools, after, onInput, onPaste, onDrop, onDragOver }) {
+          return h2("div", { class: "conversation-composer", onPaste, onDrop, onDragOver }, before, h2("label", { for: id, class: "sr-only" }, label), h2("textarea", { id, "data-c-field": field, rows: 3, value: text, disabled, "aria-describedby": id === "conversation-draft" ? "conversation-reason" : id + "-reason", placeholder, onInput }), files, tools, h2("p", { id: id === "conversation-draft" ? "conversation-reason" : id + "-reason", class: "meta" }, reason), after);
         },
         mount: function(el, adapter) {
           let draft = adapter.load() || { text: "" }, pending = false, timer, serial = 0, invalid = false;
@@ -635,6 +656,7 @@ var TaskqPmComposer = (() => {
                 adapter.save(draft);
                 local.paint();
               }, tools: h2("div", { class: "conversation-tools" }, h2("button", { disabled: pending || invalid || !!draft.request || !draft.text.trim() || !!adapter.context().reason, onClick: () => local.send(false) }, "Send"), draft.request && h2("button", { disabled: pending || invalid || !adapter.reconcile, onClick: () => local.send(true) }, "Check delivery")) }), draft.receipt && h2("p", { role: "status" }, draft.receipt.outcome), api.handoff(draft.receipt?.native)), el);
+              api.grow(el);
             },
             send: function(reconcile) {
               if (invalid || pending || reconcile && !draft.request || !reconcile && draft.request) return;

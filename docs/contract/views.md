@@ -109,10 +109,13 @@ D10 detail.
 
 ## Pinned TaskQ assets
 
-- Project/answer blocks and task controls: TaskQ v4.6.30, commit 09cb0d7db35d0de51bef83d9fa3ec803eafad42d, [shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.30/docs/design/shared-blocks.md), `assets/taskq/provenance.json`.
-- Resources: TaskQ v4.6.25, `assets/taskq/sources.json`.
+- One release: TaskQ v4.6.52, commit 73df356b19e841e3900c06878206bfdd73b7c41e. Three pin sets record it with each asset's release name and SHA-256:
+  - Project/answer blocks and task controls ([shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.52/docs/design/shared-blocks.md)): `assets/taskq/provenance.json`.
+  - Resources and the resource-policy wire corpus: `assets/taskq/sources.json`.
+  - Full workspace, detail, menus and PM composer: `assets/taskq/workspace-provenance.json`; unchanged released components through the [adapter](../design/task-workspace.md).
+- `node scripts/taskq-assets.cjs` (tests workflow) fails unless the three sets name one release and every asset comes from it.
+- The scheduled `taskq-assets` workflow (daily and on demand) runs it with `--latest`: it fails, naming each asset, when the latest TaskQ release has a newer or missing asset. `--update` repins every set from that release, checked against its `SHA256SUMS`; the repin PR then runs the usual tests.
 - Status snapshot fixture and schema (states, choices, telemetry codes): TaskQ v4.6.53, `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
-- Full workspace, detail, menus and PM composer: TaskQ v4.6.34, `assets/taskq/workspace-provenance.json`; unchanged released components through the [adapter](../design/task-workspace.md).
 
 ## Redesign target decisions
 
@@ -147,7 +150,7 @@ D13 detail.
 
 - [Adapter and qualification](../design/task-controls.md): `/task/control` is off unless `task_controls: {token: "<absolute credential path>", boards: {"<owner/repo>": "<workspace>"}}` and `taskq.binary` are configured. Each board must be a configured project. Production FRA configures it for the six configured boards.
 - The host administrator grants `dashq controller WORKSPACE SUBJECT on|off`.
-- TaskQ v4.6.30 owns the unmodified renderer, fixed command table, revision/op-id fencing and receipts for start/stop/later/retry. Close remains a board link.
+- TaskQ v4.6.52 owns the unmodified renderer, fixed command table, revision/op-id fencing and receipts for start/stop/later/retry. Close remains a board link.
 - Origin/CSRF, the durable operation journal and same-ID retry follow the answer transport.
 
 ### PM requests

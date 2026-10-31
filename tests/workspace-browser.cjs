@@ -20,7 +20,8 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
     if(step.press){for(let i=0;i<(step.max||1);i++){await page.keyboard.press(step.press);if(!step.until||await page.locator(step.until).evaluateAll(es=>es.includes(document.activeElement)))break;}}
     if(step.expect){const e=step.expect;
      for(const [selector,count] of Object.entries(e.count||{}))assert.equal(await page.locator(selector).count(),count,journey.id+' '+selector);
-     if(e.open!=null)assert.equal(await page.locator('#taskq-popover:visible').count()>0,e.open,journey.id+' open');
+     // TaskQ's own journey runner: since v4.6.52 a task's detail opens inline, not in the popover.
+     if(e.open!=null)await page.waitForFunction(o=>!!document.querySelector('#taskq-popover:popover-open,.task-inline-details')===o,e.open,{timeout:2000}).catch(()=>assert.fail(journey.id+' open is not '+e.open));
      if(e.focus)assert(await page.locator(e.focus).evaluateAll(es=>es.some(e=>e===document.activeElement||e.contains(document.activeElement))),journey.id+' focus');
      for(const [selector,text] of Object.entries(e.text||{}))assert((await page.locator(selector).innerText()).includes(text));
      if(e.fits)assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'journey horizontal fit');
@@ -73,10 +74,10 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
    assert.equal(await page.locator('.native-session').getAttribute('href'),'https://claude.ai/code/session_invented');
    await page.evaluate(()=>refresh());
    await page.locator('[data-a=task-detail]').focus();await page.keyboard.press('Enter');
-   assert(await page.locator('#taskq-popover').isVisible());await page.locator('#taskq-popover [data-control=stop]').focus();await page.evaluate(()=>refresh());
-   assert(await page.locator('#taskq-popover').isVisible(),'detail selection survives refresh');
-   assert(await page.locator('#taskq-popover [data-control=stop]').evaluate(e=>e===document.activeElement),'detail focus survives refresh');
-   assert(await page.locator('#taskq-popover [data-control=stop]').evaluate(e=>getComputedStyle(e).outlineStyle!=='none'),'keyboard focus stays visible');
+   assert(await page.locator('.task-inline-details').isVisible(),'detail opens inline');await page.locator('.task-inline-details [data-control=stop]').focus();await page.evaluate(()=>refresh());
+   assert(await page.locator('.task-inline-details').isVisible(),'detail selection survives refresh');
+   assert(await page.locator('.task-inline-details [data-control=stop]').evaluate(e=>e===document.activeElement),'detail focus survives refresh');
+   assert(await page.locator('.task-inline-details [data-control=stop]').evaluate(e=>getComputedStyle(e).outlineStyle!=='none'),'keyboard focus stays visible');
    await page.keyboard.press('Escape');
    // Native-created tasks become visible through the same subsequent board observation.
    b.tasks.push({n:8,state:'held',title:'PM-created task read back from its board',url:b.url+'/8',revision:21,controls:['start']});
@@ -86,7 +87,7 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
    b.tasks.push({n:9,state:'ask',title:'Keep the old API?',url:b.url+'/9',revision:22,controls:[],question:{parsed:true,text:'Problem: Keep the old API?',done:null,problem:'Keep the old API?',evidence:[],choices:[{id:1,text:'Keep it',recommended:true,consequential:false},{id:2,text:'Remove it',recommended:false,consequential:false}],limits:{lines:4,chars:240}}});
    await page.evaluate(()=>refresh());
    await page.locator('[data-a=task-detail]:has-text("#9")').click();
-   await page.locator('#taskq-popover [data-page=answer]').click();
+   await page.locator('.task-inline-details [data-page=answer]').click();
    await page.locator('#workspace-answer button[data-choice="2"]:not([disabled])').click();
    await page.waitForFunction(()=>/accepted/i.test(document.getElementById('workspace-answer').innerText));
    assert.deepEqual(answers.map(a=>[a.board,a.task,a.revision,a.choice,a.csrf]),[[b.project,'9','22','2','invented-answer-csrf']]);

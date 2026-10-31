@@ -2,13 +2,13 @@
 let taskWorkspace, taskWorkspaceView, pmComposer, pmDraft = {text: ''}, pmAccess = {targets: []}, pmSelected = 0;
 const workspaceOps = new Map(), workspaceAppearance = {};
 function workspaceState(boards, host = null) {
-  const states = TaskqProjectBlocks.states.map(([id, name]) => ({id, name}));
+  const states = TASKQ_STATES.map(([id, name]) => ({id, name}));
   const projects = boardProjects(boards, host).map((p, i) => {
     const b = boards[i];
     return {name: p.name, root: p.id, issues: p.board.url, board_kind: 'github', complete: p.complete,
       alive: b.source.state === 'ok' && !b.source.incomplete, saved: true, focus: [], mode: 'unknown',
       tasks: p.tasks.map(t => ({...t, labels: t.labels || [], host: t.session?.host || t.host, runtime: t.session?.runtime || t.runtime, session_reason: t.session ? 'Progress on '+t.session.host+' ('+t.session.runtime+'): '+t.session.stage+' · '+(t.session.age_s == null?'update age unknown':'updated '+t.session.age_s+'s ago') : undefined, deps: t.deps || [], blocked: t.blocked || [], steps: t.steps || [],
-        controls: Number.isSafeInteger(t.revision) && b.source.state === 'ok' && !b.source.incomplete && Array.isArray(t.controls) ? t.controls : [], state_name: states.find(s => s.id === t.state)?.name || t.state,
+        controls: Number.isSafeInteger(t.revision) && b.source.state === 'ok' && !b.source.incomplete && Array.isArray(t.controls) ? t.controls : [],
         age: t.age_s == null ? 'age unknown' : t.age_s + 's', failed: b.failed?.find(f => f.number === t.n)?.reason || t.failed,
         key: p.board.url + '/' + t.n})),
       counts: states.map(s => ({state: s.id, name: s.name, n: p.complete ? b.counts[s.id] ?? null : null})),
@@ -16,7 +16,7 @@ function workspaceState(boards, host = null) {
   });
   const partial = projects.filter(p => !p.complete).map(p => p.name);
   return {platform: 'browser', font: parseFloat(getComputedStyle(document.documentElement).fontSize), theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
-    host: host || 'Configured boards', now: Math.floor(Date.now()/1000), version: '4.6.34', service: {state: 'unknown'},
+    host: host || 'Configured boards', now: Math.floor(Date.now()/1000), version: '4.6.52', service: {state: 'unknown'},
     projects, display: {states, series: [], notify: [], periods: [], run: false,
       all: {counts: states.map(s => ({state: s.id, name: s.name, n: partial.length || projects.some(p => p.counts.find(c => c.state === s.id)?.n == null) ? null : projects.reduce((n,p) => n + p.counts.find(c => c.state === s.id).n, 0)})), partial, open: partial.length ? null : projects.reduce((n,p) => n+p.tasks.length,0)}},
     ai: {draft: ''}, notify: {projects: {}, host: {}, status: 'unsupported'}, stop_modes: false, messages: {complete: false}};

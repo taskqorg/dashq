@@ -1,0 +1,20 @@
+name: taskq-assets
+# dashq.md D10, taskq#1981: vendored TaskQ assets must not lag the latest TaskQ release.
+# A failed run names each newer asset; repin with `node scripts/taskq-assets.cjs --update` in a PR.
+on:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  latest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/taskq-assets.cjs --latest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
