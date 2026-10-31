@@ -39,7 +39,8 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - The grant supplies installation and workspace.
 - Rejected `scope`: a schema outside the grant, or a `taskq-board/1` record whose `board` (`<kind>:<host>/<repo>`) is not the granted board scope.
 - Rejected `payload`: a payload outside the metadata allowlist (below).
-- Rejected `replay_mismatch`: a reused event ID with other content. Rejected `expired`: a record older than the receipt window.
+- Rejected `replay_mismatch`: a reused event ID with other content. Rejected `expired`: a record older than the receipt window (8 days).
+- A receipt stores `sha256:<hex>` of the acknowledged record (kind, schema, observation time, payload), never a copy of it. A receipt stored with the full record before this rule still dedups until the prune removes it.
 - A full store answers 503, so nothing is acknowledged.
 
 ### Metadata allowlist
@@ -71,6 +72,8 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - `/data` adds `installations` `{source, rows}` and `sources.enrollment`, only once enrollment is set up.
 - One row per installation and workspace from its newest grant, with `connection` `active|pending|revoked`, `observation` and `snapshot` `{event_id, schema, payload}`.
 - `observation` comes from producer time: stale after 180 s (`serverq-report/1` after 7200 s); a future time is unknown (`clock uncertain`); none is `no snapshot yet`.
+- `activity` `{state, last_report, age_s, reason}`: `last_report` is the newer of the last durable receipt and a trusted producer time; without either, age counts from the grant. `state` is `revoked` for a revoked connection, else `retired` past 30 days (`no report for <age>; retired from active views, history kept`), `silent` past 3600 s (`no report for <age>`, or `no report since approval <age> ago`), else `reporting`.
+- A retired row stays in `installations` with its grant, snapshot and history; it feeds no hosts, checks, versions, agents or Attention item.
 
 ## Lifecycle UI
 

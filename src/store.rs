@@ -54,6 +54,8 @@ pub struct Limits {
     pub telemetry_bytes: u64,
     pub receipt_secs: i64,
     pub outbox_secs: i64,
+    /// Free pages that make the hourly prune VACUUM the file (#242 A2).
+    pub vacuum_bytes: u64,
     /// ponytail: 300 s skew marks a sample clock-uncertain; qualify with real hosts.
     pub future_secs: i64,
     pub records: usize,
@@ -71,6 +73,7 @@ pub const LIMITS: Limits = Limits {
     telemetry_bytes: 160 << 20,
     receipt_secs: 8 * 86400,
     outbox_secs: 7 * 86400,
+    vacuum_bytes: 64 << 20,
     future_secs: 300,
     records: 100,
     writers: 64,
@@ -185,6 +188,8 @@ pub struct Row {
     /// Export events of this installation and workspace removed unsent (C5 export gap).
     pub export_gap: i64,
     pub received_at: Option<i64>,
+    /// Grant creation time: where a silence starts when nothing was ever received (#242 A1).
+    pub created: i64,
     pub scopes: String,
     pub board: Option<String>,
     pub capabilities: Option<String>,
@@ -381,6 +386,12 @@ pub(crate) fn used(c: &Connection, path: &Path) -> Result<u64, Error> {
     let page: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;
     let wal = std::fs::metadata(format!("{}-wal", path.display())).map(|m| m.len()).unwrap_or(0);
     Ok(pages as u64 * page as u64 + wal)
+}
+
+/// `sha256:<hex>` of a receipt's acknowledged content (#242 A2).
+fn receipt_digest(content: &str) -> String {
+    let d = ring::digest::digest(&ring::digest::SHA256, content.as_bytes());
+    format!("sha256:{}", d.as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>())
 }
 
 pub(crate) fn authorize(c: &Connection, verifier: &[u8]) -> Result<Option<Grant>, Error> {
@@ -1036,6 +1047,8 @@ impl Store {
             for e in events {
                 let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry", Kind::Resources => "resources" };
                 let content = format!("{kind}\n{}\n{}\n{}", e.schema, e.observed, e.payload);
+                // #242 A2: a receipt keeps only the digest of what it acknowledged, never a second copy of the payload
+                let digest = receipt_digest(&content);
                 let seen: Option<(String, String)> = tx
                     .query_row(
                         "SELECT content, outcome FROM receipts WHERE installation = ?1 AND generation = ?2 AND event_id = ?3",
@@ -1044,7 +1057,8 @@ impl Store {
                     )
                     .optional()?;
                 let o = match seen {
-                    Some((c, o)) if c == content => outcome(&o),
+                    // a receipt written before #242 holds the full content until retention removes it
+                    Some((c, o)) if c == digest || c == content => outcome(&o),
                     Some(_) => Outcome::Rejected("replay_mismatch"),
                     None if !scopes.iter().any(|s| s == e.schema) => Outcome::Rejected("scope"),
                     // a dedup record may be pruned already: refuse instead of duplicating
@@ -1098,7 +1112,7 @@ impl Store {
                                 )?;
                             }
                         }
-                        tx.execute("INSERT INTO receipts VALUES (?1, ?2, ?3, ?4, ?5, 'accepted', ?6)", params![g.installation, g.generation, e.id, e.schema, content, now])?;
+                        tx.execute("INSERT INTO receipts VALUES (?1, ?2, ?3, ?4, ?5, 'accepted', ?6)", params![g.installation, g.generation, e.id, e.schema, digest, now])?;
                         Outcome::Accepted
                     }
                 };
@@ -1193,7 +1207,7 @@ impl Store {
                    (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
                    (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
                    (SELECT generation FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace),
-                   (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace)
+                   (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace), g.created
                  FROM grants g JOIN installations i ON i.id = g.installation
                  LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
                  WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
@@ -1224,6 +1238,7 @@ impl Store {
                         capabilities: r.get(19)?,
                         telemetry: Telemetry::default(),
                         resources: r.get::<_, Option<i64>>(20)?.zip(r.get::<_, Option<String>>(21)?),
+                        created: r.get(22)?,
                     };
                     Ok(row)
                 })?
@@ -1363,7 +1378,16 @@ impl Store {
             )?;
             Ok(())
         })?;
-        self.lock()?.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        let c = self.lock()?;
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        // #242 A2: give the file back once most of it is free pages (a store grown before receipts held digests)
+        let (pages, free): (i64, i64) =
+            c.query_row("SELECT (SELECT page_count FROM pragma_page_count), (SELECT freelist_count FROM pragma_freelist_count)", [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let page: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        if free * 2 > pages && (free * page) as u64 >= l.vacuum_bytes {
+            c.execute_batch("VACUUM")?;
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        }
         Ok(())
     }
 
@@ -1553,6 +1577,51 @@ mod tests {
         s.project(Scope::All, |_, _| true).unwrap();
         assert_eq!(s.receipt(b"v1", "e2").unwrap(), Some(("agentq.snapshot/1".into(), Outcome::Projected)));
         assert!(s.authorize(b"v1").unwrap().is_some());
+    }
+
+    /// #242 A2. Defect: every receipt kept a full copy of its record (924 MB of a 1.4 GB production store).
+    /// Protection: a receipt holds a fixed-size digest, a receipt written before #242 still dedups until retention
+    /// removes it, receipts leave after 8 days, steady load keeps the live size flat, and a store that is mostly
+    /// free pages is vacuumed back.
+    #[test]
+    fn receipts_hold_digests_and_steady_load_stays_bounded() {
+        let p = dir("steady").join("dashq.db");
+        let s = Store::open(&p, Limits { vacuum_bytes: 1 << 20, ..LIMITS }).unwrap();
+        s.grant(&AGENT, "w", "a", SCOPES, b"v1", NOW).unwrap();
+        let big = "x".repeat(16 << 10);
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, &big)], NOW).unwrap(), [Outcome::Accepted]);
+        let stored = |id: &str| s.lock().unwrap().query_row("SELECT content FROM receipts WHERE event_id = ?1", [id], |r| r.get::<_, String>(0)).unwrap();
+        assert_eq!((stored("e1").len(), stored("e1").starts_with("sha256:")), (71, true), "a digest, not the payload");
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, &big)], NOW).unwrap(), [Outcome::Accepted], "a replay matches its digest");
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "changed")], NOW).unwrap(), [Outcome::Rejected("replay_mismatch")]);
+        // a receipt from before #242 keeps its full content and still dedups
+        s.lock().unwrap().execute("UPDATE receipts SET content = ?1 WHERE event_id = 'e1'", [format!("snapshot\nagentq.snapshot/1\n{NOW}\n{big}")]).unwrap();
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, &big)], NOW).unwrap(), [Outcome::Accepted]);
+        assert_eq!(s.accept(b"v1", &[snap("e1", NOW, "changed")], NOW).unwrap(), [Outcome::Rejected("replay_mismatch")]);
+
+        // steady load: 24 snapshots a day for 30 days, pruned daily; live size stops growing once retention holds
+        let mut sizes = vec![];
+        for day in 1..=30 {
+            let now = NOW + day * 86400;
+            for h in 0..24 {
+                let id = format!("d{day}h{h}");
+                assert_eq!(s.accept(b"v1", &[snap(&id, now - h * 3600, &big)], now).unwrap(), [Outcome::Accepted]);
+            }
+            s.prune(now).unwrap();
+            sizes.push(s.used().unwrap());
+        }
+        let receipts: i64 = s.lock().unwrap().query_row("SELECT COUNT(*) FROM receipts", [], |r| r.get(0)).unwrap();
+        assert!(receipts <= 9 * 24, "only the 8-day window stays: {receipts}");
+        let settled = sizes[10];
+        assert!(sizes[10..].iter().all(|b| *b <= settled + settled / 10), "bounded under steady load: {sizes:?}");
+
+        // a store grown before #242: most of it free after the prune, so the prune gives the file back
+        let file = |p: &Path| std::fs::metadata(p).unwrap().len();
+        let before = file(&p);
+        let later = NOW + 60 * 86400;
+        s.prune(later).unwrap();
+        assert!(file(&p) < before / 2, "vacuumed: {} of {before} bytes", file(&p));
+        assert!(s.authorize(b"v1").unwrap().is_some(), "grants survive");
     }
 
     /// #161 A3: stored telemetry blocks stay under the configured byte cap (oldest leave first; a block over the
