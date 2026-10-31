@@ -2322,7 +2322,8 @@ mod tests {
         let html = crate::page::render_view(&doc, &json!({}), "/integrations");
         assert!(html.contains("Silent · no report for 62m") && html.contains("Retired · no report for 30d"), "Connections names both");
         assert!(html.contains("data-inactive=\"true\" id=\"select-inst-sq-old-ws-1\""), "retired is behind the filter");
-        assert!(html.contains("data-inactive=\"false\" id=\"select-inst-sq-quiet-ws-1\""), "silent stays in the default list");
+        assert!(html.contains("data-inactive=\"false\" id=\"select-inst-sq-quiet-ws-1\""), "silent with a current observation stays in the default list");
+        assert!(html.contains("data-inactive=\"true\" id=\"select-inst-sq-gone-ws-1\""), "revoked stays behind the filter");
     }
 
     /// Enrollment E1/E6 for TaskQ (#125): a schema 1 `taskq-board/1` observation, ask-card choice text included, is a

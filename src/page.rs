@@ -458,7 +458,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let _ = writeln!(w, "<p class=\"detail\">{}</p></section>", if inst["source"]["state"] == "ok" { "No installation connected yet." } else { "Installation list unavailable." });
         return;
     }
-    let _ = writeln!(w, "<label><input id=\"show-inactive\" type=\"checkbox\"> Show retired and revoked connections</label><div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
+    let _ = writeln!(w, "<label><input id=\"show-inactive\" type=\"checkbox\"> Show stale, retired and revoked connections</label><div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
     let mut panels = String::new();
     for (index, r) in rows.iter().enumerate() {
         let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
@@ -487,7 +487,8 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, dur(age), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
             None => format!("Unknown · {}", o["reason"].as_str().map(esc).unwrap_or_else(|| "no observation".into())),
         };
-        let gone = |r: &Value| r["connection"] == "revoked" || r["activity"]["state"] == "retired";
+        // #242: retired joins stale and revoked behind the filter; an Attention anchor still reveals a silent row
+        let gone = |r: &Value| r["connection"] == "revoked" || r["observation"]["state"] == "stale" || r["activity"]["state"] == "retired";
         let inactive = gone(r);
         let selected = !inactive && !rows[..index].iter().any(|r| !gone(r));
         let product = match r["product"].as_str() { Some("agentq") => "AgentQ", Some("serverq") => "ServerQ", Some("taskq") => "TaskQ", _ => "Unknown product" };
