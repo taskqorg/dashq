@@ -11,9 +11,8 @@ use std::fmt::Write;
 
 const PREFIX: &str = "taskq-stage ";
 pub const STAGES: [&str; 7] = ["claim", "start", "build", "checks", "review", "ask", "close"];
-const RUNTIMES: [&str; 4] = ["claude", "codex", "codex-app", "other"];
 const OUTCOMES: [&str; 6] = ["ok", "ask", "retried", "failed", "cancelled", "unknown"];
-const ERRORS: [&str; 11] = ["none", "http4xx", "http5xx", "timeout", "permission", "invalid", "other", "panic", "exit", "left-board", "unreadable"];
+// runtime and error codes are TaskQ's: they come from the pinned snapshot vocabulary (crate::vocab), never a list here
 const UNKNOWN: [&str; 6] = ["no-model", "no-usage", "log-unreadable", "app-turn", "adopted", "open-stage"];
 /// A log read, or the newest telemetry block, older than this is stale (D6); the service rereads logs every 60 s.
 const LIMIT: u64 = 300;
@@ -60,7 +59,7 @@ fn valid(r: &Value) -> bool {
     let is = |k: &str, set: &[&str]| r[k].as_str().is_some_and(|s| set.contains(&s));
     // an open lifetime marker may lack its time (taskq: no clock); it then evidences nothing
     let at = r["at_ms"].is_u64() || (open(r) && r["at_ms"].is_null());
-    is("stage", &STAGES) && is("rt", &RUNTIMES) && is("outcome", &OUTCOMES) && is("error", &ERRORS)
+    is("stage", &STAGES) && is("rt", crate::vocab::telemetry_runtimes()) && is("outcome", &OUTCOMES) && is("error", crate::vocab::telemetry_errors())
         && (r["unknown"].is_null() || is("unknown", &UNKNOWN)) && r["task"].is_u64() && r["attempt"].is_u64() && at
         && (r["us"].is_null() || r["us"].is_u64()) && ["calls", "tokens", "output_tokens"].iter().all(|k| r[*k].is_null() || r[*k].is_u64())
         && (r["model"].is_null() || r["model"].as_str().is_some_and(|m| crate::data::safe(m, 64, b"-._@")))
@@ -302,7 +301,7 @@ pub fn build(inp: &Value) -> Value {
     }
     let cov: BTreeMap<(u64, u64), (&str, String)> = by.iter().map(|(k, v)| (*k, coverage(v, &holes))).collect();
     for (host, h) in &acc {
-        for rt in RUNTIMES {
+        for &rt in crate::vocab::telemetry_runtimes() {
             let mine: Vec<&Value> = h.records.iter().filter(|r| r["rt"] == rt && !open(r) && r["at_ms"].as_u64().is_some_and(|m| (from..=now).contains(&(m / 1000)))).collect();
             if !mine.is_empty() {
                 rows.push(row(host, rt, &mine, &by, &cov));
@@ -621,6 +620,21 @@ fn render_totals(w: &mut String, doc: &Value) {
 
 #[cfg(test)]
 mod tests {
+
+    /// A3: a TaskQ error code DashQ never listed (argument-too-long, taskq #1981 drift 7) is a record, not corrupt.
+    #[test]
+    fn taskq_error_codes_come_from_the_snapshot_vocabulary() {
+        let dir = std::env::temp_dir().join(format!("dashq-aw-codes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("taskq.log");
+        let rec = |error: &str| format!("{PREFIX}{}", json!({"stage": "build", "task": 7, "attempt": 3, "rt": "codex-app", "us": 1_000, "outcome": "failed", "error": error, "at_ms": 1_000}));
+        std::fs::write(&log, [rec("argument-too-long"), rec("left-board"), rec("lunch")].join("
+")).unwrap();
+        let (value, _) = read(log.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let errors: Vec<&Value> = value["records"].as_array().unwrap().iter().map(|r| &r["error"]).collect();
+        assert_eq!((errors, value["corrupt"].as_u64()), (vec![&json!("argument-too-long"), &json!("left-board")], Some(1)), "an unknown code stays corrupt");
+    }
     use super::*;
 
     /// #220 A1/A2: boundaries remain evidence, missing timing/progress never becomes healthy work.

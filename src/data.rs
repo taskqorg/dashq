@@ -9,8 +9,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const PERIODS: [u64; 3] = [1800, 7200, 86400];
 pub const AGENTS: [(&str, &str); 3] = [("codex", "Codex"), ("claude-code", "Claude Code"), ("hermes", "Hermes")];
-/// Open TaskQ states in counter order (TaskQ task-counters.md); `waiting` is shown as Blocked, Closed follows.
-pub const COUNTS: [&str; 7] = ["doing", "review", "ask", "failed", "ready", "waiting", "later"];
 const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
@@ -523,19 +521,21 @@ pub fn build(inp: &Value) -> Value {
             t["state"] = json!(if age.is_none() { "unknown" } else if fresh { "ok" } else { "stale" });
             t["reason"] = if fresh { Value::Null } else { json!(age.map_or("heartbeat age unknown".into(), |a| format!("heartbeat {} old (ttl {})", dur(a), dur(ttl)))) };
         }
+        // TaskQ's state vocabulary (crate::vocab): counter order and canonical labels; Closed has no authoritative total yet: unknown
+        let states = crate::vocab::pinned_states();
+        let l = |id: &str| states.iter().find(|s| s.id == id).map_or("", |s| s.label.as_str());
         let mut board = json!({
             "project": repo, "url": format!("https://github.com/{repo}/issues"), "source": src, "adapter": "taskq-labels",
-            "in_work": issues.map(|_| json!(with(&["q-doing", "q-review"]).unwrap().len())), "waiting": count(&["q-ask"]), "ready": count(&["q-ready"]),
-            "questions": list(&["q-ask"]), "failed": list(&["q-failed"]), "attempts": attempts, "latest": latest(repo),
+            "in_work": issues.map(|_| json!(with(&[l("doing"), l("review")]).unwrap().len())), "waiting": count(&[l("ask")]), "ready": count(&[l("ready")]),
+            "questions": list(&[l("ask")]), "failed": list(&[l("failed")]), "attempts": attempts, "latest": latest(repo),
         });
-        // TaskQ counter order (task-counters.md); `waiting` is Blocked; Closed has no authoritative total yet: unknown
         let mut counts = json!({"closed": null});
-        for k in COUNTS {
-            counts[k] = count(&[&format!("q-{k}")]);
+        for s in states {
+            counts[&s.id] = count(&[&s.label]);
         }
         board["counts"] = counts;
         board["tasks"] = issues.into_iter().flatten().map(|i| {
-            let state = COUNTS.iter().find(|k| i["labels"].as_array().is_some_and(|ls| ls.iter().any(|l| l == &format!("q-{k}"))));
+            let state = states.iter().find(|s| i["labels"].as_array().is_some_and(|ls| ls.iter().any(|l| l == &s.label))).map(|s| &s.id);
             json!({"n": i["number"], "title": i["title"], "url": i["url"], "state": state, "revision": null})
         }).collect::<Vec<_>>().into();
         // taskq-snapshot (adapters.md S3 R1) replaces counts, questions and failures when configured; heartbeats stay
@@ -555,8 +555,10 @@ pub fn build(inp: &Value) -> Value {
             board["in_work"] = total(&["doing", "review"]);
             board["waiting"] = total(&["ask"]);
             board["ready"] = total(&["ready"]);
-            for k in COUNTS {
-                board["counts"][k] = total(&[k]);
+            // the snapshot's own state list sets the counters, Held included (A1); an older taskq reads the pin
+            board["counts"] = json!({"closed": null});
+            for st in crate::vocab::states(&ts["value"]) {
+                board["counts"][&st.id] = total(&[&st.id]);
             }
             board["questions"] = pick(&|t| t["state"] == "ask" || (t["state"] == "review" && t["question"].is_object()), &question);
             board["failed"] = pick(&|t| t["state"] == "failed", &|t| json!({"number": t["n"], "title": t["title"], "url": t["url"], "reason": t["failed"]}));
@@ -1019,7 +1021,7 @@ fn serverq_enrolled(inp: &Value, now: u64, machines: &Machines, hosts: &mut BTre
 fn question(t: &Value) -> Value {
     let q = &t["question"];
     let parsed = q["parsed"] == true;
-    let choices: Vec<Value> = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).map(|c| json!({"k": c["id"], "text": c["text"], "unavailable": crate::answer::unavailable(&c["text"])})).collect();
+    let choices: Vec<Value> = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).map(|c| json!({"k": c["id"], "text": c["text"], "unavailable": crate::answer::unavailable(c)})).collect();
     let recommended = q["choices"].as_array().into_iter().flatten().filter(|_| parsed).find(|c| c["recommended"] == true).map_or(Value::Null, |c| c["id"].clone());
     let text = if parsed { q["problem"].clone() } else { q["text"].clone() };
     json!({"id": t["url"], "number": t["n"], "title": t["title"], "url": t["url"], "state": t["state"], "revision": t["revision"],
@@ -1198,6 +1200,31 @@ mod tests {
         assert!(d["in_work"].is_null() && d["questions"] == json!([]));
         assert_eq!(doc["boards"][1]["adapter"], "taskq-labels");
         assert_eq!(doc["sources"]["taskq"]["state"], "unknown");
+    }
+
+    /// A1: Held is counted from TaskQ's state vocabulary, never a DashQ list; a snapshot that adds a state needs no
+    /// DashQ edit, and the label adapter counts `waiting` from TaskQ's canonical label (q-blocked), not a guessed one.
+    #[test]
+    fn counters_follow_the_taskq_state_vocabulary() {
+        let mut inp: Value = serde_json::from_str(include_str!("../fixture/input.json")).unwrap();
+        let v = &mut inp["taskq"]["taskqorg/taskq"]["value"];
+        v["totals"]["held"] = json!(2);
+        let c = &build(&inp)["boards"][0]["counts"];
+        assert_eq!((c["held"].as_u64(), c["closed"].clone()), (Some(2), Value::Null), "held from totals, closed stays unknown");
+        let v = &mut inp["taskq"]["taskqorg/taskq"]["value"];
+        v["totals"]["parked"] = json!(4);
+        v["vocabulary"] = json!({"states": [{"id": "held", "name": "Held", "label": "q-held"}, {"id": "parked", "name": "Parked", "label": "q-parked"}]});
+        let c = &build(&inp)["boards"][0]["counts"];
+        assert_eq!(c, &json!({"closed": null, "held": 2, "parked": 4}), "the live vocabulary sets the counters");
+        // the label adapter: the same board without a snapshot
+        inp["taskq"].as_object_mut().unwrap().remove("taskqorg/taskq");
+        let issues = inp["boards"]["taskqorg/taskq"]["value"]["issues"].as_array_mut().unwrap();
+        issues.extend([json!({"number": 15, "title": "Blocked", "url": "https://github.com/taskqorg/taskq/issues/15", "labels": ["taskq", "q-blocked"]}),
+            json!({"number": 16, "title": "Held", "url": "https://github.com/taskqorg/taskq/issues/16", "labels": ["taskq", "q-held"]})]);
+        let b = &build(&inp)["boards"][0];
+        assert_eq!((b["adapter"].as_str(), b["counts"]["waiting"].as_u64(), b["counts"]["held"].as_u64(), b["counts"]["doing"].as_u64()), (Some("taskq-labels"), Some(1), Some(1), Some(1)));
+        let state = |n: u64| b["tasks"].as_array().unwrap().iter().find(|t| t["n"] == n).unwrap()["state"].clone();
+        assert_eq!((state(15), state(16)), (json!("waiting"), json!("held")));
     }
 
     // Chain: enrolled taskq-board/1 task session -> board task row (#1565, #180). Risk: an off-host Codex session shows

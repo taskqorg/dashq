@@ -13,3 +13,4 @@ fixture/taskq/admission-codes.json -text
 fixture/taskq/host-observations.json -text
 assets/taskq/task-workspace* -text
 assets/taskq/pm-composer* -text
+assets/taskq/status-snapshot* -text

@@ -42,15 +42,18 @@ pub struct Ctx<'a> {
     pub state: &'a Answers,
 }
 
-/// TaskQ runs `close` for an option that starts with `close` (taskq § 2): such choices stay on the board.
-pub fn closes(text: &str) -> bool {
-    text.trim_start().get(..5).is_some_and(|x| x.eq_ignore_ascii_case("close"))
+/// TaskQ marks a snapshot choice `consequential` when answering it runs close, publication or an approval
+/// (taskq § 2); such choices stay on the board. A choice without the field is treated as consequential.
+pub fn consequential(choice: &Value) -> bool {
+    choice["consequential"] != false
 }
 
 /// The reason a choice cannot be answered here, for `/data`; `null` when it can.
-pub fn unavailable(text: &Value) -> Value {
-    if text.as_str().is_some_and(closes) { json!("Close and publication are answered on the board") } else { Value::Null }
+pub fn unavailable(choice: &Value) -> Value {
+    if consequential(choice) { json!(CONSEQUENTIAL) } else { Value::Null }
 }
+
+const CONSEQUENTIAL: &str = "Close, publication and approval are answered on the board";
 
 fn reply(status: &'static str, v: Value) -> Resp {
     Resp { status, ctype: "application/json", body: v.to_string().into_bytes(), headers: String::new(), forms: false }
@@ -364,8 +367,8 @@ fn precheck(g: &Guarded, op: &AnswerOp, answer: Write<'_>, token: &str) -> Resul
             let Some(c) = q["choices"].as_array().into_iter().flatten().find(|c| c["id"].as_u64() == Some(k as u64)) else {
                 return out("rejected", format!("This card has no option {k}"), t["revision"].clone(), url);
             };
-            if c["text"].as_str().is_some_and(closes) {
-                return out("rejected", "Close and publication are answered on the board".into(), t["revision"].clone(), url);
+            if consequential(c) {
+                return out("rejected", CONSEQUENTIAL.into(), t["revision"].clone(), url);
             }
         }
         Err(_) if state != "ask" => {
@@ -412,7 +415,7 @@ fn sanitize(v: &Value, op: &AnswerOp, controls: bool) -> Value {
     }
     let outcome = s("outcome").filter(|o| ["accepted", "rejected", "stale", "unknown"].contains(&o.as_str())).unwrap_or_else(|| "unknown".into());
     if controls && outcome == "accepted" && (v["revision"].as_i64().or_else(|| v["revision"].as_str()?.parse::<i64>().ok()).is_none_or(|n| n < 0)
-        || !v["state"].as_str().is_some_and(|s| ["held", "ready", "waiting", "doing", "review", "ask", "failed", "later", "closed"].contains(&s))) {
+        || !v["state"].as_str().is_some_and(|s| s == "closed" || crate::vocab::pinned_states().iter().any(|x| x.id == s))) {
         return receipt_of(op, "unknown", "TaskQ returned an incomplete accepted receipt", "Retry with the same operation ID");
     }
     let revision = if v["revision"].is_i64() { v["revision"].clone() } else { json!(s("revision")) };
@@ -471,7 +474,9 @@ mod tests {
 
         fn snap(&self, state: &str, revision: i64) {
             let s = json!({"schema": 1, "complete": true, "tasks": [{"n": 12, "url": "https://github.com/o/r/issues/12", "state": state, "revision": revision,
-                "question": {"parsed": true, "choices": [{"id": 1, "text": "close: merge now", "recommended": false}, {"id": 3, "text": "Files", "recommended": true}]}}]});
+                "question": {"parsed": true, "choices": [{"id": 1, "text": "close: merge now", "recommended": false, "consequential": true},
+                    {"id": 2, "text": "approve 0123abc ship it", "recommended": false, "consequential": true}, {"id": 3, "text": "Files", "recommended": true, "consequential": false},
+                    {"id": 4, "text": "Later", "recommended": false}]}}]});
             std::fs::write(self.d.join("snap.json"), s.to_string()).unwrap();
         }
 
@@ -668,8 +673,12 @@ mod tests {
         let t = T::new("stale");
         let (s, v) = t.post("github|1", "task=12&revision=699&op_id=op-1&choice=3");
         assert_eq!((s.as_str(), &v["outcome"], &v["revision"]), ("409 Conflict", &json!("stale"), &json!(700)));
-        let (s, v) = t.post("github|1", "task=12&revision=700&op_id=op-2&choice=1");
-        assert_eq!((s.as_str(), &v["reason"]), ("422 Unprocessable Content", &json!("Close and publication are answered on the board")));
+        // TaskQ's `consequential` flag decides, not DashQ's reading of the text: close, an approval (A2) and a
+        // choice from a snapshot without the flag all stay on the board
+        for (op, k) in [("op-2", 1), ("op-2a", 2), ("op-2b", 4)] {
+            let (s, v) = t.post("github|1", &format!("task=12&revision=700&op_id={op}&choice={k}"));
+            assert_eq!((s.as_str(), &v["reason"]), ("422 Unprocessable Content", &json!("Close, publication and approval are answered on the board")), "choice {k}");
+        }
         let (s, _) = t.post("github|1", "task=12&revision=700&op_id=op-3&choice=7");
         assert_eq!(s, "422 Unprocessable Content");
         t.snap("doing", 700);
@@ -683,8 +692,9 @@ mod tests {
         let (s, v) = t.post("github|1", "task=12&revision=700&op_id=op-6&choice=3");
         assert_eq!((s.as_str(), &v["reason"]), ("422 Unprocessable Content", &json!("Board read failed (taskq incomplete: HTTP 502); nothing was written")));
         assert!(t.calls().is_empty());
-        assert_eq!(unavailable(&json!("Close #12 now")), json!("Close and publication are answered on the board"));
-        assert_eq!(unavailable(&json!("Files")), Value::Null);
+        assert_eq!(unavailable(&json!({"text": "approve 0123abc", "consequential": true})), json!("Close, publication and approval are answered on the board"));
+        assert_eq!(unavailable(&json!({"text": "Close #12 now"})), json!("Close, publication and approval are answered on the board"), "no flag: refused");
+        assert_eq!(unavailable(&json!({"text": "Close the gap in docs", "consequential": false})), Value::Null, "the flag, not the text, decides");
     }
 
     #[test]
