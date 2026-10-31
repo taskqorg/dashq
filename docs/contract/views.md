@@ -94,7 +94,7 @@ D10 detail.
 - Ownership: the [host-first package](../design/first-screen.md) owns composition; [overview](../design/overview.md) owns resources, [boards](../design/boards.md) TaskQ adoption, [connections](../design/connections.md) lifecycle presentation. Apply [W1–W15](https://github.com/taskqorg/specq/blob/fea6e540efa6971c5739453b198183cbb3fb010d/design/dashboards.md).
 - Overview: approved compact host cards across the main width, one column at narrow widths without smaller type; no side-by-side project boards or permanent detail panels.
 - Attention keeps its header shortcut and count.
-- Stale, superseded and revoked installation records are hidden by default in Connections, available through explicit filters with history intact. D11/D16 automatic overview sections move to detail.
+- Stale, superseded and revoked installation records are hidden by default in Connections, available through explicit filters with history intact. Retired records (D11: no report for 30 days, #242 A3) are hidden the same way. A silent row reads `Silent · <reason>`; its Attention anchor reveals it even when filtered. D11/D16 automatic overview sections move to detail.
 - Refresh shows a brief local 1.3 s changed-value tint (none under reduced motion).
 - Acceptance: A1–A5 of #169 and the [review package](../design/first-screen.md#review-and-acceptance).
 
@@ -276,7 +276,7 @@ D23 detail.
 
 - Other current problems, gaps and history stay Observations detail.
 - Each `attention.requests` item is `{kind, source, host, project, task, rule, installation, reason, since, age_s, action, target}`.
-- Kinds: TaskQ questions (`/projects#board-<repo>-q-<n>`), failed TaskQ tasks (the issue) and ServerQ `warn` rules (the exact open episode `/checks#finding-<id>`, else the rule row `/checks#check-<installation|report>-<rule>`).
+- Kinds: TaskQ questions (`/projects#board-<repo>-q-<n>`), failed TaskQ tasks (the issue), ServerQ `warn` rules (the exact open episode `/checks#finding-<id>`, else the rule row `/checks#check-<installation|report>-<rule>`) and `silent` installations (D11: `source` the product, `since` the last report or null, action `Reconnect`, target `/integrations#inst-<installation>-<workspace>`).
 
 ### Query
 

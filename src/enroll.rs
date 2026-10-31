@@ -906,7 +906,8 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
             } else {
                 telemetry_json(&r.telemetry)
             };
-            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry,
+            let activity = activity(&r, now);
+            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry, "activity": activity,
                 "project_limits": if r.product == "taskq" { project_limits(&r, now) } else { Value::Null },
                 "generation": r.generation, "connection": r.connection,
                 "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
@@ -916,6 +917,29 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
         })
         .collect();
     Some(json!({"source": src("ok", None), "rows": rows}))
+}
+
+/// #242 A1: no report for longer than this makes an installation silent and an Attention request.
+pub const SILENT_SECS: u64 = 3600;
+/// #242 A3: no report for longer than this retires an installation from every active view; its records stay.
+pub const RETIRE_SECS: u64 = 30 * 86400;
+
+/// An installation row's `activity` (#242): the last report is the newest durable receipt or trusted producer time;
+/// nothing ever received counts from the grant. Revoked connections are history, never silent.
+fn activity(r: &store::Row, now: u64) -> Value {
+    let last = r.received_at.into_iter().chain(r.snapshot.as_ref().filter(|s| !s.clock_uncertain).map(|s| s.observed)).max().map(|t| t.max(0) as u64);
+    let age = now.saturating_sub(last.unwrap_or(r.created.max(0) as u64));
+    let silence = match last {
+        Some(_) => format!("no report for {}", crate::data::dur(age)),
+        None => format!("no report since approval {} ago", crate::data::dur(age)),
+    };
+    let (state, reason) = match () {
+        _ if r.connection == "revoked" => ("revoked", Some("connection revoked".to_string())),
+        _ if age > RETIRE_SECS => ("retired", Some(format!("{silence}; retired from active views, history kept"))),
+        _ if age > SILENT_SECS => ("silent", Some(silence)),
+        _ => ("reporting", None),
+    };
+    json!({"state": state, "last_report": last, "age_s": age, "reason": reason})
 }
 
 /// An installation row's `telemetry` (D11 #161, #181 A3): DashQ's retained range and its known loss, and the
@@ -2234,6 +2258,72 @@ mod tests {
         let cred = machine(e, "/machine/connect/token", None, json!({"protocol": 1, "device_code": d["device_code"]}), now).1["credential"].as_str().unwrap().to_string();
         assert_eq!(machine(e, "/machine/connect/ack", Some(&cred), json!({"protocol": 1}), now).0, 200);
         cred
+    }
+
+    /// #242 A1/A3. Defect: an installation that stopped reporting raised nothing (ServerQ on Windows and WSL went
+    /// silent for 16 days unnoticed, a TaskQ never linked), and a retired one stayed in every active view.
+    /// Protection: no report for over an hour reads `silent` and is an Attention request with a reconnect target;
+    /// a 30-day silence is `retired`: gone from hosts, checks and Attention, still listed with its history; a
+    /// revoked connection is never silent.
+    #[test]
+    fn silent_installations_ask_for_a_reconnect_and_retired_ones_leave_active_views() {
+        let now = crate::source::now() as i64;
+        let (_d, e) = setup("silent");
+        let schema = "serverq-report/1";
+        let linux = include_str!("../fixture/serverq/linux.json");
+        let (hour, month) = (SILENT_SECS as i64, RETIRE_SECS as i64);
+        let send = |cred: &str, id: &str, at: i64| {
+            let (s, v) = ingest(&e, cred, vec![json!({"schema": schema, "event_id": id, "observed_at": at, "payload": serverq_report(linux, at)})], at);
+            assert_eq!((s, states(&v)), (200, vec!["accepted".to_string()]), "{v}");
+        };
+        let fresh = join(&e, "serverq", "sq-fresh", "native", "fresh", schema, now - 600);
+        send(&fresh, "r-fresh", now - 60);
+        // just under the hour still reports; just over is silent
+        let edge = join(&e, "serverq", "sq-edge", "native", "edge", schema, now - 2 * hour);
+        send(&edge, "r-edge", now - hour + 120);
+        let quiet = join(&e, "serverq", "sq-quiet", "wsl", "DESKTOP", schema, now - 2 * hour);
+        send(&quiet, "r-quiet", now - hour - 120);
+        // approved and acknowledged, never reported
+        join(&e, "taskq", "tq-never", "wsl", "pds18", "taskq-board/1", now - 2 * hour);
+        let old = join(&e, "serverq", "sq-old", "native", "old", schema, now - month - 7200);
+        send(&old, "r-old", now - month - 3600);
+        let gone = join(&e, "serverq", "sq-gone", "native", "gone", schema, now - 2 * hour);
+        send(&gone, "r-gone", now - 2 * hour);
+        assert!(e.as_ref().unwrap().store().revoke("sq-gone", now).unwrap());
+
+        let mut app = app(e, None);
+        app.cfg.serverq_report = String::new();
+        let (s, doc) = data(&app, "", Some(Scope::All));
+        assert_eq!(s, "200 OK", "{doc}");
+        let rows = doc["installations"]["rows"].as_array().unwrap();
+        let activity = |inst: &str| rows.iter().find(|r| r["installation"] == inst).unwrap()["activity"].clone();
+        let states: Vec<_> = ["sq-fresh", "sq-edge", "sq-quiet", "tq-never", "sq-old", "sq-gone"].map(|i| activity(i)["state"].as_str().unwrap().to_string()).into();
+        assert_eq!(states, ["reporting", "reporting", "silent", "silent", "retired", "revoked"]);
+        assert_eq!(activity("sq-quiet")["last_report"], now - hour - 120);
+        assert!(activity("tq-never")["reason"].as_str().unwrap().starts_with("no report since approval"), "{}", activity("tq-never"));
+        assert!(activity("sq-old")["reason"].as_str().unwrap().ends_with("retired from active views, history kept"));
+
+        // Attention: exactly the two silent installations, each naming host, age and its Connections row
+        let silent: Vec<&Value> = doc["attention"]["requests"].as_array().unwrap().iter().filter(|r| r["kind"] == "silent").collect();
+        assert_eq!(silent.len(), 2, "{silent:?}");
+        let quiet_req = silent.iter().find(|r| r["installation"] == "sq-quiet").unwrap();
+        assert_eq!((quiet_req["host"].as_str(), quiet_req["source"].as_str(), quiet_req["action"].as_str()), (Some("DESKTOP/wsl"), Some("serverq"), Some("Reconnect")));
+        assert_eq!(quiet_req["target"], "/integrations?period=1800#inst-sq-quiet-ws-1");
+        assert!(quiet_req["age_s"].as_u64().is_some_and(|a| a > SILENT_SECS), "{quiet_req}");
+        assert_eq!(quiet_req["reason"], "serverq silent: no report for 62m");
+        assert!(silent.iter().any(|r| r["installation"] == "tq-never" && r["since"].is_null()));
+
+        // A3: the retired installation leaves hosts, checks and versions, but keeps its row and history
+        assert!(!doc["checks"]["installations"].as_array().unwrap().iter().any(|c| c["installation"] == "sq-old"));
+        assert!(!doc["hosts"].as_array().unwrap().iter().any(|h| h["id"].as_str().is_some_and(|id| id.starts_with("old/"))), "{}", doc["hosts"]);
+        assert!(!doc["versions"]["rows"].as_array().unwrap().iter().any(|r| r["installation"] == "sq-old"));
+        assert!(doc["checks"]["installations"].as_array().unwrap().iter().any(|c| c["installation"] == "sq-quiet"), "a silent one stays visible");
+        assert_eq!(app.enroll.as_ref().unwrap().store().history("sq-old").unwrap().len(), 1);
+        let html = crate::page::render_view(&doc, &json!({}), "/integrations");
+        assert!(html.contains("Silent · no report for 62m") && html.contains("Retired · no report for 30d"), "Connections names both");
+        assert!(html.contains("data-inactive=\"true\" id=\"select-inst-sq-old-ws-1\""), "retired is behind the filter");
+        assert!(html.contains("data-inactive=\"false\" id=\"select-inst-sq-quiet-ws-1\""), "silent with a current observation stays in the default list");
+        assert!(html.contains("data-inactive=\"true\" id=\"select-inst-sq-gone-ws-1\""), "revoked stays behind the filter");
     }
 
     /// Enrollment E1/E6 for TaskQ (#125): a schema 1 `taskq-board/1` observation, ask-card choice text included, is a

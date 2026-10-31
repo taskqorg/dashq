@@ -244,7 +244,19 @@ fn add(m: &mut Value, k: &str, n: f64) {
     m[k] = if v.fract() == 0.0 && v < 9e15 { json!(v as u64) } else { json!(v) };
 }
 
-pub fn build(inp: &Value) -> Value {
+pub fn build(full: &Value) -> Value {
+    // #242 A3: a retired installation leaves every active view (hosts, checks, versions, Attention); `installations`
+    // keeps it with its history
+    let retired = |r: &Value| r["activity"]["state"] == "retired";
+    let trimmed;
+    let inp = if full["installations"]["rows"].as_array().is_some_and(|rows| rows.iter().any(retired)) {
+        let mut c = full.clone();
+        c["installations"]["rows"].as_array_mut().unwrap().retain(|r| !retired(r));
+        trimmed = c;
+        &trimmed
+    } else {
+        full
+    };
     let now = inp["now"].as_u64().unwrap_or(0);
     let period = inp["period"].as_u64().unwrap_or(1800);
     let f = &inp["filters"];
@@ -847,11 +859,11 @@ pub fn build(inp: &Value) -> Value {
             "what": format!("{}: {}", f["rule"].as_str().unwrap_or("unknown"), f["state"].as_str().unwrap_or("unknown")), "since": f["first_seen"], "verified_at": f["verified_at"], "episode": f})));
     }
     doc["changes"] = crate::explain::changes(&items, &events, &sources, now, period, cursor);
-    doc["attention"]["requests"] = crate::explain::requests(&doc, now).into();
     let longest = doc["changes"]["rows_total"].as_u64().max(doc["agent_work"]["attempts_total"].as_u64()).unwrap_or(0) as usize;
     doc["query"] = crate::explain::query(period, now, cursor, longest);
-    if inp["installations"].is_object() {
-        doc["installations"] = inp["installations"].clone();
+    // retired rows stay listed here, with their history, behind the Connections filter (#242 A3)
+    if full["installations"].is_object() {
+        doc["installations"] = full["installations"].clone();
         for r in doc["installations"]["rows"].as_array_mut().into_iter().flatten() {
             r["route"] = crate::explain::route(r);
         }
@@ -865,6 +877,19 @@ pub fn build(inp: &Value) -> Value {
             }); }
         }
     }
+    let mut requests = crate::explain::requests(&doc, now);
+    // #242 A1 (owner decision): an installation silent for over an hour needs a person to reconnect it
+    for r in doc["installations"]["rows"].as_array().into_iter().flatten().filter(|r| r["activity"]["state"] == "silent") {
+        let label = r["host_label"].as_str().filter(|h| safe(h, 64, b"_.-")).unwrap_or("unknown");
+        let host = machines.id(label, if r["runtime"] == "wsl" { "wsl" } else { "native" });
+        let a = &r["activity"];
+        let since = if a["last_report"].is_null() { Value::Null } else { a["last_report"].clone() };
+        let target = format!("/integrations?period={period}#inst-{}-{}", crate::source::enc(r["installation"].as_str().unwrap_or("")), crate::source::enc(r["workspace"].as_str().unwrap_or("")));
+        requests.push(json!({"kind": "silent", "source": r["product"], "host": host, "project": null, "task": null, "rule": null, "installation": r["installation"],
+            "reason": format!("{} silent: {}", r["product"].as_str().unwrap_or("installation"), a["reason"].as_str().unwrap_or("no report")),
+            "since": since, "age_s": a["age_s"], "action": "Reconnect", "target": target}));
+    }
+    doc["attention"]["requests"] = requests.into();
     doc
 }
 

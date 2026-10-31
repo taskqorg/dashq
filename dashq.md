@@ -65,7 +65,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 ## D8. Page
 The [operator redesign](docs/design/operator-redesign/README.md) is the target for D8 and D10 over the host-first baseline: hosts and their state first, tasks through shared TaskQ UI, other information on demand. The page is English. R1–R9 and D2–D7 stay binding; D10 amends only the source-summary placement. Production qualification remains pending. Item detail: [views detail](docs/contract/views.md#page).
 1. **Hosts**: one machine/kind per visual group; each value keeps its source and time. Silence means unknown, not offline. A heartbeat never proves client login or service health. No host state is inferred from activity or totals. Shared queues remain unassigned, never multiplied across hosts.
-2. **Attention**: only a condition requiring a person and an identified action; each item names host/task, reason, age and action. Observation gaps, revoked connections and incident history are detail, not current failures; automatic retries and ordinary waits are not requests for a person.
+2. **Attention**: only a condition requiring a person and an identified action; each item names host/task, reason, age and action. Observation gaps, revoked connections and incident history are detail, not current failures; automatic retries and ordinary waits are not requests for a person. One exception: an installation silent for over 1 h (D11) is a request to reconnect it.
 3. **Tasks**: selecting a host's count opens its observed tasks in the TaskQ view; a direct Tasks entry includes all configured projects and unassigned work. A missing full-workspace or control release stays an explicit gap, not a DashQ editor.
 4. **Agents**: `/agents` starts with TaskQ attempts and a selected inspector. Client activity, D21 stage totals, D17 optimization and D24 model use keep separate linked destinations; totals are never merged. Cost is null unless reported; login is a separate probe.
 5. **Server checks**: host detail or Checks retains per-rule detail, incidents, linked work, numeric evidence and manual rules marked not verified. A closed task never establishes recovery.
@@ -93,6 +93,8 @@ The [operator redesign package](docs/design/operator-redesign/README.md) owns th
 - `dashq report` reads the store only with the 0600 config and key, so local report stays a protected host-administrator capability, never a remote identity bypass.
 - The browser subject comes only from `X-Dashq-Subject`, which the proxy strips from clients and copies from the guard's verified answer ([fixture/Caddyfile](fixture/Caddyfile)).
 - Freshness uses producer observation time; connection and export health stay separate. No receipt means contact unknown; silence never proves the host stopped. Langfuse forwarding stays off by default.
+- Silence: an active or pending installation with no report (newest durable receipt or trusted producer time; none: since its grant) for over 3600 s reads `silent`, an Attention request to reconnect it. Over 30 days it reads `retired` and leaves hosts, checks, versions and Attention; its row, grant and history stay. Revoked is never silent.
+- A receipt keeps only a SHA-256 digest of the record it acknowledged, for the 8-day receipt window; the hourly prune vacuums the file when most of it is free.
 - A receipt becomes `projected` only when the shared projection reads its snapshot as current and a view renders it. Registry, approval, ingestion, projection, telemetry and resources: [connections detail](docs/contract/connections.md).
 ## D25. Host link relay
 DashQ is a blind relay: connected TaskQ installations exchange end-to-end encrypted messages through it. TaskQ owns keys, encryption and message schema. DashQ never decodes a body, holds no key, runs no host command and adds no authority.
@@ -129,7 +131,7 @@ Read-only: no billing source, credential or new authority. Actual expenses are a
 ## D23. Waiting work, changes and route
 Read-only, no new authority. One projection serves `/data`, the page and `dashq report`. Detail: [views detail](docs/contract/views.md#waiting-work-changes-and-route).
 - DashQ never infers a stall or another reason; an admission code outside TaskQ's pinned vocabulary reads `unknown`. Changes classify conditions only from producer times and never say "nothing changed"; an unknown route stage is never passed.
-- `attention.requests` lists only producer requests needing a person. The Attention list and count render exactly these.
+- `attention.requests` lists only producer requests needing a person and D11 silent installations. The Attention list and count render exactly these.
 ## D18. Service versions and diagnostics
 - [Service versions V1–V4](docs/design/service-versions.md): distinguish available, selected, running and verified health per installation. No remote update, restart or rollback authority. `update` is `available|current` only from a fresh verified comparison. Detail: [views detail](docs/contract/views.md#service-versions).
 ## D20. Profiling

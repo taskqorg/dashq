@@ -458,7 +458,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let _ = writeln!(w, "<p class=\"detail\">{}</p></section>", if inst["source"]["state"] == "ok" { "No installation connected yet." } else { "Installation list unavailable." });
         return;
     }
-    let _ = writeln!(w, "<label><input id=\"show-inactive\" type=\"checkbox\"> Show stale and revoked connections</label><div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
+    let _ = writeln!(w, "<label><input id=\"show-inactive\" type=\"checkbox\"> Show stale, retired and revoked connections</label><div class=\"connect-head\"><span>Installation</span><span>Connection</span><span>Data</span></div><div class=\"connect-list\">");
     let mut panels = String::new();
     for (index, r) in rows.iter().enumerate() {
         let (inst_id, ws) = (r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""));
@@ -466,21 +466,31 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let revoked = r["connection"] == "revoked";
         let verified = r["projected"] == true;
         let recent = r["received_at"].as_u64().is_some_and(|t| t <= now && now - t <= crate::enroll::stale_secs(r["snapshot"]["schema"].as_str().unwrap_or("")));
-        let (class, connection) = match r["connection"].as_str() {
+        let activity = &r["activity"];
+        let silence = activity["reason"].as_str().map(esc).unwrap_or_default();
+        let (class, connection) = match (r["connection"].as_str(), activity["state"].as_str()) {
+            // #242: silent over an hour asks for a reconnect; retired after 30 days leaves the default list
+            (Some("revoked"), _) => ("detail", "Revoked · history kept".to_string()),
+            (_, Some("retired")) => ("detail", format!("Retired · {silence}")),
+            (_, Some("silent")) => ("connect-ask", format!("Silent · {silence}")),
+            (c, _) => { let (class, label) = match c {
             Some("revoked") => ("detail", "Revoked · history kept"),
             Some("pending") => ("detail", "Pending · credential activation"),
             Some("active") if !verified => ("detail", "Pending · first snapshot readback"),
             Some("active") if recent => ("connect-good", "✓ Connected"),
             Some("active") if r["received_at"].as_u64().is_some_and(|t| t <= now) => ("connect-ask", "No recent receipt"),
             _ => ("detail", "Connection unknown"),
+            }; (class, label.to_string()) }
         };
         let o = &r["observation"];
         let data = match o["age_s"].as_u64() {
             Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, dur(age), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
             None => format!("Unknown · {}", o["reason"].as_str().map(esc).unwrap_or_else(|| "no observation".into())),
         };
-        let inactive = revoked || o["state"] == "stale";
-        let selected = !inactive && !rows[..index].iter().any(|r| r["connection"] != "revoked" && r["observation"]["state"] != "stale");
+        // #242: retired joins stale and revoked behind the filter; an Attention anchor still reveals a silent row
+        let gone = |r: &Value| r["connection"] == "revoked" || r["observation"]["state"] == "stale" || r["activity"]["state"] == "retired";
+        let inactive = gone(r);
+        let selected = !inactive && !rows[..index].iter().any(|r| !gone(r));
         let product = match r["product"].as_str() { Some("agentq") => "AgentQ", Some("serverq") => "ServerQ", Some("taskq") => "TaskQ", _ => "Unknown product" };
         let duplicate = rows.iter().filter(|other| other["host_label"] == r["host_label"] && other["runtime"] == r["runtime"] && other["product"] == r["product"]).count() > 1;
         let identity = if duplicate { format!("<small>{}</small>", esc(inst_id)) } else { String::new() };
@@ -1103,6 +1113,7 @@ fn actions(w: &mut String, doc: &Value, now: u64) -> usize {
     for r in requests {
         let what = match r["kind"].as_str() {
             Some("finding") => format!("{} · {}", text(&r["host"]), text(&r["rule"])),
+            Some("silent") => format!("{} · {}", text(&r["host"]), text(&r["installation"])),
             _ => format!("{} · #{}", text(&r["project"]), text(&r["task"])),
         };
         let target = r["target"].as_str().unwrap_or("");
