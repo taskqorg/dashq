@@ -35,6 +35,7 @@ D4.2 detail ([S3 R1](../design/adapters.md#s3-taskq-snapshots-and-questions)).
 
 - With config `taskq.binary` (absolute path of the pinned taskq), dashq runs `taskq status --json` per project in an isolated scratch run ([process detail](process.md#snapshot-adapter-run)); single flight, 10 s timeout, cache 60 s. Absent key: labels only.
 - Snapshot totals, questions (S3 shape, read-only) and failure reasons replace the label counts; heartbeats stay label reads.
+- Counters are one per state of the snapshot's `vocabulary.states`, Held included; a snapshot without it, and the label adapter, use the [pinned fixture](#pinned-taskq-assets)'s ids and labels.
 - A failed, incomplete or unknown-schema run is a failed read with its reason; `sources.taskq` lists it.
 
 ## ServerQ report
@@ -110,6 +111,7 @@ D10 detail.
 
 - Project/answer blocks and task controls: TaskQ v4.6.30, commit 09cb0d7db35d0de51bef83d9fa3ec803eafad42d, [shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.30/docs/design/shared-blocks.md), `assets/taskq/provenance.json`.
 - Resources: TaskQ v4.6.25, `assets/taskq/sources.json`.
+- Status snapshot fixture and schema (states, choices, telemetry codes): TaskQ v4.6.53, `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
 - Full workspace, detail, menus and PM composer: TaskQ v4.6.34, `assets/taskq/workspace-provenance.json`; unchanged released components through the [adapter](../design/task-workspace.md).
 
 ## Redesign target decisions

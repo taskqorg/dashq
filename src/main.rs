@@ -21,6 +21,7 @@ mod profile;
 mod resource;
 mod source;
 mod version;
+mod vocab;
 #[allow(dead_code)] // export forwarding, backup and restore use the rest
 mod store;
 
@@ -602,6 +603,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
         return Err("fixture: rendering differs from fixture/page.html".into());
     }
     answer::control_fixture()?;
+    vocab::check()?;
     println!("fixture: ok; task controls: taskq.task-controls/1");
     let p = config_path(t);
     if !p.exists() {

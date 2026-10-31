@@ -441,7 +441,8 @@
         "failed": 1,
         "ready": 1,
         "waiting": 1,
-        "later": 0
+        "later": 0,
+        "held": 0
       },
       "tasks": [
         {
@@ -595,7 +596,8 @@
         "failed": null,
         "ready": null,
         "waiting": null,
-        "later": null
+        "later": null,
+        "held": null
       },
       "tasks": []
     },
@@ -625,7 +627,8 @@
         "failed": null,
         "ready": null,
         "waiting": null,
-        "later": null
+        "later": null,
+        "held": null
       },
       "tasks": []
     }

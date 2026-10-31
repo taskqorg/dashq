@@ -47,6 +47,7 @@ Each source has its own cache, single flight (one read in progress, callers shar
 - Projects are an explicit list in config (`taskqorg/taskq`, `taskqorg/agentq`, `taskqorg/serverq`, `taskqorg/coreq`, `taskqorg/specq`, `taskqorg/dashq`). Repositories are never discovered.
 - Boards: open issues labelled `taskq`, one page of 100 per repo; more than 100 marks the board `incomplete`. Heartbeat age = response `Date` minus issue `updated_at`, never the local clock. Labels, releases and caches: [views detail](docs/contract/views.md#github-reads).
 - Snapshot adapter ([S3 R1](docs/design/adapters.md#s3-taskq-snapshots-and-questions)): with config `taskq.binary`, dashq runs `taskq status --json` per project in an isolated scratch run whose totals, questions and failure reasons replace the label counts. A failed, incomplete or unknown-schema run is a failed read with its reason. Detail: [views detail](docs/contract/views.md#snapshot-adapter).
+- TaskQ vocabularies: states, labels and telemetry codes come from the snapshot's `vocabulary`, else the pinned snapshot fixture; DashQ keeps no TaskQ table.
 ### D4.3 ServerQ report
 - The local `report.json` written by `serverq check` (path in optional `serverq` config) is read on every refresh. On failure the last-good report stays in memory with its original producer time, unconfirmed until a successful read.
 - Absent config is unconfigured, distinct from a missing report. Another schema or invalid JSON is unknown with the reason. Stale after 7200 s. Schema, paths and enrolled reports: [views detail](docs/contract/views.md#serverq-report).
@@ -99,7 +100,7 @@ DashQ is a blind relay: connected TaskQ installations exchange end-to-end encryp
 - Memory only: nothing about a message reaches SQLite, logs, `/data` or `report`; only D20 counts its requests. A restart drops pending messages; the sender asks again.
 ## D13. TaskQ answers, task controls and PM requests
 TaskQ owns the components, renderer, commands and receipts; DashQ pins released assets and supplies scoped browser adapters. Each route stays off until configured; detail: [views detail](docs/contract/views.md#gated-taskq-actions).
-- **Answer card** ([shared-card integration](docs/design/answers.md)): guarded `POST /answer` uses TaskQ's canonical dispatcher, expected revision, operation ID and verified receipt; consequential operations are excluded. Cards stay read-only wherever `answer` is not configured.
+- **Answer card** ([shared-card integration](docs/design/answers.md)): guarded `POST /answer` uses TaskQ's canonical dispatcher, expected revision, operation ID and verified receipt; a choice TaskQ marks `consequential` (close, publication, approval), or one without that flag, is refused. Cards stay read-only wherever `answer` is not configured.
 - Worker line text never reaches DashQ views: ingestion strips `session.line` before storing a snapshot, and older stored lines are never projected. The full log never leaves its host.
 - **Task controls** ([adapter](docs/design/task-controls.md)): guarded `GET|POST /task/control`. Every request requires the verified subject to be the workspace's administrator with the separate `dashq controller` grant. `/data` task rows add the canonical `controls` list; no offer is inferred.
 - Actor, a fresh complete row/revision and a qualified adapter gate every dispatch. Unknown delivery never becomes accepted or a fresh operation.
@@ -117,7 +118,7 @@ TaskQ owns the components, renderer, commands and receipts; DashQ pins released 
 - Approving a connection alone grants no capability; the grant keeps only the ticked subset. Queued operations take `authority` from the server only; payload claims never add authority. Detail: [AgentQ operations](docs/contract/connections.md#agentq-operations).
 - The Agent integration view is read-only: a missing, older or unsupported projection is `unknown` with its reason; a stale snapshot is never green; configured never reads as verified.
 ## D21. Agent work
-- Source: TaskQ attempt stage records from stored `taskq-telemetry/1` blocks (D11), else a configured local `taskq.log`. Only valid stage, runtime, outcome, error and unknown codes count; other lines never leave the reader. Detail: [views detail](docs/contract/views.md#agent-work).
+- Source: TaskQ attempt stage records from stored `taskq-telemetry/1` blocks (D11), else a configured local `taskq.log`. Only valid stage, runtime, outcome, error and unknown codes count; runtime and error codes are the pinned snapshot vocabulary's; other lines never leave the reader. Detail: [views detail](docs/contract/views.md#agent-work).
 - Elapsed and execution times exist only for `complete` coverage, else null with a state and reason. Intervals may overlap; open, adopted, partial or untimed evidence never becomes a complete duration or an idle interval.
 - A period without rows reads `No attempt stages` only when the block is `ok`, else unknown with the reason. Missing, old or partial evidence is never zero or ok; incomplete counts are a lower bound.
 ## D24. Model use and estimates
