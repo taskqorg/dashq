@@ -34,6 +34,8 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
    page.on('pageerror',e=>errors.push(e.message));let offline=false,answer='lost';const answers=[];
    const doc=JSON.parse(read('fixture/data.json')),b=doc.boards[0];
    b.source={state:'ok',at:Math.floor(Date.now()/1000),age_s:0,incomplete:false};
+   // The board reports every state but held; held must stay unknown, never zero.
+   delete b.counts.held;
    b.tasks=[{n:7,state:'doing',title:'One shared task workspace',url:b.url+'/7',revision:20,controls:['stop','later']}];b.questions=[];b.failed=[];b.attempts=[];doc.boards=[b];
    const target=JSON.parse(read('assets/taskq/pm-composer-fixtures.json')).request;
    const html=()=>read('fixture/page.html').replace(/data-boards="[^"]*"/,'data-boards="'+escape(JSON.stringify(doc.boards))+'"');
