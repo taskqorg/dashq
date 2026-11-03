@@ -1046,22 +1046,21 @@ pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Va
         // Authorization precedes cache access; each workspace keeps a separate single-flight last-good read.
         let key=format!("fleet:{}",json!([r["installation"],r["workspace"]]));
         let snap=e.fleet_cache.get(&key,30,|| {
-            let mut records = vec![];
-            let mut capped = false;
             let blocks=e.store.telemetry_since(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""), since, |_| true).map_err(|_|("store unavailable".to_string(),None))?;
-            for (_, p) in blocks {
-                let (_, lines)=p.and_then(|p| serde_json::from_str::<Value>(&p).ok()).and_then(|p| telemetry_lines(&p)).ok_or(("stored block invalid".to_string(),None))?;
-                for l in lines {
-                    if matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")) {
-                        if records.len() >= 10_000 { capped = true; break }
-                        records.push(l);
-                    }
-                }
-                if capped { break }
-            }
-            Ok((json!({"records":records,"telemetry":r["telemetry"]}),capped))
+            let mut invalid = false;
+            let lines = blocks.into_iter().flat_map(|(_, p)| {
+                let block = p.and_then(|p| serde_json::from_str::<Value>(&p).ok()).and_then(|p| telemetry_lines(&p));
+                invalid |= block.is_none();
+                block.map(|(_, l)| l).unwrap_or_default()
+            }).filter(|l| matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")));
+            // A3: blocks arrive oldest first; the cap keeps the newest rows so current limits stay readable.
+            let mut kept = crate::fleet::keep_newest(lines, 10_000);
+            if invalid { return Err(("stored block invalid".to_string(),None)); }
+            let capped = kept["capped"] == true;
+            kept["telemetry"] = r["telemetry"].clone();
+            Ok((kept,capped))
         });
-        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "error": snap["error"], "capped": snap["incomplete"]})
+        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]})
     }).collect::<Vec<_>>())
 }
 

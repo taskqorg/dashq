@@ -16,6 +16,25 @@ pub fn cli_lines(body: &str) -> Value {
     out
 }
 
+/// A3: a capped read keeps the newest received rows. `dropped_newest_ms` is the newest producer time of a dropped
+/// turn (unknown time: max), so a limit no newer than it is never shown as current.
+pub fn keep_newest(lines: impl IntoIterator<Item = Value>, cap: usize) -> Value {
+    let mut records = std::collections::VecDeque::with_capacity(cap.min(1024));
+    let mut capped = false;
+    let mut dropped: Option<u64> = None;
+    for l in lines {
+        if records.len() >= cap.max(1) {
+            capped = true;
+            if let Some(old) = records.pop_front().filter(|o: &Value| o["observation"]["kind"] == "agent.turn") {
+                let at = old["observation"]["started_ms"].as_u64().unwrap_or(u64::MAX);
+                dropped = Some(dropped.map_or(at, |d| d.max(at)));
+            }
+        }
+        records.push_back(l);
+    }
+    json!({"records": records, "capped": capped, "dropped_newest_ms": dropped})
+}
+
 fn unknown(why: &str) -> Value {
     json!({"state": "unknown", "at": null, "age_s": null, "reason": why, "incomplete": false})
 }
@@ -66,7 +85,7 @@ fn tokens(rows: &[&Value]) -> Value {
     out
 }
 
-fn groups(rows: &[&Value], dimension: &str, now: u64) -> Vec<Value> {
+fn groups(rows: &[&Value], dimension: &str, now: u64, dropped_ms: Option<u64>) -> Vec<Value> {
     let mut grouped: BTreeMap<String, Vec<&Value>> = BTreeMap::new();
     for r in rows {
         let label = match dimension {
@@ -78,7 +97,11 @@ fn groups(rows: &[&Value], dimension: &str, now: u64) -> Vec<Value> {
     }
     grouped.into_iter().map(|(label, rs)| {
         let latest = rs.iter().max_by_key(|r| r["started_ms"].as_u64().unwrap_or(0)).unwrap();
+        let cut = dropped_ms.is_some_and(|d| latest["started_ms"].as_u64().is_none_or(|s| s <= d));
         let limit = |k: &str| {
+            if cut {
+                return json!({"state": "unknown", "at": latest["started_ms"].as_u64().map(|t|t/1000), "age_s": latest["started_ms"].as_u64().map(|t|now.saturating_sub(t/1000)), "value": null, "reason": "Fleet row cap reached; a newer limit may be unread"});
+            }
             let valid = match k {
                 "limit_used_percent" => latest[k].as_f64().is_some_and(|n| n.is_finite() && (0.0..=100.0).contains(&n)),
                 "limit_resets_at" => latest[k].as_u64().is_some(),
@@ -87,7 +110,7 @@ fn groups(rows: &[&Value], dimension: &str, now: u64) -> Vec<Value> {
             let stale=latest["started_ms"].as_u64().is_none_or(|at|now.saturating_sub(at/1000)>300) || latest["limit_resets_at"].as_u64().is_some_and(|t|t<=now);
             json!({"state": if !valid {"unknown"} else if stale {"stale"} else {"ok"}, "at": latest["started_ms"].as_u64().map(|t|t/1000), "age_s": latest["started_ms"].as_u64().map(|t|now.saturating_sub(t/1000)), "value": if valid { latest[k].clone() } else { Value::Null }, "reason": if valid && stale { json!("snapshot stale or reset elapsed") } else if valid { Value::Null } else if latest[k].is_null() { json!(code(&latest["unknown"][k]).unwrap_or("not-reported")) } else { json!("invalid-producer-value") }})
         };
-        json!({"label": label, "turns": rs.len(), "tokens": tokens(&rs), "at": latest["started_ms"].as_u64().map(|t|t/1000),
+        json!({"label": label, "turns": rs.len(), "tokens": tokens(&rs), "at": latest["started_ms"].as_u64().map(|t|t/1000), "limit_capped": cut,
             "limit_used_percent": limit("limit_used_percent"), "limit_resets_at": limit("limit_resets_at"), "limit_window": limit("limit_window")})
     }).collect()
 }
@@ -120,6 +143,7 @@ fn window(stream: &Value, now: u64, seconds: u64) -> Value {
     }
     // The transport certifies retained rows, not a whole-window producer baseline. Never claim a complete census.
     let t = &stream["telemetry"];
+    let dropped = if stream["capped"] == true { Some(stream["dropped_newest_ms"].as_u64().unwrap_or(u64::MAX)) } else { None };
     let reason = if stream["error"].is_string() { stream["error"].as_str().unwrap() }
         else if stream["capped"] == true { "Fleet row cap reached" }
         else if unidentified > 0 { "observations have no stable identity" }
@@ -137,7 +161,7 @@ fn window(stream: &Value, now: u64, seconds: u64) -> Value {
         source["state"]=json!("stale"); source["reason"]=json!(format!("latest producer observation older than 300 s; {reason}"));
     }
     json!({"seconds": seconds, "from": now.saturating_sub(seconds), "to": now, "source": source, "untimed": untimed, "capped": stream["capped"] == true, "last_received": t["last_synced"],
-        "projects": groups(&turns,"project",now), "attempts": groups(&turns,"attempt",now), "accounts": groups(&turns,"account",now),
+        "projects": groups(&turns,"project",now,dropped), "attempts": groups(&turns,"attempt",now,dropped), "accounts": groups(&turns,"account",now,dropped),
         "completed_observed": (!completed.is_empty()).then_some(completed.len()),
         "completions_per_hour_observed": (!completed.is_empty()).then_some(completed.len() as f64 / (seconds as f64 / 3600.0)),
         "workers_started_observed": (!workers.is_empty()).then_some(workers.len())})
@@ -161,7 +185,9 @@ pub fn build(inp: &Value, hosts: &Value) -> Value {
             // Visual grouping never merges installation/workspace identities or sums their streams.
             let candidates: Vec<usize> = rows.iter().enumerate().filter(|(_,r)| r["host"].as_str().is_some_and(|h| h.eq_ignore_ascii_case(&label) || h.split('/').next().is_some_and(|h|h.eq_ignore_ascii_case(&label)))).map(|(i,_)|i).collect();
             let index = if candidates.len()==1 { candidates[0] } else {
-                rows.push(json!({"host":label,"clis":[],"streams":[]})); rows.len()-1
+                // A5/R2: no heartbeat joins this host, so both CLI versions stay visible as unknown.
+                let none=json!({});
+                rows.push(json!({"host":label,"clis":[version(&none,"claude",inp,now),version(&none,"codex",inp,now)],"streams":[]})); rows.len()-1
             };
             for seconds in [86400,7*86400] {
                 let mut win=window(&scoped,now,seconds);
@@ -202,7 +228,9 @@ pub fn render(w: &mut String, fleet: &Value) {
         }
         if h["streams"].as_array().is_none_or(|a|a.is_empty()) { w.push_str("<p>Usage, account limits and cadence unknown · no associated D11 Fleet stream.</p>"); }
         for win in h["streams"].as_array().into_iter().flatten() {
-            let _ = write!(w,"<details id=\"fleet-{}-{}-{}-{}\" {}><summary>{} · {} · {}</summary><p>{} to {} UTC · source age {} s</p><p>Observed completions: {} · completions/hour: {} · workers started: {}</p>",esc(win["installation"].as_str().unwrap_or("none")),esc(win["workspace"].as_str().unwrap_or("none")),esc(h["host"].as_str().unwrap_or("unknown")),win["seconds"],if win["seconds"]==86400 {" open"} else {""},if win["seconds"]==86400 {"24 h"} else {"7 d"},value(&win["source"]["state"]),value(&win["source"]["reason"]),crate::source::iso(win["from"].as_u64().unwrap_or(0)),crate::source::iso(win["to"].as_u64().unwrap_or(0)),value(&win["source"]["age_s"]),observed(&win["completed_observed"],win["capped"]==true),win["completions_per_hour_observed"].as_f64().map_or_else(||value(&Value::Null),|n|if win["capped"]==true {format!("\u{2265}{n:.3} (capped)")} else {format!("{n:.3}")}),observed(&win["workers_started_observed"],win["capped"]==true));
+            // D10: the summary keeps a stable id so refresh restores its focus.
+            let id=format!("fleet-{}-{}-{}-{}",esc(win["installation"].as_str().unwrap_or("none")),esc(win["workspace"].as_str().unwrap_or("none")),esc(h["host"].as_str().unwrap_or("unknown")),win["seconds"]);
+            let _ = write!(w,"<details id=\"{id}\" {}><summary id=\"{id}-summary\">{} · {} · {}</summary><p>{} to {} UTC · source age {} s</p><p>Observed completions: {} · completions/hour: {} · workers started: {}</p>",if win["seconds"]==86400 {" open"} else {""},if win["seconds"]==86400 {"24 h"} else {"7 d"},value(&win["source"]["state"]),value(&win["source"]["reason"]),crate::source::iso(win["from"].as_u64().unwrap_or(0)),crate::source::iso(win["to"].as_u64().unwrap_or(0)),value(&win["source"]["age_s"]),observed(&win["completed_observed"],win["capped"]==true),win["completions_per_hour_observed"].as_f64().map_or_else(||value(&Value::Null),|n|if win["capped"]==true {format!("\u{2265}{n:.3} (capped)")} else {format!("{n:.3}")}),observed(&win["workers_started_observed"],win["capped"]==true));
             let _=write!(w,"<p>Installation {} · workspace {} · {}</p>",value(&win["installation"]),value(&win["workspace"]),value(&win["host_provenance"]));
             for (key,title) in [("projects","Tokens per project"),("attempts","Tokens per task attempt"),("accounts","Tokens and limits per account")] {
                 let _ = write!(w,"<h4>{title}</h4>");
@@ -219,7 +247,7 @@ pub fn render(w: &mut String, fleet: &Value) {
                             let _ = write!(w,"<span>{label}: {} {}</span>",display,value(&r[k]["reason"]));
                         }
                         let at=r["at"].as_u64().unwrap_or(0);
-                        let _ = write!(w,"<span data-fleet-state>Limit observation {} UTC · {}</span>",crate::source::iso(at),if win["to"].as_u64().unwrap_or(0).saturating_sub(at)>300 || r["limit_resets_at"]["value"].as_u64().is_some_and(|t|t<=win["to"].as_u64().unwrap_or(0)) {"stale; current limit unknown"} else {"turn observation"});
+                        let _ = write!(w,"<span data-fleet-state>Limit observation {} UTC · {}</span>",crate::source::iso(at),if r["limit_capped"]==true {"row cap reached; current limit unknown"} else if win["to"].as_u64().unwrap_or(0).saturating_sub(at)>300 || r["limit_resets_at"]["value"].as_u64().is_some_and(|t|t<=win["to"].as_u64().unwrap_or(0)) {"stale; current limit unknown"} else {"turn observation"});
                     }
                     w.push_str("</div>");
                 }
@@ -277,6 +305,39 @@ pub(crate) mod tests {
         assert!(build(&empty,&json!([]))["hosts"][0]["streams"][0]["workers_started_observed"].is_null());
         empty["filters"]["host"]=json!("other/native");
         assert!(build(&empty,&json!([]))["hosts"].as_array().unwrap().is_empty());
+    }
+    /// D26 A5 / R2: a telemetry-only host keeps both CLI rows as unknown instead of hiding them.
+    #[test]
+    fn fleet_telemetry_only_host_shows_cli_unknowns() {
+        let d=build(&fixture(),&json!([]));
+        let clis=d["hosts"][0]["clis"].as_array().unwrap();
+        assert_eq!(clis.iter().map(|c|c["runtime"].as_str().unwrap()).collect::<Vec<_>>(),["claude","codex"]);
+        assert!(clis.iter().all(|c|c["running"].is_null() && c["source"]["state"]=="unknown" && c["behind"].is_null()));
+        let mut html=String::new(); render(&mut html,&d);
+        assert!(html.contains("claude: — ") && html.contains("codex: — "));
+    }
+    /// D26 A3 / R2: a capped read whose dropped turns may be newer never shows an older limit as current.
+    #[test]
+    fn fleet_capped_limits_are_not_current() {
+        let mut f=fixture(); let now=f["now"].as_u64().unwrap();
+        f["fleet_records"][0]["capped"]=json!(true);
+        f["fleet_records"][0]["dropped_newest_ms"]=json!((now-30)*1000);
+        let a=&build(&f,&json!([]))["hosts"][0]["streams"][0]["accounts"][0];
+        assert!(a["limit_used_percent"]["value"].is_null(),"older limit shown as current");
+        assert_eq!(a["limit_used_percent"]["state"],"unknown");
+        f["fleet_records"][0]["dropped_newest_ms"]=json!((now-120)*1000);
+        assert_eq!(build(&f,&json!([]))["hosts"][0]["streams"][0]["accounts"][0]["limit_used_percent"]["value"],42);
+    }
+    /// D26 A3: the read cap keeps the newest rows and records the newest dropped turn time.
+    #[test]
+    fn fleet_cap_keeps_newest_rows() {
+        let t=|id:&str,s:u64|json!({"id":id,"observation":{"kind":"agent.turn","started_ms":s}});
+        let w=json!({"id":"w","observation":{"kind":"worker","started_ms":9}});
+        let r=keep_newest([t("a",5),t("b",3),w,t("c",7)],2);
+        assert_eq!(r["records"].as_array().unwrap().iter().map(|l|l["id"].as_str().unwrap()).collect::<Vec<_>>(),["w","c"]);
+        assert_eq!(r["capped"],true);
+        assert_eq!(r["dropped_newest_ms"],5);
+        assert_eq!(keep_newest([t("a",5)],2)["capped"],false);
     }
     /// D18/D26: stale and failed release/heartbeat reads never qualify drift; missing CLI stays unknown.
     #[test]

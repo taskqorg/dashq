@@ -30,6 +30,7 @@ const css=read('assets/style.css');
    await disclosure.locator('summary').click();
    await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
    assert.equal(await page.locator(`[id="${id}"]`).getAttribute('open'),null,'refresh reopened disclosure');
+   assert.equal(await page.evaluate(()=>document.activeElement?.id),id+'-summary','refresh lost summary focus');
    const before=await page.locator('#fleet').innerText();offline=true;
    await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
    assert(await page.locator('#banner').isVisible());
