@@ -685,12 +685,19 @@ var TaskqAnswerCard = (() => {
           return { draft: "", bound: row.revision, op: null, receipt: null };
         },
         textProblem: function(q2, text, files) {
+          if (q2?.resultDate) {
+            const at = /* @__PURE__ */ new Date(text + "T12:00:00Z");
+            return /^\d{4}-\d{2}-\d{2}$/.test(text) && Number.isFinite(+at) && at.toISOString().slice(0, 10) === text && at > Date.now() ? null : "Choose a future revisit date";
+          }
+          if (q2?.resultReason && (text.trim().length === 0 || [...text.trim()].length > 180 || /[\r\n]/.test(text))) return "Give a one-line reason, at most 180 characters";
           return replyFiles.problem(files) || (text.trim() || files?.length ? null : "Type an answer");
         },
         status: function(row, local, cap) {
           const q2 = row.question;
+          if (row.resultDecision && local.bound !== row.revision) return "stale";
+          if (row.resultDecision && row.state === "closed" && q2?.parsed && row.repeatable && local.receipt?.state === "accepted" && cap?.answer) return "actionable";
           if (local.op && local.receipt && (HELD.includes(local.receipt.state) || local.op.revision === row.revision || !q2)) return local.receipt.state;
-          if (!manageable(row, cap) && (!q2 || !q2.parsed || !cap || !cap.answer || !["ask", "review"].includes(row.state))) return "read-only";
+          if (!manageable(row, cap) && (!q2 || !q2.parsed || !cap || !cap.answer || !(row.resultDecision ? row.state === "closed" : ["ask", "review"].includes(row.state)))) return "read-only";
           if (local.bound !== row.revision && (local.draft.trim() || local.files?.length)) return "changed";
           return "actionable";
         },
@@ -716,11 +723,16 @@ var TaskqAnswerCard = (() => {
               if (!LIVE.includes(st) || l2.files?.length) return { local, send: null };
               const c2 = row.question.choices.find((x2) => x2.id === ev.id);
               if (!c2 || c2.consequential) return { local, send: null };
+              if (row.resultDecision && c2.local) return { local: l2, send: null };
+              if (row.resultDecision && c2.reason) return { local: { ...l2, intent: c2.reason, ...c2.reason === "later" && !l2.draft ? { draft: new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10) } : {} }, send: null };
               return start({ choice: c2.id });
             }
             case "submit":
+              if (row.resultDecision && (!(row.question.resultReason || row.question.resultDate) || !l2.intent)) return { local, send: null };
               if (!cap || !cap.answer || !LIVE.includes(st) || textProblem(draftQuestion(row, cap), l2.draft, l2.files)) return { local, send: null };
               return start(fallback(row, cap) ? { action: "requeue", text: l2.draft.trim() } : { text: l2.draft.trim() }, st === "changed" && !fallback(row, cap) ? l2.bound : row.revision);
+            case "cancel-result":
+              return row.resultDecision && LIVE.includes(st) ? { local: { ...l2, intent: null }, send: null } : { local, send: null };
             case "requeue":
               if (!manageable(row, cap) || !LIVE.includes(st) || textProblem(REQUEUE, l2.draft, l2.files)) return { local, send: null };
               return start({ action: "requeue", text: l2.draft.trim() });
@@ -735,6 +747,7 @@ var TaskqAnswerCard = (() => {
                 l2.draft = "";
                 l2.files = [];
               }
+              if (ev.state === "accepted" && l2.intent === "later") l2.intent = null;
               return { local: l2, send: null };
             case "retry":
               return RETRY.includes(st) ? { local: { ...l2, receipt: { state: "sending" } }, send: l2.op } : { local, send: null };
@@ -750,15 +763,15 @@ var TaskqAnswerCard = (() => {
           h2 += '<p class="qac-head" id="' + id + '-t"><span class="qac-mark" aria-hidden="true">?</span> <a href="' + href(row.url) + '" target="_blank" rel="noopener">#' + esc(row.n) + "</a> " + esc(row.title) + "</p>";
           if (own && cap?.files && st !== "read-only") h2 += replyFiles.markup(local.files, !live);
           if (manageable(row, cap)) {
-            h2 += q2.parsed ? lines(q2) + images(q2) : '<pre class="qac-text">' + esc(q2.text || row.card || "No question text supplied") + "</pre>";
+            h2 += cap?.paged ? images(q2) : q2.parsed ? lines(q2) + images(q2) : '<pre class="qac-text">' + esc(q2.text || row.card || "No question text supplied") + "</pre>";
             if (own) h2 += q2.parsed ? '<form class="qac-text-form" data-qac="submit"><textarea data-qac="input" rows="2" aria-label="Your answer" placeholder="What you did"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !textProblem(q2, local.draft, local.files) ? "" : " disabled") + ">Send</button>" + hint(id, live && textProblem(q2, local.draft, local.files)) + "</form>" : '<form class="qac-text-form" data-qac="submit"><textarea data-qac="input" rows="1" aria-label="Requeue reason" placeholder="Reason to requeue"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !textProblem(REQUEUE, local.draft, local.files) ? "" : " disabled") + ">Requeue</button>" + hint(id, live && textProblem(REQUEUE, local.draft, local.files)) + "</form>";
             h2 += '<div class="qac-choices">' + (q2.parsed && own ? '<button type="button" data-qac="requeue"' + (live && !textProblem(REQUEUE, local.draft, local.files) ? "" : " disabled") + ">Requeue</button>" : "") + '<button type="button" data-qac="later"' + (live ? "" : " disabled") + '>Later</button><button type="button" data-qac="close"' + (live ? "" : " disabled") + ">Close without publishing</button></div>";
             h2 += receipt(st, local.receipt && local.receipt.reason, row.url, id, local.receipt && local.receipt.next, !!(local.op && local.op.action), what, local.receipt?.note);
             h2 += retry(st, local.receipt && local.receipt.reason);
             return h2 + "</section>";
           }
-          if (!q2.parsed) return h2 + '<pre class="qac-text">' + esc(q2.text) + "</pre>" + receipt(st, st === "read-only" ? "This card has no answer form here" : local.receipt && local.receipt.reason, row.url, id, null, false, what) + retry(st, local.receipt && local.receipt.reason) + "</section>";
-          h2 += lines(q2) + images(q2);
+          if (!q2.parsed) return h2 + (cap?.paged ? "" : '<pre class="qac-text">' + esc(q2.text) + "</pre>") + receipt(st, st === "read-only" ? "This card has no answer form here" : local.receipt && local.receipt.reason, row.url, id, null, false, what) + retry(st, local.receipt && local.receipt.reason) + "</section>";
+          h2 += (cap?.paged ? "" : lines(q2)) + images(q2);
           if (q2.choices.length) h2 += '<div class="qac-choices" role="group" aria-label="Choices">';
           for (const c2 of q2.choices) {
             const off = !live || c2.consequential || !!local.files?.length, why = c2.consequential ? "Answer on the board: this choice closes or publishes the task, or approves its result" : local.files?.length ? "Send files with a text reply, or remove them to choose an option" : "";
@@ -927,7 +940,7 @@ var TaskqAnswerCard = (() => {
             },
             act(board, n2, type) {
               const k2 = key(board, { n: n2 });
-              if (cards.has(k2) && ["submit", "requeue"].includes(type)) apply(k2, { type });
+              if (cards.has(k2) && ["submit", "requeue", "cancel-result"].includes(type)) apply(k2, { type });
             },
             // rows: [{board, row}] of open questions; a row that left keeps no state
             update(rows) {

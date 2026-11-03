@@ -67,7 +67,8 @@ D4.5 detail.
 - Model use: a runtime with `model.source` takes the `agentq.model` coverage; one with `model.reason` reads unknown with it; a client with `model` adds its unknown row.
 - Client rows: key, label, producer agent names (Claude Code reports as `claude`) and the Direct routing note.
 - PM receipt links: https, plain path characters, at most 300 bytes, and the runtime's `session-url` capability; anything else is dropped, never rewritten.
-- Pinned TaskQ assets are TaskQ releases; their own link checks change only with a repin (D10).
+- Fleet host CLIs (D26): a runtime's `cli` names its `cli <key> <version>` heartbeat key and its release repository; Fleet shows one version row per listed CLI.
+- Pinned TaskQ assets are TaskQ releases; their own link checks change only with a repin (D10). The name test scans them too; TaskQ v4.6.66 still branches on runtime names in 23 listed lines, the only exception, and a listed line that no longer matches fails the test.
 
 ## Refresh
 
@@ -122,13 +123,13 @@ D10 detail.
 
 ## Pinned TaskQ assets
 
-- One release: TaskQ v4.6.52, commit 73df356b19e841e3900c06878206bfdd73b7c41e. Three pin sets record it with each asset's release name and SHA-256:
-  - Project/answer blocks and task controls ([shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.52/docs/design/shared-blocks.md)): `assets/taskq/provenance.json`.
+- One release: TaskQ v4.6.66, commit 0275b366a92678a426f0e2b09e05e1ed5f8e29d3. Three pin sets record it with each asset's release name and SHA-256:
+  - Project/answer blocks and task controls ([shared blocks](https://github.com/taskqorg/taskq/blob/v4.6.66/docs/design/shared-blocks.md)): `assets/taskq/provenance.json`.
   - Resources and the resource-policy wire corpus: `assets/taskq/sources.json`.
   - Full workspace, detail, menus and PM composer: `assets/taskq/workspace-provenance.json`; unchanged released components through the [adapter](../design/task-workspace.md).
 - `node scripts/taskq-assets.cjs` (tests workflow) fails unless the three sets name one release and every asset comes from it.
 - The scheduled `taskq-assets` workflow (daily and on demand) runs it with `--latest`: it fails, naming each asset, when the latest TaskQ release has a newer or missing asset. `--update` repins every set from that release, checked against its `SHA256SUMS`; the repin PR then runs the usual tests.
-- Status snapshot fixture and schema (states, choices, telemetry codes): TaskQ v4.6.53, `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
+- Status snapshot fixture and schema (states, choices, telemetry codes): TaskQ v4.6.66, `assets/taskq/snapshot-provenance.json`, SHA-256 checked by `selftest`; a field DashQ reads failing in a repinned fixture fails its contract test.
 
 ## Redesign target decisions
 
@@ -163,7 +164,7 @@ D13 detail.
 
 - [Adapter and qualification](../design/task-controls.md): `/task/control` is off unless `task_controls: {token: "<absolute credential path>", boards: {"<owner/repo>": "<workspace>"}}` and `taskq.binary` are configured. Each board must be a configured project. Production pds18.ufobe.com configures it for the six configured boards.
 - The host administrator grants `dashq controller WORKSPACE SUBJECT on|off`.
-- TaskQ v4.6.52 owns the unmodified renderer, fixed command table, revision/op-id fencing and receipts for start/stop/later/retry. Close remains a board link.
+- TaskQ v4.6.66 owns the unmodified renderer, fixed command table, revision/op-id fencing and receipts for start/stop/later/retry. Close remains a board link.
 - Origin/CSRF, the durable operation journal and same-ID retry follow the answer transport.
 
 ### PM requests

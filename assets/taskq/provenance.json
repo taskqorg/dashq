@@ -1,29 +1,29 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "commit": "73df356b19e841e3900c06878206bfdd73b7c41e",
-  "release": "v4.6.52",
+  "commit": "0275b366a92678a426f0e2b09e05e1ed5f8e29d3",
+  "release": "v4.6.66",
   "files": {
-    "answer-card.js": "edb938b9d64854c9766b3a90642950562d3deb2d37d03f66858244177ca0650a",
+    "answer-card.js": "7648e64860c485fe5eb14bf2e27e4193458414ff423d3c598887ef733f2b2bd2",
     "answer-card.css": "48f66124d87c0c4e69cf23ec1d4a760a1e560610d4d5639214ee650727c65314",
-    "answer-card.json": "25612d4df1ce8b77870272755701a0c9b8bb8bd2852e2cd765e46e7f35ba9dc8",
-    "project-blocks.js": "2d8cef072bb05d9ec4eb4090b830d1c81606ca0be4b12c3c9434d53e9c1d6a92",
-    "project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0",
+    "answer-card.json": "d4d98ca3075b7352242c55b1cfff085e41c0374f32aa6faa3000541570be4375",
+    "project-blocks.js": "a849e08c58ed5d9c92f6000af866a720cc65b32796dc9686ef38cdd53de463a4",
+    "project-blocks.css": "35ffc029fce0ff07c86b03d1c0618a268d07dee7e615eab7d8204334fddc208c",
     "project-blocks.json": "0b049c5f09b368de869672b2b4bbe1b387c1b210e14afabb371ad7c0342794b8",
-    "project-blocks.sources.json": "355f8e206875fe0c3c16cc063b7f88fb823aff35e2bf935d56f5340b62781564",
+    "project-blocks.sources.json": "88ac663eaf6dda50f060a397c61f2bc3f76ff79f116ba1e509283fb825d1dfe1",
     "project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
-    "task-controls.js": "6552a0e73f3078428b61fd41304a22084e8e42084600d8d4923d3d53cdcde6b9",
+    "task-controls.js": "39fa15f9f3e49edbb20b6b33a92beeafeed6956da07c68195d763a37b5b724b2",
     "task-controls.json": "365233d01a50eb7ef515051a32ee8f6a8d09d41f6b72ba744d14aa4d25003ecb"
   },
   "assets": {
-    "answer-card.js": "taskq-4.6.52-answer-card.js",
-    "answer-card.css": "taskq-4.6.52-answer-card.css",
-    "answer-card.json": "taskq-4.6.52-answer-card-fixtures.json",
-    "project-blocks.js": "taskq-4.6.52-project-blocks.js",
-    "project-blocks.css": "taskq-4.6.52-project-blocks.css",
-    "project-blocks.json": "taskq-4.6.52-project-blocks-fixtures.json",
-    "project-blocks.sources.json": "taskq-4.6.52-project-blocks-sources.json",
-    "project-blocks.LICENSE": "taskq-4.6.52-project-blocks.LICENSE",
-    "task-controls.js": "taskq-4.6.52-task-controls.js",
-    "task-controls.json": "taskq-4.6.52-task-controls-fixtures.json"
+    "answer-card.js": "taskq-4.6.66-answer-card.js",
+    "answer-card.css": "taskq-4.6.66-answer-card.css",
+    "answer-card.json": "taskq-4.6.66-answer-card-fixtures.json",
+    "project-blocks.js": "taskq-4.6.66-project-blocks.js",
+    "project-blocks.css": "taskq-4.6.66-project-blocks.css",
+    "project-blocks.json": "taskq-4.6.66-project-blocks-fixtures.json",
+    "project-blocks.sources.json": "taskq-4.6.66-project-blocks-sources.json",
+    "project-blocks.LICENSE": "taskq-4.6.66-project-blocks.LICENSE",
+    "task-controls.js": "taskq-4.6.66-task-controls.js",
+    "task-controls.json": "taskq-4.6.66-task-controls-fixtures.json"
   }
 }

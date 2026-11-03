@@ -202,9 +202,21 @@ mod tests {
                 }
             }
         }
-        // Open exception (#252): assets/taskq holds pinned TaskQ release bytes (D10), which DashQ never edits; up to
-        // v4.6.65 they still branch on runtime names. #252 repins to a descriptor-reading release and drops this line.
-        hits.retain(|h| !h.replace('\\', "/").contains("/assets/taskq/"));
+        // Open exception (#252): assets/taskq holds pinned TaskQ v4.6.66 release bytes (D10), which DashQ never edits.
+        // That release still branches on runtime names in exactly these lines (TaskQ sources: src/pm-composer.js,
+        // src/project-blocks.js, src/resource-controls.js, src/tray-app.js). Every other vendored line is scanned, and
+        // a listed line that no longer matches fails too, so the list only shrinks when a repin drops a branch.
+        const VENDORED: &[(&str, &[usize])] = &[
+            ("assets/taskq/pm-composer.js", &[613]),
+            ("assets/taskq/project-blocks.js", &[770, 816, 820, 821]),
+            ("assets/taskq/resource-controls.js", &[755]),
+            ("assets/taskq/task-controls.js", &[771, 817, 821, 822]),
+            ("assets/taskq/task-workspace.js", &[2157, 2203, 2207, 2208, 3003, 5584, 8324, 8349, 8366, 8414, 8549, 9453, 9454]),
+        ];
+        let allowed: Vec<String> = VENDORED.iter().flat_map(|(f, lines)| lines.iter().map(move |l| format!("{}{f}:{l}:", dir.replace('\\', "/")))).collect();
+        let stale: Vec<&String> = allowed.iter().filter(|a| !hits.iter().any(|h| h.replace('\\', "/").starts_with(a.as_str()))).collect();
+        assert!(stale.is_empty(), "vendored exception lines without a runtime name; drop them:\n{stale:?}");
+        hits.retain(|h| !allowed.iter().any(|a| h.replace('\\', "/").starts_with(a.as_str())));
         assert!(hits.is_empty(), "runtime names outside the runtime table:\n{}", hits.join("\n"));
     }
 }

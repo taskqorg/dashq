@@ -3,7 +3,7 @@
   "componentVersion": 1,
   "schema": "taskq.pm/1",
   "files": {
-    "src/pm-composer.js": "705885cd63854ffe609f219f0dd9895a6a4ef8474d929d05842be568440df45a",
+    "src/pm-composer.js": "a35477f066967db743bdb54b7b36df797eb930ffbde02ecca6bf4f70200d9cfd",
     "tests/fixtures/pm-requests.json": "0f9b25c1a6abbd7aa7b0fc5e8f1551933fc9f7e73c41720510116fd4740d8e78",
     "src/pm-composer.css": "d4df93cbf263022344ffd3c736fe8b7883ddccd727e1a51e6a7ab5232326a856"
   },

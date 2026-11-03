@@ -1,17 +1,17 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "commit": "93215a4c90235b390ee4e5b5ccf94f10cee31cd0",
-  "release": "v4.6.53",
+  "commit": "0275b366a92678a426f0e2b09e05e1ed5f8e29d3",
+  "release": "v4.6.66",
   "files": {
     "status-snapshot.json": {
       "source": "tests/fixtures/status-snapshot.json",
-      "release_asset": "taskq-4.6.53-status-snapshot-fixtures.json",
-      "sha256": "a44885851e106c1c3bed8ff49d08e4f20a301b9ca4465e374ee3d3adc87ac43a"
+      "release_asset": "taskq-4.6.66-status-snapshot-fixtures.json",
+      "sha256": "312e3167b8442ae313e5103c3ac027779a562d3de7eb49ec94a8d8cbcf244021"
     },
     "status-snapshot.schema.json": {
       "source": "tests/fixtures/status-snapshot.schema.json",
-      "release_asset": "taskq-4.6.53-status-snapshot-schema.json",
-      "sha256": "2f63c915852af0d533f0c01e25776c8b2184ca21f74ac30540ed5334f14d34e0"
+      "release_asset": "taskq-4.6.66-status-snapshot-schema.json",
+      "sha256": "032cd3d4606835ff1f63220ce09f3d096948a9bf3ea8c45f817ca7f95dc23ce9"
     }
   }
 }

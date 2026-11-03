@@ -1,25 +1,25 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "release": "v4.6.52",
+  "release": "v4.6.66",
   "files": {
-    "task-workspace.js": "3f470316de5b19f656e666043f899ec6529317f49f91b07589e402813ee02941",
-    "task-workspace.css": "da9668233e60f899a2ab2983a25389f2fe546a5b82cd1c665e2d16a3d04b54ee",
+    "task-workspace.js": "0e74740f602104e4c7cb002b135714067e746c1cb8132d10474160481a1494b8",
+    "task-workspace.css": "4038cc72f225f0cfe9bd8ed3aa8cfcf84ffb404a0a1ed5dda645198e9a6309ca",
     "task-workspace-fixtures.json": "fb1b9736ec19c083cd457831fd0b8c63edfb680fba280f92a725759451cbeb6f",
-    "task-workspace-sources.json": "99cf313cf3354a6c4a03c207c39515d9ebb0f467e609ce114d767c7e7e155396",
-    "pm-composer.js": "f9c1dabaf4f3a3fd1fdb9d22861eab3569ef8ce3a549358eb69dbc63382c7a92",
+    "task-workspace-sources.json": "92e76481c7c864c3aa52f839011069d160fbd7008ed06c777b3517d264ad0d0d",
+    "pm-composer.js": "3a5d8c3fed7f23b988d82dc2e6d8ccd2bb3f290e9da868f3ed859c893cef01be",
     "pm-composer.css": "d4df93cbf263022344ffd3c736fe8b7883ddccd727e1a51e6a7ab5232326a856",
     "pm-composer-fixtures.json": "0f9b25c1a6abbd7aa7b0fc5e8f1551933fc9f7e73c41720510116fd4740d8e78",
-    "pm-composer-sources.json": "936d2deddbfde23a4569a03fd2f2d463f0f8204ef6552c8e2346aaf216df64fb"
+    "pm-composer-sources.json": "caab80585ea7efcf1d844d0e2533b6033937275daee821fb6afa91a9408b88ca"
   },
   "assets": {
-    "task-workspace.js": "taskq-4.6.52-task-workspace.js",
-    "task-workspace.css": "taskq-4.6.52-task-workspace.css",
-    "task-workspace-fixtures.json": "taskq-4.6.52-task-workspace-fixtures.json",
-    "task-workspace-sources.json": "taskq-4.6.52-task-workspace-sources.json",
-    "pm-composer.js": "taskq-4.6.52-pm-composer.js",
-    "pm-composer.css": "taskq-4.6.52-pm-composer.css",
-    "pm-composer-fixtures.json": "taskq-4.6.52-pm-composer-fixtures.json",
-    "pm-composer-sources.json": "taskq-4.6.52-pm-composer-sources.json"
+    "task-workspace.js": "taskq-4.6.66-task-workspace.js",
+    "task-workspace.css": "taskq-4.6.66-task-workspace.css",
+    "task-workspace-fixtures.json": "taskq-4.6.66-task-workspace-fixtures.json",
+    "task-workspace-sources.json": "taskq-4.6.66-task-workspace-sources.json",
+    "pm-composer.js": "taskq-4.6.66-pm-composer.js",
+    "pm-composer.css": "taskq-4.6.66-pm-composer.css",
+    "pm-composer-fixtures.json": "taskq-4.6.66-pm-composer-fixtures.json",
+    "pm-composer-sources.json": "taskq-4.6.66-pm-composer-sources.json"
   },
-  "commit": "73df356b19e841e3900c06878206bfdd73b7c41e"
+  "commit": "0275b366a92678a426f0e2b09e05e1ed5f8e29d3"
 }
