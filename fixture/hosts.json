@@ -175,7 +175,26 @@
         "state": "ok",
         "age_s": 90,
         "reason": null,
-        "observed_running": 1
+        "observed_running": 1,
+        "cli_heartbeats": [
+          {
+            "service": "202953da20cf",
+            "workspace": "taskqorg/taskq",
+            "host": "DESKTOP/native",
+            "at": 1792026510,
+            "age_s": 90,
+            "ttl": 300,
+            "version": "4.2.0",
+            "source": {
+              "state": "ok",
+              "at": 1792026600,
+              "age_s": 0,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": "inst-win-new",
@@ -207,7 +226,8 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no heartbeat",
-        "observed_running": null
+        "observed_running": null,
+        "cli_heartbeats": []
       },
       "agentq": {
         "installation": "inst-wsl",
@@ -239,7 +259,26 @@
         "state": "ok",
         "age_s": 70,
         "reason": null,
-        "observed_running": 0
+        "observed_running": 0,
+        "cli_heartbeats": [
+          {
+            "service": "8d8c701e0317",
+            "workspace": "taskqorg/taskq",
+            "host": "hermes-fra1/native",
+            "at": 1792026530,
+            "age_s": 70,
+            "ttl": 300,
+            "version": "4.2.0",
+            "source": {
+              "state": "ok",
+              "at": 1792026600,
+              "age_s": 0,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": "inst-fra",
@@ -273,7 +312,43 @@
         "state": "ok",
         "age_s": 30,
         "reason": null,
-        "observed_running": 1
+        "observed_running": 1,
+        "cli_heartbeats": [
+          {
+            "service": "18535c594451",
+            "workspace": "taskqorg/agentq",
+            "host": "macbook-m2.local/native",
+            "at": 1792026570,
+            "age_s": 30,
+            "ttl": 300,
+            "version": "4.1.2",
+            "source": {
+              "state": "ok",
+              "at": 1792026600,
+              "age_s": 0,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          },
+          {
+            "service": "18535c594451",
+            "workspace": "taskqorg/taskq",
+            "host": "macbook-m2.local/native",
+            "at": 1792026540,
+            "age_s": 60,
+            "ttl": 300,
+            "version": "4.2.0",
+            "source": {
+              "state": "ok",
+              "at": 1792026600,
+              "age_s": 0,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": "inst-mac",
@@ -305,7 +380,26 @@
         "state": "stale",
         "age_s": 28000,
         "reason": "heartbeat 7h old (ttl 5m)",
-        "observed_running": null
+        "observed_running": null,
+        "cli_heartbeats": [
+          {
+            "service": "383a0516e138",
+            "workspace": "taskqorg/taskq",
+            "host": "wsl",
+            "at": 1791998600,
+            "age_s": 28000,
+            "ttl": 300,
+            "version": "4.2.0-dev.1791998010",
+            "source": {
+              "state": "ok",
+              "at": 1792026600,
+              "age_s": 0,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": null,
