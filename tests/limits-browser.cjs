@@ -99,10 +99,10 @@ const receipt = (body, state, extra = {}) => ({schema: 'taskq.resources/1', op_i
       await x.page.getByText(why).waitFor();
       assert.equal(await x.page.getByRole('button', {name: 'Edit limits'}).count(), 0, why);
       assert.equal(x.posts.length, 0);
-      // Work mode never edits this profile
-      await x.page.getByRole('button', {name: '◎ Work mode…'}).click();
+      // Balancing never edits this profile
+      await x.page.getByRole('button', {name: '◎ Balancing…'}).click();
       await x.page.locator('[data-rsc-select]').first().check();
-      assert(await x.page.getByRole('button', {name: 'Edit work mode'}).isDisabled());
+      assert(await x.page.getByRole('button', {name: 'Edit Balancing'}).isDisabled());
       await x.page.close();
     }
     console.log('PASS project limits: grant scope, exact submit, lookup, superseded/applied readback, refusal reasons');

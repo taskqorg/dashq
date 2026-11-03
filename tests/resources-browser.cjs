@@ -1,4 +1,4 @@
-// Chain D14/#46: server fixture -> shared summary -> Work mode -> refresh/review -> no remote write.
+// Chain D14/#46: server fixture -> shared summary -> Balancing -> refresh/review -> no remote write.
 // The editable adapter below is a fixture only. Production writes only taskq.project-limits/1 (tests/limits-browser.cjs).
 const {chromium} = require('playwright');
 const fs = require('node:fs'), assert = require('node:assert/strict');
@@ -30,9 +30,9 @@ const fx = require('../fixture/taskq/resource-controls.json');
         if (width === 360) await page.locator('.node-policy summary').click();
         await page.locator(width === 1024 ? '#servers' : '.node-policy').screenshot({path: `${process.env.DASHQ_RESOURCE_SHOTS}/overview-${width}-${size}-${theme}.png`});
       }
-      await page.getByRole('button', {name: '◎ Work mode…'}).click();
+      await page.getByRole('button', {name: '◎ Balancing…'}).click();
       await page.locator('[data-rsc-select]').first().check();
-      assert(await page.getByRole('button', {name: 'Edit work mode'}).isDisabled());
+      assert(await page.getByRole('button', {name: 'Edit Balancing'}).isDisabled());
       await page.getByRole('button', {name: 'Close', exact: true}).click();
       // Same shell, canonical editable fixture. No HTTP mutation handler exists.
       await page.evaluate(groups => {
@@ -41,10 +41,10 @@ const fx = require('../fixture/taskq/resource-controls.json');
         const el = document.querySelector('.node-policy');
         window.fixtureBinding = DashqResources.mount(el, groups, {now: () => clockNow, capability: () => ({edit: true}), send: async (g, op) => { sent.push({key: g.key, op}); return {state: 'saved'}; }});
       }, fx.work[0].groups);
-      await page.getByRole('button', {name: '◎ Work mode…'}).click();
+      await page.getByRole('button', {name: '◎ Balancing…'}).click();
       await page.locator('[data-rsc-select="mac/taskq"]').check();
       await page.locator('[data-rsc-select="mac/agentq"]').check();
-      await page.getByRole('button', {name: 'Edit work mode'}).click();
+      await page.getByRole('button', {name: 'Edit Balancing'}).click();
       const max = page.locator('[data-rsc-field="host.maximum"]');
       assert.equal(await max.getAttribute('placeholder'), 'Mixed');
       if (process.env.DASHQ_RESOURCE_SHOTS && ((width === 1024 && size === 16 && theme === 'light') || (width === 360 && size === 20 && theme === 'dark'))) {

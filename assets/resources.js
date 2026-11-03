@@ -86,13 +86,13 @@
     const now = () => adapter.now ? adapter.now() : Math.floor(Date.now() / 1000);
     const view = g => adapter.view ? adapter.view(g) : g;
     const cap = g => shared.freshness(g, now()).fresh ? adapter.capability(g) : {edit: false, reason: 'Policy observation stale or unknown; read-only.'};
-    // Work mode drops saved_revision, so it cannot show this profile applied: project limits are edited inline only
-    const work = g => adapter.inline && limits(g) ? {edit: false, reason: 'Change project limits in the list; Work mode cannot confirm them.'} : cap(g);
+    // Balancing drops saved_revision, so it cannot show this profile applied: project limits are edited inline only
+    const work = g => adapter.inline && limits(g) ? {edit: false, reason: 'Change project limits in the list; Balancing cannot confirm them.'} : cap(g);
     const summary = document.createElement('div'), open = document.createElement('button');
     const details = document.createElement('details'), label = document.createElement('summary');
     details.append(label, summary);
     open.type = 'button';
-    open.textContent = '◎ Work mode…';
+    open.textContent = '◎ Balancing…';
     el.replaceChildren(details, open);
     const source = document.createElement('p');
     source.className = 'detail';
@@ -128,7 +128,7 @@
       if (active) active.dialog.close();
       const dialog = document.createElement('dialog');
       dialog.className = 'work-dialog';
-      dialog.setAttribute('aria-label', 'TaskQ Work mode');
+      dialog.setAttribute('aria-label', 'TaskQ Balancing');
       const close = document.createElement('button'), note = document.createElement('p'), editor = document.createElement('div');
       close.type = 'button'; close.textContent = 'Close';
       note.className = 'detail';

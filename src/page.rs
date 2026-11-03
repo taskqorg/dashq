@@ -1174,7 +1174,7 @@ fn servers(w: &mut String, res: &Value, now: u64) {
         let warm = h["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default();
         let _ = writeln!(
             w,
-            "<article class=\"node\" id=\"node-{inst}\"><div class=\"who\"><b>{}</b> <small>{} · {}</small> {}{}{warm}<br><span class=\"policy detail\">Work mode: no TaskQ policy adapter</span></div>",
+            "<article class=\"node\" id=\"node-{inst}\"><div class=\"who\"><b>{}</b> <small>{} · {}</small> {}{}{warm}<br><span class=\"policy detail\">Balancing: no TaskQ policy adapter</span></div>",
             text(&r["host"]),
             text(&r["runtime"]),
             text(&r["provenance"]),
@@ -1824,7 +1824,7 @@ mod tests {
         let mac = node("inst-mac");
         assert!(mac.contains("no trend yet") && !mac.contains("<polyline") && mac.contains("9.5 %"), "{mac}");
         assert!(node("inst-fra").contains("title=\"unknown: stat failed\">—</span>"));
-        assert_eq!(first.matches("Work mode: no TaskQ policy adapter</span>").count(), 4);
+        assert_eq!(first.matches("Balancing: no TaskQ policy adapter</span>").count(), 4);
         assert!(first.contains("data-boards="));
         assert!(first.contains("Shared TaskQ blocks require JavaScript."));
         assert!(first.contains("https://github.com/taskqorg/taskq/issues"));
