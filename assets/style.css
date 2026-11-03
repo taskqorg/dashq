@@ -368,3 +368,11 @@ body[data-view="/agents"][data-agent-view="aqresults"] #aqresults {display:block
 @media(max-width:800px){.attempt-layout{grid-template-columns:1fr}.attempt-inspectors{border-left:0;border-top:1px solid var(--line);padding:18px 0 0}.attempt-back{display:inline-block;margin-bottom:14px}}
 
 body[data-view="/agents"]:not([data-agent-view]) :is(#agentwork,#agents,#agenttotals,#modeluse,#aqresults){display:block}
+
+body[data-view="/fleet"] #fleet {display:block}
+#fleet {overflow-wrap:anywhere}
+#fleet .fleet-row {display:flex;flex-wrap:wrap;gap:.4em 1.2em;padding:.5em 0;border-bottom:1px solid light-dark(#ccd1d5,#555e66);font-variant-numeric:tabular-nums}
+#fleet h3 {margin-bottom:.3em}
+#fleet dl {display:flex;flex-wrap:wrap;gap:.5em 1.5em}
+#fleet dd {margin:0}
+body[data-view="/fleet"] {max-width:1024px;box-sizing:border-box;padding:20px;background:light-dark(#fafbfc,#252b32);color:light-dark(#243039,#eef2f5)}

@@ -100,6 +100,7 @@ pub struct Enroll {
     buckets: Mutex<HashMap<(String, i64), (f64, i64)>>,
     /// Stage records of each decoded telemetry block by block id (D21 #182): blocks never change.
     stages: Mutex<HashMap<i64, std::sync::Arc<Vec<Value>>>>,
+    fleet_cache: crate::source::Cache,
 }
 
 /// The deployment unit: `dashq.db` and its key `dashq.key` (0600) in the config folder (C4).
@@ -138,6 +139,7 @@ impl Enroll {
             recent: Mutex::new(HashMap::new()),
             buckets: Mutex::new(HashMap::new()),
             stages: Mutex::new(HashMap::new()),
+            fleet_cache: Default::default(),
         })
     }
 
@@ -1036,6 +1038,33 @@ pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Va
     json!(out)
 }
 
+/// D26: retain only Fleet observation kinds from actor-scoped, unrevoked telemetry.
+/// A bounded read reports truncation; raw rows remain internal and never enter `/data`.
+pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
+    let Ok(e) = e else { return json!([]) };
+    json!(rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && r["connection"] != "revoked" && r["activity"]["state"] != "retired").map(|r| {
+        // Authorization precedes cache access; each workspace keeps a separate single-flight last-good read.
+        let key=format!("fleet:{}",json!([r["installation"],r["workspace"]]));
+        let snap=e.fleet_cache.get(&key,30,|| {
+            let mut records = vec![];
+            let mut capped = false;
+            let blocks=e.store.telemetry_since(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""), since, |_| true).map_err(|_|("store unavailable".to_string(),None))?;
+            for (_, p) in blocks {
+                let (_, lines)=p.and_then(|p| serde_json::from_str::<Value>(&p).ok()).and_then(|p| telemetry_lines(&p)).ok_or(("stored block invalid".to_string(),None))?;
+                for l in lines {
+                    if matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")) {
+                        if records.len() >= 10_000 { capped = true; break }
+                        records.push(l);
+                    }
+                }
+                if capped { break }
+            }
+            Ok((json!({"records":records,"telemetry":r["telemetry"]}),capped))
+        });
+        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "error": snap["error"], "capped": snap["incomplete"]})
+    }).collect::<Vec<_>>())
+}
+
 /// D15 retained episode evidence: bounded, workspace-scoped, independent of the activity period.
 pub fn finding_samples(e: &Result<Enroll, String>, rows: &Value) -> Value {
     let Ok(e) = e else { return json!([]) };
@@ -1664,6 +1693,43 @@ mod tests {
         assert!(matches!(coreq::enroll::deliver(&host, std::slice::from_ref(&r4), &mut Default::default(), &mut w), Err(coreq::enroll::Delivery::Stopped(_))));
         assert_eq!(ingest(&e, a["credential"].as_str().unwrap(), vec![r4], T0 + 30), (401, json!({"protocol": 1, "error": "revoked"})));
         assert_eq!(stored(&e), 4);
+    }
+
+    /// D26 A2-A4 / R1,R2,D11: real wire ingest, durable replay and scoped projection preserve turns without credentials or stage duplication.
+    #[test]
+    fn fleet_through_ingest_and_scoped_projection() {
+        let f = crate::fleet::tests::fixture();
+        let now = f["now"].as_u64().unwrap();
+        let (_d, e) = setup("fleet");
+        let host = dir("fleet-host");
+        let mut w = Wire { e: &e, now: now as i64, code: None, calls: vec![], tick: false };
+        let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: "pds18.ufobe.com", schemas: &[TELEMETRY], scope: None, capabilities: &[] };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        let mut lines = f["fleet_records"][0]["records"].as_array().unwrap().clone();
+        for (i,l) in lines.iter_mut().enumerate() { l["seq"] = json!(i+1); l["received_ms"] = json!(now*1000); }
+        let rec = coreq::enroll::stamp(&host, TELEMETRY, "fleet-block", now, block(1,&lines,Some(json!({"backlog_rows":0,"backlog_bytes":0,"gap_rows":0})))).unwrap();
+        for _ in 0..2 {
+            let got=coreq::enroll::deliver(&host,std::slice::from_ref(&rec),&mut Default::default(),&mut w).unwrap();
+            assert_eq!(got[0]["state"],"accepted");
+        }
+        let p=projection(&e,Some(Scope::Subject("github|1")),None,now).unwrap();
+        let streams=fleet_records(&e,&p["rows"],(now-7*86400) as i64);
+        assert_eq!(streams[0]["records"].as_array().unwrap().len(),6,"stage rows excluded; replay stores one block");
+        let mut inp=f.clone(); inp["fleet_records"]=streams;
+        let doc=crate::data::build(&inp);
+        assert_eq!(doc["fleet"]["hosts"][0]["streams"][0]["accounts"][0]["tokens"]["input_tokens"]["observed"],100);
+        let html=crate::page::render_view(&doc,&json!({}),"/fleet");
+        assert!(html.contains("Tokens per project") && html.contains("invented-account") && html.contains("not-reported"));
+        assert!(!html.contains(a["credential"].as_str().unwrap()));
+        let denied=projection(&e,Some(Scope::Subject("github|other")),None,now).unwrap();
+        assert_eq!(fleet_records(&e,&denied["rows"],0),json!([]));
+        let revoked=p["rows"].as_array().unwrap().iter().cloned().map(|mut r|{r["connection"]=json!("revoked");r}).collect::<Vec<_>>();
+        assert_eq!(fleet_records(&e,&json!(revoked),0),json!([]));
+        if let Ok(path)=std::env::var("DASHQ_FLEET_EVIDENCE") {
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(std::path::Path::new(&path).join("page.html"),&html).unwrap();
+            std::fs::write(std::path::Path::new(&path).join("page.json"),doc.to_string()).unwrap();
+        }
     }
 
     /// Chain (#182 A1–A6): TaskQ stage rows in telemetry blocks -> coreq client -> /machine/ingest allowlist -> store

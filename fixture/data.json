@@ -45,6 +45,13 @@
       "age_s": 0,
       "reason": null,
       "incomplete": false
+    },
+    "fleet": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "fra/native claude release_source: not configured; fra/native claude source: CLI version missing or unsupported in heartbeat; fra/native codex release_source: not configured; fra/native codex source: CLI version missing or unsupported in heartbeat; fra/native: no associated D11 Fleet stream; macbook-m2.local claude release_source: not configured; macbook-m2.local claude source: CLI version missing or unsupported in heartbeat; macbook-m2.local codex release_source: not configured; macbook-m2.local codex source: CLI version missing or unsupported in heartbeat; macbook-m2.local: no associated D11 Fleet stream; win-1/native claude release_source: not configured; win-1/native claude source: CLI version missing or unsupported in heartbeat; win-1/native codex release_source: not configured; win-1/native codex source: CLI version missing or unsupported in heartbeat; win-1/native: no associated D11 Fleet stream",
+      "incomplete": false
     }
   },
   "hosts": [
@@ -122,7 +129,26 @@
         "state": "stale",
         "age_s": 3900,
         "reason": "heartbeat 65m old (ttl 5m)",
-        "observed_running": null
+        "observed_running": null,
+        "cli_heartbeats": [
+          {
+            "service": null,
+            "workspace": "taskqorg/taskq",
+            "host": "fra/native",
+            "at": 1791871200,
+            "age_s": 3939,
+            "ttl": 300,
+            "version": "4.2.0",
+            "source": {
+              "state": "ok",
+              "at": 1791875100,
+              "age_s": 39,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": "inst-fra",
@@ -156,7 +182,26 @@
         "state": "ok",
         "age_s": 60,
         "reason": null,
-        "observed_running": 1
+        "observed_running": 1,
+        "cli_heartbeats": [
+          {
+            "service": null,
+            "workspace": "taskqorg/taskq",
+            "host": "macbook-m2.local",
+            "at": 1791875040,
+            "age_s": 99,
+            "ttl": 300,
+            "version": "4.1.2",
+            "source": {
+              "state": "ok",
+              "at": 1791875100,
+              "age_s": 39,
+              "reason": null,
+              "incomplete": false
+            },
+            "clis": {}
+          }
+        ]
       },
       "agentq": {
         "installation": null,
@@ -188,7 +233,8 @@
         "state": "unknown",
         "age_s": null,
         "reason": "no heartbeat",
-        "observed_running": null
+        "observed_running": null,
+        "cli_heartbeats": []
       },
       "agentq": {
         "installation": "inst-win",
@@ -3300,6 +3346,155 @@
         "no price for claude-sonnet-5-5",
         "output_tokens not reported"
       ]
+    }
+  },
+  "fleet": {
+    "hosts": [
+      {
+        "host": "fra/native",
+        "clis": [
+          {
+            "runtime": "claude",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": 1791871200,
+              "age_s": 3939,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          },
+          {
+            "runtime": "codex",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": 1791871200,
+              "age_s": 3939,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          }
+        ],
+        "streams": []
+      },
+      {
+        "host": "macbook-m2.local",
+        "clis": [
+          {
+            "runtime": "claude",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": 1791875040,
+              "age_s": 99,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          },
+          {
+            "runtime": "codex",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": 1791875040,
+              "age_s": 99,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          }
+        ],
+        "streams": []
+      },
+      {
+        "host": "win-1/native",
+        "clis": [
+          {
+            "runtime": "claude",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          },
+          {
+            "runtime": "codex",
+            "running": null,
+            "source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "CLI version missing or unsupported in heartbeat",
+              "incomplete": false
+            },
+            "latest": null,
+            "release_source": {
+              "state": "unknown",
+              "at": null,
+              "age_s": null,
+              "reason": "not configured",
+              "incomplete": false
+            },
+            "behind": null
+          }
+        ],
+        "streams": []
+      }
+    ],
+    "source": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "fra/native claude release_source: not configured; fra/native claude source: CLI version missing or unsupported in heartbeat; fra/native codex release_source: not configured; fra/native codex source: CLI version missing or unsupported in heartbeat; fra/native: no associated D11 Fleet stream; macbook-m2.local claude release_source: not configured; macbook-m2.local claude source: CLI version missing or unsupported in heartbeat; macbook-m2.local codex release_source: not configured; macbook-m2.local codex source: CLI version missing or unsupported in heartbeat; macbook-m2.local: no associated D11 Fleet stream; win-1/native claude release_source: not configured; win-1/native claude source: CLI version missing or unsupported in heartbeat; win-1/native codex release_source: not configured; win-1/native codex source: CLI version missing or unsupported in heartbeat; win-1/native: no associated D11 Fleet stream",
+      "incomplete": false
     }
   },
   "changes": {

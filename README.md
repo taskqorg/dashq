@@ -20,7 +20,7 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
   "langfuse": {"base_url": "https://langfuse.example.com", "project_id": "…", "public_key": "pk-lf-…", "secret_key": "sk-lf-…", "forward": false},
   "github": {"token": "<read-only token>"},
   "projects": ["taskqorg/taskq", "taskqorg/agentq", "taskqorg/serverq", "taskqorg/coreq", "taskqorg/specq", "taskqorg/dashq"],
-  "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "fra/native"},
+  "serverq": {"report": "/home/<user>/.serverq/report.json", "host": "pds18.ufobe.com/native"},
   "public_host": "dash.example.com",
   "taskq": {"binary": "/opt/taskq/releases/4.6.40/taskq"},
   "answer": {"token": "/home/<user>/.config/dashq/answer-token", "boards": {"taskqorg/dashq": "<workspace>"}}
@@ -33,7 +33,7 @@ Tasks uses TaskQ v4.6.52's released workspace, detail menus and PM composer. PM 
 
 ## Deployment (D3)
 
-FRA, user service `dashq-dashq.service`, config in `<install>/config.json`. Caddy site, after the Langfuse UI Access guard:
+pds18.ufobe.com, user service `dashq-dashq.service`, config in `<install>/config.json`. Caddy site, after the Langfuse UI Access guard:
 
 ```caddy
 dash.ufobe.com {

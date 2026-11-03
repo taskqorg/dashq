@@ -142,20 +142,20 @@ D13 detail.
 
 - TaskQ owns one component; DashQ pins its assets and supplies the scoped browser adapter through guarded `POST /answer`.
 - The route stays off until a deployment configures `answer` ([answers § Route](../design/answers.md#route-41)). The browser takes its answer capability from `GET /answer` per board.
-- Production writes wait for live qualification ([#44](https://github.com/taskqorg/dashq/issues/44)). FRA configures `answer` for the `taskqorg/dashq` board only, for that live board run; other boards stay read-only.
+- Production writes wait for live qualification ([#44](https://github.com/taskqorg/dashq/issues/44)). pds18.ufobe.com configures `answer` for the `taskqorg/dashq` board only, for that live board run; other boards stay read-only.
 - Tasks owns one card per board/task; Attention navigates to it. Source rows preserve canonical question fields. The card uses the published D10 assets.
 - `line` is removed from task rows. Snapshots stored with one keep it only until normal retention ages them out, never projected; nothing is deleted.
 
 ### Task controls
 
-- [Adapter and qualification](../design/task-controls.md): `/task/control` is off unless `task_controls: {token: "<absolute credential path>", boards: {"<owner/repo>": "<workspace>"}}` and `taskq.binary` are configured. Each board must be a configured project. Production FRA configures it for the six configured boards.
+- [Adapter and qualification](../design/task-controls.md): `/task/control` is off unless `task_controls: {token: "<absolute credential path>", boards: {"<owner/repo>": "<workspace>"}}` and `taskq.binary` are configured. Each board must be a configured project. Production pds18.ufobe.com configures it for the six configured boards.
 - The host administrator grants `dashq controller WORKSPACE SUBJECT on|off`.
 - TaskQ v4.6.52 owns the unmodified renderer, fixed command table, revision/op-id fencing and receipts for start/stop/later/retry. Close remains a board link.
 - Origin/CSRF, the durable operation journal and same-ID retry follow the answer transport.
 
 ### PM requests
 
-- `POST /machine/pm/v1/exchange` is authenticated. Config `pm_requests: true` is off by default; production FRA has it on. `dashq pm-requester WORKSPACE SUBJECT on|off` grants a workspace administrator separately.
+- `POST /machine/pm/v1/exchange` is authenticated. Config `pm_requests: true` is off by default; production pds18.ufobe.com has it on. `dashq pm-requester WORKSPACE SUBJECT on|off` grants a workspace administrator separately.
 - The actor is the SHA-256 of the verified subject. TaskQ must advertise its matching unexpired host PM grant and project revision. Origin/CSRF and per-actor rate limits gate submits.
 - One bounded temporary request outbox in the existing SQLite store keeps exact input until a terminal receipt or expiry. Permanent digest tombstones prohibit changed-input or op-id reuse.
 - Receipts correlate actor, op-id and revision and name the native host/runtime/session when observed.
@@ -341,3 +341,13 @@ D19 detail.
 - ServerQ retains last-good evidence. Langfuse resource reads cannot stay fresh after a collection failure. Trends need three real samples under U1.
 - Real action and recovery qualification ([#119](https://github.com/taskqorg/dashq/issues/119)) follows #44 and TaskQ #931.
 - Config validation fixtures use native absolute paths without relaxing validation.
+
+## Fleet
+
+D26 adds guarded `GET /fleet` and additive `/data.fleet`, also available through `dashq report`. Fixed UTC windows are independent of the model activity period; host filters apply, agent/session filters do not. Project/account/attempt rows keep workspace and installation identity. A partial window reports observed counts, never a complete total. Empty history is unknown. Account labels are producer codes, not inferred identities. CLI comparisons keep heartbeat and release states/times separately.
+
+Fleet reads at most 10,000 relevant rows per installation from the retained seven-day receipt window; a cut or failed decode is explicit. Producer times select the two display windows; future and untimed records never enter a timed count. An empty window stays unknown without a producer baseline. Task completions are TaskQ `transition` rows to `closed` with a project/task identity; successful starts are `worker` rows with operation `spawn` and outcome `ok`, following the released [TaskQ v4.6.65 schema](../research/247.md). Stable universal observation IDs deduplicate replay within each installation/workspace. Separate grants remain separate coverage streams even when visually grouped under one host. Host codes on observations take precedence over the installation label; missing host codes retain the label fallback provenance.
+
+Limit snapshots validate percent in 0?100 and nonnegative reset timestamps; missing or invalid fields are null with reasons. Account rows retain their turn time; after 300 s the displayed snapshot is stale and current use is unknown. The sender does not certify full-window coverage, so observed window counts remain incomplete rather than complete totals. CLI release reads share the normal single-flight cache for 180 s, with the D4 HTTP timeout; they start only with configured GitHub projects.
+
+Fleet uses a 30 s single-flight cache per installation/workspace, authorized before lookup; failed reads retain the last good rows as unconfirmed. Source age uses newest producer observation time, never receipt or page time; after 300 s it is stale. `last_received` separately records transport contact.
