@@ -111,7 +111,7 @@ fn targets(v: &Value) -> bool {
             })
     })
 }
-// A receipt is metadata only. Never retain host-supplied prose or off-host codex:// links.
+// A receipt is metadata only. Never retain host-supplied prose or off-host native session links.
 fn clean_receipt(v: &Value) -> Option<Value> {
     if v["schema"] != SCHEMA
         || !["actor_id", "op_id", "revision"].iter().all(|k| id(&v[*k]))
@@ -155,10 +155,8 @@ fn clean_receipt(v: &Value) -> Option<Value> {
                 .contains(&s.as_str())
             })
             .unwrap_or_else(|| "unknown".into());
-        let url = n["url"].as_str().filter(|s| {
-            s.strip_prefix("https://claude.ai/code/session_")
-                .is_some_and(|x| !x.is_empty() && x.bytes().all(|b| b.is_ascii_alphanumeric()))
-        });
+        // only a runtime whose descriptor offers session links keeps one (#249); off-host native URIs never do
+        let url = n["url"].as_str().and_then(|s| crate::runtimes::session_url(&runtime, s));
         out["request_id"] = json!(request);
         out["native"] = json!({"host":host,"runtime":runtime,"state":state,"session":safe("session"),"url":url});
     }

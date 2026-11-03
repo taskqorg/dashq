@@ -4,7 +4,7 @@ Linked detail of [dashq.md](../../dashq.md): the `/data` document, the source re
 
 ## Data document
 
-- Top level: `schema` (2), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources`, `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21), `model_use` (D24).
+- Top level: `schema` (2), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources`, `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21), `model_use` (D24), `runtimes` (D4.5).
 - `resources` (D4.4): `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`.
 - D11 adds `installations`, `sources.enrollment`, `sources.export` and `telemetry_block`; D23 adds `changes` and `query`; their sections state when.
 - Declared exceptions within `schema` 2, not additive changes:
@@ -55,6 +55,19 @@ D4.4 detail.
 - Window = the period; at most 2016 samples per installation (7 days of buckets), newest kept; a cut marks the row `incomplete`. Langfuse reads keep D4.1 pagination and cap.
 - History shows `gaps` (over two buckets without a sample, or a stale tail), `resets` (`warmup` or `counter reset` CPU baselines) and `warmup` below three samples.
 - Per sample (D4.4): CPU percent; RAM used, available and total bytes; per filesystem `id`, role, fstype, used, free and total bytes.
+
+## Agent runtimes
+
+D4.5 detail.
+
+- The runtime table's descriptor fields copy the AgentQ descriptor table at the revision its `descriptor` link names; a changed AgentQ descriptor is a table update.
+- `/data.runtimes` lists the descriptors in table order. Runtime names, TaskQ codes and session IDs stay opaque data.
+- TaskQ codes map telemetry, observation and policy runtime ids to a runtime (`codex-app` is Codex). A `login` observation needs every runtime's login field; an invalid one resets every code it carries to `unknown`.
+- Project-limit runtime ids are table codes that the pinned TaskQ vocabulary also names.
+- Model use: a runtime with `model.source` takes the `agentq.model` coverage; one with `model.reason` reads unknown with it; a client with `model` adds its unknown row.
+- Client rows: key, label, producer agent names (Claude Code reports as `claude`) and the Direct routing note.
+- PM receipt links: https, plain path characters, at most 300 bytes, and the runtime's `session-url` capability; anything else is dropped, never rewritten.
+- Pinned TaskQ assets are TaskQ releases; their own link checks change only with a repin (D10).
 
 ## Refresh
 

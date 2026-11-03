@@ -74,14 +74,14 @@ pub fn build(inp: &Value) -> Value {
             {
                 r["runner"] = Value::Null;
             }
-            if !["claude", "codex", "hermes"].contains(&r["agent"].as_str().unwrap_or("")) {
+            if !crate::runtimes::agents().any(|a| r["agent"] == a) {
                 r["agent"] = json!("unknown");
             }
             if r["time"].is_null() {
                 r["time"] = row["startTime"].as_str().and_then(crate::source::iso_secs).map_or(Value::Null, |t| json!(t));
             }
             if name != "agentq.installation"
-                && (f["agent"].as_str().is_some_and(|s| r["agent"] != if s == "claude-code" { "claude" } else { s })
+                && (f["agent"].as_str().is_some_and(|s| r["agent"].as_str().and_then(crate::runtimes::client).map(|c| c.key) != Some(s))
                     || f["session"].as_str().is_some_and(|s| r["session"] != s && row["sessionId"] != s))
             {
                 continue;
@@ -150,7 +150,7 @@ pub fn render(w: &mut String, doc: &Value) {
         let _ = write!(w, "<option value=\"{n}\"{}>{t}</option>", if n == period { " selected" } else { "" });
     }
     let _ = write!(w, "</select></label><label>Client <select id=\"results-client\" data-results-filter=\"agent\">");
-    for (k, t) in [("", "All"), ("codex", "Codex"), ("claude-code", "Claude Code"), ("hermes", "Hermes")] {
+    for (k, t) in std::iter::once(("", "All")).chain(crate::runtimes::clients().iter().map(|c| (c.key, c.label))) {
         let _ = write!(
             w,
             "<option value=\"{k}\"{}>{t}</option>",
@@ -324,11 +324,7 @@ pub fn render(w: &mut String, doc: &Value) {
     for c in cohorts {
         let query = format!(
             "/?period={period}&agent={}{}#aqresults",
-            enc(if c["agent"] == "claude" {
-                "claude-code"
-            } else {
-                c["agent"].as_str().unwrap_or("")
-            }),
+            enc(c["agent"].as_str().map(|a| crate::runtimes::client(a).map_or(a, |c| c.key)).unwrap_or("")),
             ["host", "session"]
                 .iter()
                 .filter_map(|k| f[k].as_str().map(|v| format!("&{k}={}", enc(v))))

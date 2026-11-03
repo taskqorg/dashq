@@ -26,7 +26,10 @@ const AHEAD: i64 = 30;
 const RETAIN: i64 = 86400;
 const KEEP: i64 = 4096;
 const FRESH: i64 = 60;
-pub const RUNTIMES: [&str; 3] = ["claude", "codex", "codex-app"];
+/// A project-limit runtime id: a runtime-table code that TaskQ's pinned vocabulary also names (#249).
+fn runtime_id(r: &str) -> bool {
+    crate::runtimes::codes().any(|c| c == r) && crate::vocab::telemetry_runtimes().contains(&r)
+}
 /// The one remote write a host-policy TaskQ install takes (TaskQ shared-resource-controls.md § Project overlay).
 pub const PROJECT_LIMITS: &str = "taskq.project-limits/1";
 const REASONS: [&str; 9] = ["unauthorized", "revoked", "scope", "unsupported", "invalid", "conflict", "replay_mismatch", "busy", "clock_unknown"];
@@ -179,7 +182,7 @@ fn target(t: &Value) -> bool {
         && t["installation_id"].as_str().is_some_and(|i| i.len() == 64 && i.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
         && int(&t["generation"]).is_some_and(|g| g >= 1)
         && (t["project_id"].is_null() || rid(&t["project_id"]))
-        && (t["runtime_id"].is_null() || t["runtime_id"].as_str().is_some_and(|r| RUNTIMES.contains(&r)) && !t["project_id"].is_null())
+        && (t["runtime_id"].is_null() || t["runtime_id"].as_str().is_some_and(runtime_id) && !t["project_id"].is_null())
 }
 
 /// Typed changes for one target under `schema`: `invalid` for a malformed value or a field at the wrong scope,
@@ -658,7 +661,7 @@ fn exchange(c: &Ctx, r: &Req, now: i64) -> Resp {
 /// and runtimes. Returns `(grant_id, actor_id)`.
 #[allow(clippy::too_many_arguments)]
 pub fn issue(s: &Store, workspace: &str, subject: &str, installation: &str, host: bool, project_limits: bool, projects: &[String], runtimes: &[String], expires: i64) -> Result<(String, String), String> {
-    let ok_ids = projects.iter().all(|p| rid(&json!(p))) && runtimes.iter().all(|r| RUNTIMES.contains(&r.as_str()));
+    let ok_ids = projects.iter().all(|p| rid(&json!(p))) && runtimes.iter().all(|r| runtime_id(r));
     if !enroll::id(workspace, 64) || !enroll::valid_subject(subject) || !ok_ids || (!host && projects.is_empty()) {
         return Err("resources grant: bad workspace, subject, project or runtime".into());
     }

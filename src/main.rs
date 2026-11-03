@@ -20,6 +20,7 @@ mod page;
 mod policy;
 mod profile;
 mod resource;
+mod runtimes;
 mod source;
 mod version;
 mod vocab;
@@ -611,6 +612,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     }
     answer::control_fixture()?;
     vocab::check()?;
+    runtimes::check()?;
     println!("fixture: ok; task controls: taskq.task-controls/1");
     let p = config_path(t);
     if !p.exists() {
