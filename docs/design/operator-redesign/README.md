@@ -14,6 +14,8 @@ Owner accepted the consolidated design and authorized a PM planning/decompositio
 - [Scoped Reports runtime evidence](../evidence/reports/README.md): #221 time/wait totals, estimate price basis and attempt drill-down; coverage and fixture browser checks stay distinct from live qualification.
 - [Qualification on real scoped data](../evidence/qualification-223/README.md): #223 fidelity across all redesigned views, DQ-01–DQ-10 on deployed 0.17.1 data, ledger/T-row checks and producer gaps.
 
+- [Fleet evidence](../evidence/fleet/README.md): #244 D11 usage, account snapshots, hourly cadence and upstream CLI comparison; synthetic browser qualification remains separate from production.
+
 ## Private input and authority
 
 The source repository is public. Exact accepted HTML and full live-data/reviewer evidence remain in the owner-only input packet on the registered DashQ primary checkout on host mac, outside committed files. The native planning worker may read `docs/design/approved/r1/manifest.json` there and verify its hashes. Find the primary checkout through the existing registered project/Git worktree identity; do not search home or the disk. Missing/mismatched input is a blocker, never permission to publish or replace it. Never commit, upload or quote private inputs in a task, plan or report.

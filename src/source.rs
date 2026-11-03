@@ -496,3 +496,18 @@ mod tests {
         assert_eq!(taskq_status("/nonexistent/taskq", "o/r", "tok").unwrap_err().0, "taskq binary not found");
     }
 }
+
+/// D26 explicit upstream CLI release sources; no repository discovery or board authority.
+pub fn cli_release(repo: &str, token: Option<&str>) -> Result<(Value, bool), Fail> {
+    let mut headers = vec!["Accept: application/vnd.github+json".into()];
+    if let Some(t) = token { headers.push(format!("Authorization: Bearer {t}")); }
+    let r = get(&format!("https://api.github.com/repos/{repo}/releases/latest"), &headers)?;
+    if r.status != 200 { return Err((format!("HTTP {}", r.status), r.reset)); }
+    let tag = r.body["tag_name"].as_str().ok_or(("release version missing".into(), None))?;
+    let version = tag.strip_prefix("rust-v").unwrap_or(tag.trim_start_matches('v'));
+    let version = crate::data::semver(&json!(version));
+    if version.is_null() || r.body["prerelease"] != false || r.body["draft"] != false {
+        return Err(("unsupported stable release".into(), None));
+    }
+    Ok((version, false))
+}

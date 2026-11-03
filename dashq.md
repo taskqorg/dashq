@@ -25,7 +25,7 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - Requests whose `Host` is neither the loopback address nor the configured public name get 421 (DNS rebinding).
 - Config is a private JSON file named by env `DASHQ_CONFIG`, else `<install>/config.json` (coreq service units pass only `PATH`), mode 0600. Invalid config: the service refuses to start and names the bad key, never the value. Keys: [process detail](docs/contract/process.md#config).
 ## D3. Deployment
-- Runs on the production host (FRA), where Langfuse and the ServerQ report live, under the `dash.` host name of the Langfuse UI domain.
+- Runs on the production host pds18.ufobe.com, where Langfuse and the ServerQ report live, under the `dash.` host name of the Langfuse UI domain.
 - The reverse proxy site for that name runs the same `forward_auth` guard as the Langfuse UI first, then proxies to `127.0.0.1:18882`. No firewall change, no listener on a public address, no route under `/api/public`.
 - Rollback: remove the `dash.` site block and stop the dashq service. Nothing else changes. dashq supersedes the AgentQ ServiceQ panel (`/serviceq`); its removal is AgentQ's task, not dashq's.
 ## D12. Security
@@ -134,6 +134,10 @@ Read-only, no new authority. One projection serves `/data`, the page and `dashq 
 - `attention.requests` lists only producer requests needing a person and D11 silent installations. The Attention list and count render exactly these.
 ## D18. Service versions and diagnostics
 - [Service versions V1–V4](docs/design/service-versions.md): distinguish available, selected, running and verified health per installation. No remote update, restart or rollback authority. `update` is `available|current` only from a fresh verified comparison. Detail: [views detail](docs/contract/views.md#service-versions).
+## D26. Fleet
+- `/fleet` is one read-only page for every observed or expected host: token counts by project, task attempt and account over fixed 24 h and 7 d windows from CoreQ universal `agent.turn` observations carried by D11 TaskQ telemetry. Counts are metadata, never credentials (R1/R7); stage token summaries are not added to turn counts.
+- Each account shows its newest reported limit used percent, reset time and window, or null with the producer reason. Host cadence is observed task completions per hour over each window; workers started counts successful worker spawns, separately. Deduplicate stable observation identities; missing history, loss, capped reads and missing fields retain explicit coverage and reasons (R2/D6).
+- Host Claude and Codex CLI versions come from TaskQ heartbeat `cli` lines. Compare with fresh upstream latest stable releases (`anthropics/claude-code`, `openai/codex`); missing, unsupported or stale versions/comparisons are unknown. These explicit release sources do not discover boards (D4.2). No update, restart or health authority is added (D18).
 ## D20. Profiling
 - Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md). Counters are always on in `serve`, `service run`, `report` and `update`; records hold no secrets, content, URLs or paths. A failed write never fails the operation. Detail: [process detail](docs/contract/process.md#profiling).
 ## Linked detail

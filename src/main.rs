@@ -2,6 +2,7 @@
 
 mod accounting;
 mod agent_work;
+mod fleet;
 mod model_use;
 mod answer;
 mod pm;
@@ -280,11 +281,17 @@ impl App {
         // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
         // started up to a day before the widest window share one decoded set
         let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
+        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64));
+        let cli_releases: serde_json::Map<String, Value> = [("claude", "anthropics/claude-code"), ("codex", "openai/codex")].into_iter().map(|(cli, repo)| {
+            let snap = if c.github_token.is_some() && !c.projects.is_empty() { self.cache.get(&format!("cli-release:{cli}"), 180, || source::cli_release(repo, c.github_token.as_deref())) } else { Value::Null };
+            (cli.into(), snap)
+        }).collect();
         profile::step("enrollment", t0);
         let t0 = std::time::Instant::now();
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
+            "fleet_records": fleet_records, "cli_releases": cli_releases,
             "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings, "prices": c.prices,
         }));
         profile::step("build", t0);
@@ -1083,7 +1090,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "fra/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -1124,7 +1131,7 @@ mod tests {
         let binary_path = d.join("taskq");
         let token_path = d.join("answer-token");
         let good = json!({"langfuse": {"base_url": "https://lf.example.com", "public_key": "pk-lf-1", "secret_key": "sk-lf-SECRET", "project_id": "p1"},
-            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": report_path, "host": "fra/native"}, "public_host": "dash.example.com"});
+            "github": {"token": "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"}, "projects": ["taskqorg/dashq"], "serverq": {"report": report_path, "host": "pds18.ufobe.com/native"}, "public_host": "dash.example.com"});
         let write = |v: &Value| {
             std::fs::write(&p, v.to_string()).unwrap();
             #[cfg(unix)]

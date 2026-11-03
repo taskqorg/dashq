@@ -28,7 +28,7 @@ jobs:
       - run: node tests/resources.cjs
       - name: cargo checks
         run: |
-          DASHQ_REPORTS_EVIDENCE="$RUNNER_TEMP/reports" DASHQ_AGENTS_EVIDENCE="$RUNNER_TEMP/agents" DASHQ_TELEMETRY_EVIDENCE="$RUNNER_TEMP/telemetry" DASHQ_OVERVIEW_EVIDENCE="$RUNNER_TEMP/overview" DASHQ_HOST_OBSERVATIONS_EVIDENCE="$RUNNER_TEMP/host-observations" DASHQ_HOST_FIRST_EVIDENCE="$RUNNER_TEMP/host-first" DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" cargo test --locked
+          DASHQ_FLEET_EVIDENCE="$RUNNER_TEMP/fleet" DASHQ_REPORTS_EVIDENCE="$RUNNER_TEMP/reports" DASHQ_AGENTS_EVIDENCE="$RUNNER_TEMP/agents" DASHQ_TELEMETRY_EVIDENCE="$RUNNER_TEMP/telemetry" DASHQ_OVERVIEW_EVIDENCE="$RUNNER_TEMP/overview" DASHQ_HOST_OBSERVATIONS_EVIDENCE="$RUNNER_TEMP/host-observations" DASHQ_HOST_FIRST_EVIDENCE="$RUNNER_TEMP/host-first" DASHQ_FINDINGS_EVIDENCE="$RUNNER_TEMP/findings" DASHQ_RESOURCE_EVIDENCE="$RUNNER_TEMP/resources.html" DASHQ_STARTUP_EVIDENCE="$RUNNER_TEMP/startup" DASHQ_LIMITS_EVIDENCE="$RUNNER_TEMP/limits.html" cargo test --locked
           cargo run -- selftest
       - name: shared resource browser chain
         run: |
@@ -47,5 +47,6 @@ jobs:
           DASHQ_AGENTS_EVIDENCE="$RUNNER_TEMP/agents" node tests/agents-browser.cjs
           DASHQ_REPORTS_EVIDENCE="$RUNNER_TEMP/reports" node tests/reports-browser.cjs
           DASHQ_QUALIFY_EVIDENCE="$RUNNER_TEMP/telemetry" node tests/qualification-browser.cjs
+          DASHQ_FLEET_EVIDENCE="$RUNNER_TEMP/fleet" node tests/fleet-browser.cjs
           node tests/task-controls-browser.cjs
           node tests/workspace-browser.cjs

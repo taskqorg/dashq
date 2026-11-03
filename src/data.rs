@@ -514,7 +514,7 @@ pub fn build(full: &Value) -> Value {
             let service = body.lines().find_map(|l| l.strip_prefix("service ")).map(str::trim).filter(|s| s.len() == 12 && s.bytes().all(|b| b.is_ascii_hexdigit()));
             let key = format!("{repo}:{}", service.map_or_else(|| format!("unidentified:{index}"), String::from));
             if heartbeats.get(&key).is_none_or(|o: &Value| o["age_s"].as_u64().is_some_and(|a| cached_age.is_some_and(|x| x < a))) {
-                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": row, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src}));
+                heartbeats.insert(key, json!({"service": service, "workspace": repo, "host": row, "at": at, "age_s": cached_age, "ttl": ttl, "version": version, "source": src, "clis": crate::fleet::cli_lines(body)}));
             }
             let h = host_entry(&mut hosts, &row);
             if !joined {
@@ -764,6 +764,7 @@ pub fn build(full: &Value) -> Value {
         h["taskq"]["observed_running"] = if unconfirmed.contains_key(&id) { Value::Null } else {
             working.get(&id).map_or(Value::Null, |tasks| json!(tasks.iter().collect::<HashSet<_>>().len()))
         };
+        h["taskq"]["cli_heartbeats"] = json!(heartbeats.values().filter(|r| r["host"] == h["id"]).collect::<Vec<_>>());
         h["taskq"]["latest"] = latest("taskqorg/taskq");
         h["taskq"]["behind"] = behind(&h["taskq"]["latest"], &h["taskq"]["version"]);
         let a = &mut h["agentq"];
@@ -834,6 +835,8 @@ pub fn build(full: &Value) -> Value {
         "agent_work": agent_work,
         "model_use": model_use,
     });
+    doc["fleet"] = crate::fleet::build(inp, &doc["hosts"]);
+    if doc["fleet"]["hosts"].as_array().is_some_and(|a| !a.is_empty()) { doc["sources"]["fleet"] = doc["fleet"]["source"].clone(); }
     // D23: changes while away, person requests and the query shape, from the parts above
     let mut sources: Vec<(&str, Option<String>)> = Vec::new();
     if !sq.is_null() || doc["checks"]["installations"].as_array().is_some_and(|a| !a.is_empty()) {

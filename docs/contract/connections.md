@@ -121,7 +121,7 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - The Telemetry view renders these coverage fields separately from delivery stages, including sender backlog/gap, receipt-ordered retained seq range and times, holes (at most 32 listed with total), restarts and known loss by cause.
 - `telemetry.evidence` lists the newest 200 retained blocks per installation/workspace (event ID, generation, observation/receipt times, seq range and rows; no payload); `blocks` counts all.
 - Each listed block links to scoped `/data?block=ID` evidence and its Connections row. No retained range proves all-event coverage.
-- Analysis over block contents remains a later task. Production deploy to FRA needs owner approval.
+- D21 and D26 analyze their declared stage and Fleet metadata only; other block analysis remains a later task. Production deploy to pds18.ufobe.com needs owner approval.
 
 ## TaskQ resources
 

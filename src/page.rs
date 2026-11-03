@@ -62,7 +62,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 9] = [("/", "Overview"), ("/projects", "Tasks"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
+pub const VIEWS: [(&str, &str); 10] = [("/", "Overview"), ("/projects", "Tasks"), ("/fleet", "Fleet"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -112,6 +112,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 "taskq" => "taskq",
                 "export" => "Export",
                 "agent_work" => "Agent work",
+                "fleet" => "Fleet",
                 _ => "serverq",
             };
             format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", dur(a))))
@@ -126,6 +127,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     }
     let first_launch = unconfigured.len() == 3 && !has_rows(&doc["installations"]["rows"]);
     reports(w, doc, &query);
+    crate::fleet::render(w, &doc["fleet"]);
     if first_launch {
         let _ = writeln!(w, "<section id=\"startup\"><h2>Connect an existing installation</h2><p>Connect TaskQ, AgentQ or ServerQ using its existing service and identity.</p><a id=\"add-service\" href=\"/connect\">＋ Add service</a><p class=\"note\">Approval waits for credential activation, a durable first snapshot and dashboard readback. No observations received yet.</p></section></main></body></html>");
         return h;
