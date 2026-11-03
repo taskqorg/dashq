@@ -172,7 +172,16 @@ mod tests {
         let names: Vec<&str> = runtimes().iter().flat_map(|r| std::iter::once(r.name).chain(r.codes.iter().copied())).chain(agents()).chain(clients().iter().map(|c| c.key)).collect();
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/");
         let mut files: Vec<String> = std::fs::read_dir(format!("{dir}src")).unwrap().map(|e| e.unwrap().path().display().to_string()).filter(|p| p.ends_with(".rs")).collect();
-        files.extend(std::fs::read_dir(format!("{dir}assets")).unwrap().map(|e| e.unwrap().path().display().to_string()).filter(|p| p.ends_with(".js")));
+        let mut dirs = vec![std::path::PathBuf::from(format!("{dir}assets"))];
+        while let Some(d) = dirs.pop() {
+            for p in std::fs::read_dir(d).unwrap().map(|e| e.unwrap().path()) {
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|e| e == "js") {
+                    files.push(p.display().to_string());
+                }
+            }
+        }
         let mut hits = vec![];
         for f in files {
             let text = std::fs::read_to_string(&f).unwrap();
@@ -185,6 +194,9 @@ mod tests {
                 }
             }
         }
+        // Open exception (#252): assets/taskq holds pinned TaskQ release bytes (D10), which DashQ never edits; up to
+        // v4.6.65 they still branch on runtime names. #252 repins to a descriptor-reading release and drops this line.
+        hits.retain(|h| !h.replace('\\', "/").contains("/assets/taskq/"));
         assert!(hits.is_empty(), "runtime names outside the runtime table:\n{}", hits.join("\n"));
     }
 }
