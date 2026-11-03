@@ -55,6 +55,10 @@ Each source has its own cache, single flight (one read in progress, callers shar
 - Producer contract: agentq.md § 6 Resource samples (`agentq.resource`, one per 300 s bucket). Enrolled history (D11) is read first, Langfuse for the rest; each row names its `provenance`. Raw samples only, no aggregation.
 - A missing, invalid or inconsistent value is `null` with the producer's or dashq's reason; nothing is derived from other fields or the legacy disk-headroom summary.
 - Current = newest sample; stale after 900 s. A row that is not `ok` joins Attention gaps. Window, cap, gaps, resets and warmup: [views detail](docs/contract/views.md#resource-samples).
+### D4.5 Agent runtimes
+- Applies [specq agent runtimes](https://github.com/taskqorg/specq/blob/main/engineering/agent-runtimes.md). The runtime table `src/runtimes.json` holds the AgentQ runtime descriptors (name, label, brand, family, capabilities) at a pinned AgentQ revision, each runtime's TaskQ codes, login field and model accounting, and the AgentQ clients with their producer names.
+- Code never branches on a runtime or client name; a test fails on such a literal outside the table and tests.
+- Session links stay opaque: a receipt keeps an https link only for a runtime whose descriptor has `session-url`; no host or path pattern is parsed. Host sign-in lists each runtime with a login field by label and brand. Detail: [views detail](docs/contract/views.md#agent-runtimes).
 ## D7. /data JSON
 - `GET /data?period=1800|7200|86400&host=H&agent=A&session=ID&block=ID&cursor=N` returns the document the page renders. Filters are optional; `block` (D11 telemetry) adds `telemetry_block` and filters nothing; `cursor` pages capped lists (D23).
 - Invalid parameters: 400. All sources failed: 503 with `{"error"}`. Partial failure is 200 with source states. Session filters apply to model activity only; host health and resources keep host scope.

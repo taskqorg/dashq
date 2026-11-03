@@ -2,20 +2,20 @@
 //! from the newest `agentq.installation` heartbeat (agentq#134), MCP from the enrolled snapshot and 24 h use from
 //! `agentq.compress` and `agentq.retrieval`. Unknown stays `null` with its reason (D6).
 
-use crate::data::{AGENTS, aq, aq_identity, dur, row_at, safe};
+use crate::data::{aq, aq_identity, dur, row_at, safe};
+use crate::runtimes;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
 const DAY: u64 = 86400;
 
-/// Producer agent or profile kind -> client key of `AGENTS`; other clients (Claude Desktop chat) have no row.
+/// Producer agent or profile kind -> client key of the runtime table; other clients (Claude Desktop chat) have no row.
 fn client(a: &str) -> Option<&'static str> {
-    let a = if a == "claude" { "claude-code" } else { a };
-    AGENTS.iter().find(|(k, _)| *k == a).map(|(k, _)| *k)
+    runtimes::client(a).map(|c| c.key)
 }
 
 fn name(c: &str) -> &'static str {
-    AGENTS.iter().find(|(k, _)| *k == c).map_or("unknown client", |(_, n)| *n)
+    runtimes::client_key(c).map_or("unknown client", |c| c.label)
 }
 
 /// A producer reason: short plain words only; anything path- or content-like is withheld.
@@ -115,7 +115,7 @@ pub fn build(cx: &Ctx, fleet: &[Value], activity: &[Value], enrolled: &Value, cu
         hooks.iter().flat_map(|h| h.as_array().into_iter().flatten()).for_each(|h| note(h["agent"].as_str().and_then(client)));
         profiles.iter().for_each(|p| note(p["kind"].as_str().and_then(client)));
         used.keys().filter(|(i, _)| i == inst).for_each(|(_, c)| note(client(c)));
-        clients.sort_by_key(|c| AGENTS.iter().position(|(k, _)| k == c));
+        clients.sort_by_key(|c| runtimes::clients().iter().position(|k| k.key == *c));
         // an installation that names no client still has a row, so an old heartbeat reads unknown, not absent
         if clients.is_empty() && cx.agent.is_none() {
             let why = |r: &Result<Value, String>| r.as_ref().err().map_or(json!("no client reported"), |e| json!(e));

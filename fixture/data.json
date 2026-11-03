@@ -3302,6 +3302,51 @@
       ]
     }
   },
+  "runtimes": [
+    {
+      "name": "claude",
+      "label": "Claude Code",
+      "brand": "Anthropic",
+      "family": "claude",
+      "capabilities": [
+        "turn",
+        "resume",
+        "caller-session-id",
+        "compact-hook",
+        "session-url",
+        "quota-snapshot",
+        "background",
+        "title"
+      ]
+    },
+    {
+      "name": "codex",
+      "label": "Codex CLI",
+      "brand": "OpenAI",
+      "family": "gpt",
+      "capabilities": [
+        "turn",
+        "resume",
+        "quota-snapshot",
+        "app-queue",
+        "app-server",
+        "effort",
+        "image-input",
+        "account"
+      ]
+    },
+    {
+      "name": "antigravity",
+      "label": "Antigravity",
+      "brand": "Google",
+      "family": "gemini",
+      "capabilities": [
+        "turn",
+        "resume",
+        "title"
+      ]
+    }
+  ],
   "changes": {
     "window_s": 1800,
     "from": 1791873339,

@@ -8,7 +8,6 @@ use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 pub const PERIODS: [u64; 3] = [1800, 7200, 86400];
-pub const AGENTS: [(&str, &str); 3] = [("codex", "Codex"), ("claude-code", "Claude Code"), ("hermes", "Hermes")];
 const SNAPSHOT_LIMIT: u64 = 600;
 const HEARTBEAT_TTL: u64 = 300;
 const GITHUB_LIMIT: u64 = 180;
@@ -76,7 +75,7 @@ pub(crate) fn aq_identity(row: &Value) -> Option<(String, String)> {
 }
 
 fn agent_name(a: &str) -> Option<&'static str> {
-    AGENTS.iter().find(|(k, _)| *k == a).map(|(_, n)| *n)
+    crate::runtimes::client_key(a).map(|c| c.label)
 }
 
 /// `period=&host=&agent=&session=&block=&cursor=` (D7): the period and the filters, or `Err` for 400.
@@ -639,11 +638,7 @@ pub fn build(full: &Value) -> Value {
         let mut covered: HashMap<(String, &str), u64> = HashMap::new();
         for r in rows("agentq.compress").into_iter().chain(rows("agentq.run")).filter(|r| in_period(r).is_some()) {
             let Some((inst, _)) = aq_identity(r) else { continue };
-            let agent = match aq(r, "agentq.agent").as_str() {
-                Some("claude") => "claude-code",
-                Some(a) if agent_name(a).is_some() => a,
-                _ => "unknown",
-            };
+            let agent = aq(r, "agentq.agent").as_str().and_then(crate::runtimes::client).map_or("unknown", |c| c.key);
             *covered.entry((inst, agent)).or_default() += 1;
         }
         for x in fleet.iter().filter(|x| x["state"] == "ok") {
@@ -833,6 +828,7 @@ pub fn build(full: &Value) -> Value {
         "optimization": crate::optimization::build(inp),
         "agent_work": agent_work,
         "model_use": model_use,
+        "runtimes": crate::runtimes::descriptors(),
     });
     // D23: changes while away, person requests and the query shape, from the parts above
     let mut sources: Vec<(&str, Option<String>)> = Vec::new();
@@ -940,13 +936,13 @@ fn taskq_observations(inp: &Value, now: u64, machines: &Machines, aliases: &BTre
             else if o["valid_until"].as_u64().is_some_and(|t|now>t) { Some("expired") }
             else if o["complete"] != true || o["state"] == "unknown" { Some(o["reason"].as_str().unwrap_or("incomplete observation")) }
             else if o["observed"].as_u64().is_none_or(|t|t==0) || o["valid_until"].as_u64().is_none_or(|t|Some(t)<o["observed"].as_u64()) { Some("invalid observation time") }
-            else if kind == "login" && ["claude","codex"].iter().any(|k| !matches!(o[*k].as_str(),Some("logged in"|"not logged in"|"not installed"))) { Some("runtime login unknown") }
+            else if kind == "login" && crate::runtimes::runtimes().iter().filter_map(|r| r.login).any(|k| !matches!(o[k].as_str(),Some("logged in"|"not logged in"|"not installed"))) { Some("runtime login unknown") }
             else if !valid || !o["producer"].as_str().is_some_and(|p|p.len()==12 && p.bytes().all(|b|b.is_ascii_hexdigit())) { Some("invalid observation") }
             else { None };
         if let Some(reason) = reason.map(str::to_string) {
             o["state"] = json!("unknown"); o["complete"] = json!(false); o["reason"] = json!(reason);
             for k in ["running","queued"] { if o.get(k).is_some() { o[k] = Value::Null; } }
-            for k in ["claude","codex","codex-app"] { if o.get(k).is_some() { o[k] = json!("unknown"); } }
+            for k in crate::runtimes::codes() { if o.get(k).is_some() { o[k] = json!("unknown"); } }
         }
         let h = hosts.get_mut(&row).unwrap();
         if !h["taskq"]["observations"].is_array() { h["taskq"]["observations"] = json!([]); }

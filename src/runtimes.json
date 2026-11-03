@@ -1,0 +1,25 @@
+{
+  "descriptor": "https://github.com/taskqorg/agentq/blob/e5e004f7f41fb770404bda18774c650170bb07ad/docs/spec/RUNTIME.md#runtime-trait",
+  "runtimes": [
+    {
+      "name": "claude", "label": "Claude Code", "brand": "Anthropic", "family": "claude",
+      "capabilities": ["turn", "resume", "caller-session-id", "compact-hook", "session-url", "quota-snapshot", "background", "title"],
+      "codes": ["claude"], "login": "claude", "model": {"source": "agentq.model"}
+    },
+    {
+      "name": "codex", "label": "Codex CLI", "brand": "OpenAI", "family": "gpt",
+      "capabilities": ["turn", "resume", "quota-snapshot", "app-queue", "app-server", "effort", "image-input", "account"],
+      "codes": ["codex", "codex-app"], "login": "codex", "model": {"reason": "model accounting not qualified (no model id)"}
+    },
+    {
+      "name": "antigravity", "label": "Antigravity", "brand": "Google", "family": "gemini",
+      "capabilities": ["turn", "resume", "title"],
+      "codes": ["agy"], "login": null, "model": null
+    }
+  ],
+  "clients": [
+    {"key": "codex", "label": "Codex", "agents": ["codex"], "direct": "Direct keeps MCP and telemetry; it bypasses the provider optimization."},
+    {"key": "claude-code", "label": "Claude Code", "agents": ["claude", "claude-code"], "direct": "Direct removes the AgentQ route; the command hook can still use RTK."},
+    {"key": "hermes", "label": "Hermes", "agents": ["hermes"], "direct": null, "model": {"reason": "no model accounting adapter"}}
+  ]
+}
