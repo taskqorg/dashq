@@ -283,7 +283,7 @@ impl App {
         // started up to a day before the widest window share one decoded set
         let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
         let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64));
-        let cli_releases: serde_json::Map<String, Value> = [("claude", "anthropics/claude-code"), ("codex", "openai/codex")].into_iter().map(|(cli, repo)| {
+        let cli_releases: serde_json::Map<String, Value> = crate::runtimes::clis().map(|(cli, repo)| {
             let snap = if c.github_token.is_some() && !c.projects.is_empty() { self.cache.get(&format!("cli-release:{cli}"), 180, || source::cli_release(repo, c.github_token.as_deref())) } else { Value::Null };
             (cli.into(), snap)
         }).collect();

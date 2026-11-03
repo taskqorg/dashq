@@ -4,17 +4,17 @@
     {
       "name": "claude", "label": "Claude Code", "brand": "Anthropic", "family": "claude",
       "capabilities": ["turn", "resume", "caller-session-id", "compact-hook", "session-url", "quota-snapshot", "background", "title"],
-      "codes": ["claude"], "login": "claude", "model": {"source": "agentq.model"}
+      "codes": ["claude"], "login": "claude", "cli": {"key": "claude", "releases": "anthropics/claude-code"}, "model": {"source": "agentq.model"}
     },
     {
       "name": "codex", "label": "Codex CLI", "brand": "OpenAI", "family": "gpt",
       "capabilities": ["turn", "resume", "quota-snapshot", "app-queue", "app-server", "effort", "image-input", "account"],
-      "codes": ["codex", "codex-app"], "login": "codex", "model": {"reason": "model accounting not qualified (no model id)"}
+      "codes": ["codex", "codex-app"], "login": "codex", "cli": {"key": "codex", "releases": "openai/codex"}, "model": {"reason": "model accounting not qualified (no model id)"}
     },
     {
       "name": "antigravity", "label": "Antigravity", "brand": "Google", "family": "gemini",
       "capabilities": ["turn", "resume", "title"],
-      "codes": ["agy"], "login": null, "model": null
+      "codes": ["agy"], "login": null, "cli": null, "model": null
     }
   ],
   "clients": [

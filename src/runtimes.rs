@@ -16,6 +16,8 @@ pub struct Runtime {
     pub codes: Vec<&'static str>,
     /// The field of a TaskQ `login` host observation that carries this runtime's sign-in, if any.
     pub login: Option<&'static str>,
+    /// The host CLI of this runtime: its `cli <key> <version>` heartbeat key and the GitHub repository of its releases.
+    pub cli: Option<(&'static str, &'static str)>,
     /// Model accounting: `{source}` when qualified, else `{reason}`; null when not listed.
     pub model: &'static Value,
     descriptor: Value,
@@ -60,6 +62,7 @@ pub fn runtimes() -> &'static [Runtime] {
                 capabilities: strs(&r["capabilities"]),
                 codes: strs(&r["codes"]),
                 login: r["login"].as_str(),
+                cli: r["cli"]["key"].as_str().zip(r["cli"]["releases"].as_str()),
                 model: &r["model"],
                 descriptor: json!({"name": r["name"], "label": r["label"], "brand": r["brand"], "family": r["family"], "capabilities": r["capabilities"]}),
             })
@@ -88,6 +91,11 @@ pub fn by_code(code: &str) -> Option<&'static Runtime> {
 /// Every TaskQ runtime code of the table.
 pub fn codes() -> impl Iterator<Item = &'static str> {
     runtimes().iter().flat_map(|r| r.codes.iter().copied())
+}
+
+/// Host CLIs (Fleet D26) as (heartbeat key, release repository), in table order.
+pub fn clis() -> impl Iterator<Item = (&'static str, &'static str)> {
+    runtimes().iter().filter_map(|r| r.cli)
 }
 
 /// The client of a client key or producer agent name; other clients (Claude Desktop chat) have none.
