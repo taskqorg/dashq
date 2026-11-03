@@ -84,6 +84,7 @@
         "claude",
         "codex",
         "codex-app",
+        "antigravity",
         "other"
       ]
     }
@@ -108,6 +109,30 @@
       "card": null,
       "question": null,
       "failed": null,
+      "heartbeat": {
+        "host": null,
+        "attempt": null,
+        "source": "board host heartbeat",
+        "observed": null,
+        "age_s": null,
+        "freshness": "not applicable",
+        "reason": "no live attempt",
+        "ttl_s": 300,
+        "progress": {
+          "source": "not applicable",
+          "status": "not applicable",
+          "reason": "no live attempt"
+        },
+        "as_of": 102,
+        "warning": null,
+        "input_pending": false,
+        "executor": {
+          "state": "not applicable",
+          "reason": "no live attempt",
+          "observed": null,
+          "source": "board task projection"
+        }
+      },
       "controls": [
         "stop",
         "later"
@@ -176,11 +201,40 @@
         }
       },
       "failed": null,
+      "heartbeat": {
+        "host": "mac",
+        "attempt": 3,
+        "source": "board host heartbeat",
+        "observed": 9,
+        "age_s": 93,
+        "freshness": "not applicable",
+        "reason": "no live attempt",
+        "ttl_s": 300,
+        "progress": {
+          "source": "not applicable",
+          "status": "not applicable",
+          "reason": "no live attempt"
+        },
+        "as_of": 102,
+        "warning": null,
+        "input_pending": false,
+        "executor": {
+          "state": "not applicable",
+          "reason": "no live attempt",
+          "observed": null,
+          "source": "board task projection"
+        }
+      },
       "controls": [
         "stop",
         "later"
       ],
       "verdict": null,
+      "worker": {
+        "attempt": 3,
+        "session": "claude:abc mac",
+        "role": "worker"
+      },
       "executions": [
         {
           "task": 2,
@@ -247,6 +301,30 @@
       "card": null,
       "question": null,
       "failed": null,
+      "heartbeat": {
+        "host": null,
+        "attempt": null,
+        "source": "board host heartbeat",
+        "observed": null,
+        "age_s": null,
+        "freshness": "not applicable",
+        "reason": "no live attempt",
+        "ttl_s": 300,
+        "progress": {
+          "source": "not applicable",
+          "status": "not applicable",
+          "reason": "no live attempt"
+        },
+        "as_of": 102,
+        "warning": null,
+        "input_pending": false,
+        "executor": {
+          "state": "not applicable",
+          "reason": "no live attempt",
+          "observed": null,
+          "source": "board task projection"
+        }
+      },
       "controls": [
         "stop",
         "later"
@@ -288,6 +366,30 @@
       "card": null,
       "question": null,
       "failed": "Reason: no login",
+      "heartbeat": {
+        "host": null,
+        "attempt": null,
+        "source": "board host heartbeat",
+        "observed": null,
+        "age_s": null,
+        "freshness": "not applicable",
+        "reason": "no live attempt",
+        "ttl_s": 300,
+        "progress": {
+          "source": "not applicable",
+          "status": "not applicable",
+          "reason": "no live attempt"
+        },
+        "as_of": 102,
+        "warning": null,
+        "input_pending": false,
+        "executor": {
+          "state": "not applicable",
+          "reason": "no live attempt",
+          "observed": null,
+          "source": "board task projection"
+        }
+      },
       "controls": [
         "retry"
       ],
@@ -328,6 +430,30 @@
       "card": null,
       "question": null,
       "failed": null,
+      "heartbeat": {
+        "host": null,
+        "attempt": null,
+        "source": "board host heartbeat",
+        "observed": null,
+        "age_s": null,
+        "freshness": "not applicable",
+        "reason": "no live attempt",
+        "ttl_s": 300,
+        "progress": {
+          "source": "not applicable",
+          "status": "not applicable",
+          "reason": "no live attempt"
+        },
+        "as_of": 102,
+        "warning": null,
+        "input_pending": false,
+        "executor": {
+          "state": "not applicable",
+          "reason": "no live attempt",
+          "observed": null,
+          "source": "board task projection"
+        }
+      },
       "controls": [
         "stop",
         "later"
@@ -339,6 +465,11 @@
           "cargo run -- selftest -- pass"
         ],
         "open": "none"
+      },
+      "worker": {
+        "attempt": 11,
+        "session": "claude:def mac",
+        "role": "worker"
       },
       "result": "cccccccccccccccccccccccccccccccccccccccc",
       "executions": [

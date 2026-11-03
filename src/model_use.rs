@@ -179,10 +179,12 @@ pub fn build(inp: &Value, agent_work: &Value) -> Value {
         e.3.add(cost.map(|(x, c)| (c.to_string(), x)).ok_or_else(|| why("cost")));
     }
     let calls: u64 = rows.values().map(|r| r.0).sum();
+    // the runtime whose model accounting the agentq.model adapter qualifies
+    let reporter = crate::runtimes::runtimes().iter().find(|r| r.model["source"] == "agentq.model").map(|r| r.name);
     let rows: Vec<Value> = rows
         .iter()
         .map(|((host, model), (n, fields, est, rep))| {
-            json!({"host": host, "runtime": "claude", "model": model, "calls": n,
+            json!({"host": host, "runtime": reporter, "model": model, "calls": n,
                 "tokens": fields.iter().map(|(k, v)| (k.to_string(), v.json())).collect::<serde_json::Map<_, _>>(),
                 "estimate": est.json(), "reported": rep.json()})
         })
@@ -204,16 +206,21 @@ pub fn build(inp: &Value, agent_work: &Value) -> Value {
     };
     let unknown = |why: &str| json!({"state": "unknown", "reason": why});
     let agentq = (calls > 0).then(|| json!({"source": "agentq.model", "calls": calls, "fields": cover.iter().map(|(k, v)| (k.to_string(), v.json())).collect::<serde_json::Map<_, _>>()}));
-    let claude_state = match (&agentq, src["state"].as_str()) {
+    let qualified_state = match (&agentq, src["state"].as_str()) {
         (_, Some(s)) if s != "ok" => json!({"state": s, "reason": src["reason"]}),
         (Some(_), _) => json!({"state": "ok", "reason": null}),
         (None, _) => unknown("no agentq.model calls in the period"),
     };
-    let runtimes = json!([
-        {"runtime": "claude", "status": claude_state, "sources": agentq.into_iter().chain(stages(&["claude"])).collect::<Vec<_>>()},
-        {"runtime": "codex", "status": unknown("model accounting not qualified (no model id)"), "sources": stages(&["codex", "codex-app"]).into_iter().collect::<Vec<_>>()},
-        {"runtime": "hermes", "status": unknown("no model accounting adapter"), "sources": []},
-    ]);
+    // model qualification is runtime-table data (#249): a `source` qualifies the agentq.model adapter, else its reason
+    let mut runtimes: Vec<Value> = crate::runtimes::runtimes().iter().filter(|r| r.model.is_object()).map(|r| {
+        let (status, own) = match r.model["source"].as_str() {
+            Some(_) => (qualified_state.clone(), agentq.clone()),
+            None => (unknown(r.model["reason"].as_str().unwrap_or("model accounting not qualified")), None),
+        };
+        json!({"runtime": r.name, "status": status, "sources": own.into_iter().chain(stages(&r.codes)).collect::<Vec<_>>()})
+    }).collect();
+    runtimes.extend(crate::runtimes::clients().iter().filter(|c| c.model.is_object()).map(|c|
+        json!({"runtime": c.key, "status": unknown(c.model["reason"].as_str().unwrap_or("no model accounting adapter")), "sources": []})));
     let prices = if table.is_empty() { json!({"state": "unknown", "reason": "no price table configured", "entries": []}) } else { json!({"state": "ok", "reason": null, "entries": table}) };
     json!({"source": src, "label": LABEL, "prices": prices, "runtimes": runtimes, "rows": rows, "estimate": priced.json()})
 }

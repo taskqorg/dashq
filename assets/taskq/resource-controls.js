@@ -405,11 +405,15 @@ var TaskqResources = (() => {
           if (local.receipt && local.receipt.state === "saved") return applied(group, now) === "applied" && JSON.stringify(revs(group)) !== JSON.stringify(local.receipt.from) ? "applied" : "saved";
           if (local.receipt) return local.receipt.state;
           if (!local.draft) return cap && cap.edit && fields(group).length ? "view" : "read-only";
-          if (JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) return "conflict";
+          if (!local.draft.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) return "conflict";
           return local.draft.review ? "review" : "editing";
         },
         step: function(group, local, cap, ev, newId, now) {
-          const st = status(group, local, cap, now), l = { ...local };
+          const l = { ...local };
+          if (l.draft?.rebind && JSON.stringify(l.draft.base) !== JSON.stringify(revs(group))) {
+            l.draft = { ...l.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f) => [f.key, l.draft.touched[f.key] ? l.draft.values[f.key] : shown(f)])), rebind: false };
+          }
+          const st = status(group, l, cap, now);
           switch (ev.type) {
             case "open":
               if (!["view", "applied", "rejected", "superseded"].includes(st)) return { local, send: null };
@@ -427,21 +431,26 @@ var TaskqResources = (() => {
               if (st === "review") l.draft = { ...l.draft, review: false };
               return { local: l, send: null };
             case "rebase":
-              if (st === "conflict") l.draft = { ...l.draft, base: revs(group), review: false };
+              if (st === "conflict") l.draft = { ...l.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f) => [f.key, l.draft.touched[f.key] ? l.draft.values[f.key] : shown(f)])), review: false };
               return { local: l, send: null };
             case "cancel":
               return ["editing", "review", "conflict"].includes(st) ? { local: fresh(), send: null } : { local, send: null };
             case "confirm": {
               if (st !== "review") return { local, send: null };
               l.op = { id: newId(), ops: changes(group, l.draft) };
-              l.receipt = { state: "sending", from: revs(group) };
+              l.receipt = { state: "sending", from: revs(group), draft: { ...l.draft, review: false } };
               l.draft = null;
               return { local: l, send: l.op };
             }
-            case "receipt":
+            case "receipt": {
               if (!l.op || ev.opId !== l.op.id) return { local, send: null };
+              const d = l.receipt?.draft, changed = JSON.stringify(l.receipt?.from) !== JSON.stringify(revs(group));
+              if (ev.state === "rejected" && d && (l.op.ops || []).some((o) => o.policy_schema === "taskq.host-capacity/1") && (/host policy changed|revision/i.test(ev.reason || "") || changed)) {
+                return { local: { draft: { base: revs(group), values: Object.fromEntries(fields(group).map((f) => [f.key, d.touched[f.key] ? d.values[f.key] : shown(f)])), touched: d.touched, review: false, error: ev.reason || RECEIPT.conflict, rebind: !changed }, op: null, receipt: null }, send: null };
+              }
               l.receipt = { ...l.receipt, state: ["saved", "rejected", "unknown"].includes(ev.state) ? ev.state : "unknown", reason: ev.reason, saved_revision: ev.saved_revision };
               return { local: l, send: null };
+            }
             case "retry":
               return st === "unknown" ? { local: { ...l, receipt: { ...l.receipt, state: "sending", reason: null } }, send: l.op } : { local, send: null };
             case "dismiss":
@@ -451,6 +460,9 @@ var TaskqResources = (() => {
           }
         },
         render: function(group, local, cap, now) {
+          if (local.draft?.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) {
+            local = { ...local, draft: { ...local.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f2) => [f2.key, local.draft.touched[f2.key] ? local.draft.values[f2.key] : shown(f2)])), rebind: false } };
+          }
           const st = status(group, local, cap, now), f = freshness(group, now), s = scopes(group), id = "rsc-" + String(group.key || "").replace(/[^\w-]/g, "_");
           let h = '<section class="rsc" data-rsc-state="' + st + '" aria-label="' + esc("Capacity of " + (schemaOf(s.host, "taskq.host-capacity/1") ? "all registered projects" : group.labels?.project || "project") + " on " + (group.labels?.host || "this host")) + '">';
           h += '<p class="rsc-row"><span>Policy</span><span class="rsc-muted">' + esc(policy(group)) + "</span></p>";
@@ -527,6 +539,9 @@ var TaskqResources = (() => {
           return execution.module("resource-controls.mount.controller", {
             update(g) {
               group = g;
+              if (local.draft?.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) {
+                local = { ...local, draft: { ...local.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f) => [f.key, local.draft.touched[f.key] ? local.draft.values[f.key] : shown(f)])), rebind: false } };
+              }
               paint();
             },
             editing() {
@@ -631,8 +646,8 @@ var TaskqResources = (() => {
         workRender: function(groups, w, cap, now, host) {
           const ws = workStatus(groups, w, cap, now), st = ws.state, sel = picked(groups, w), d = w.draft;
           const busy = st === "review" || st === "receipts";
-          let h = '<section class="rsc rsc-work" data-rsc-state="' + st + '" aria-label="' + esc("Work mode on " + (host || "this host")) + '">';
-          h += '<p class="rsc-row"><span>Work mode</span><span class="rsc-muted">' + esc((host || "this host") + " \xB7 selected projects") + "</span></p>";
+          let h = '<section class="rsc rsc-work" data-rsc-state="' + st + '" aria-label="' + esc("Balancing on " + (host || "this host")) + '">';
+          h += '<p class="rsc-row"><span>Balancing</span><span class="rsc-muted">' + esc((host || "this host") + " \xB7 selected projects") + "</span></p>";
           h += '<fieldset class="rsc-scope"><legend>Projects</legend>' + groups.map((g) => '<label><input type="checkbox" data-rsc-select="' + esc(g.key) + '"' + (w.selected[g.key] ? " checked" : "") + (busy ? " disabled" : "") + ">" + esc(g.labels && g.labels.project || g.key) + "</label>").join("") + '<p class="rsc-muted">Other projects remain unchanged.</p></fieldset>';
           if (sel.length) h += '<p class="rsc-muted">' + esc(sel.map((g) => (g.labels && g.labels.project || g.key) + ": " + policy(g)).join(" \xB7 ")) + "</p>";
           if (st === "receipts") {
@@ -643,7 +658,7 @@ var TaskqResources = (() => {
             const done = Object.values(ws.each).every((s) => s === "applied" || s === "rejected");
             return h + (done ? '<button type="button" data-rsc="dismiss">Done</button>' : "") + "</section>";
           }
-          if (st === "view" || st === "read-only") return h + '<button type="button" data-rsc="open"' + (st === "view" ? "" : " disabled") + ">Edit work mode</button>" + (st === "read-only" ? '<p class="rsc-muted">' + (sel.length ? "A selected project is read-only here" : "Select projects to change") + "</p>" : "") + "</section>";
+          if (st === "view" || st === "read-only") return h + '<button type="button" data-rsc="open"' + (st === "view" ? "" : " disabled") + ">Edit Balancing</button>" + (st === "read-only" ? '<p class="rsc-muted">' + (sel.length ? "A selected project is read-only here" : "Select projects to change") + "</p>" : "") + "</section>";
           if (st === "review") return h + '<div class="rsc-review" role="alert"><p>' + esc("Apply on " + (host || "this host") + "?") + "</p>" + sel.map((g) => {
             const r = review(g, d);
             return "<p>" + esc((g.labels && g.labels.project || g.key) + ": " + (r.length ? r.join(", ") : "unchanged")) + "</p>";
@@ -737,7 +752,7 @@ var TaskqResources = (() => {
       var STATES = ["view", "editing", "review", "conflict", "sending", "saved", "applied", "rejected", "unknown", "read-only", "superseded"];
       var FRESH = 60;
       var { esc } = execution.module("resource-controls", { esc: (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]) });
-      var { rtName } = execution.module("resource-controls", { rtName: (rt) => ({ claude: "Claude", codex: "Codex", "codex-app": "Codex app" })[rt] || rt });
+      var { rtName } = execution.module("resource-controls", { rtName: (rt) => ({ claude: "Claude", codex: "Codex", "codex-app": "Codex app", antigravity: "Antigravity" })[rt] || rt });
       var BLOCKERS = {
         cpu: "CPU",
         memory: "memory",

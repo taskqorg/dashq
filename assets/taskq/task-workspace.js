@@ -1973,6 +1973,154 @@ var TaskqTaskWorkspace = (() => {
     }
   });
 
+  // src/relative-time.js
+  var require_relative_time = __commonJS({
+    "src/relative-time.js"(exports, module) {
+      "use strict";
+      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
+      var ui = require_ui_runtime();
+      var { execution } = ui;
+      var mounted = /* @__PURE__ */ new WeakSet();
+      var zone;
+      var exact;
+      var time = execution.module("relative-time", {
+        value: function(raw) {
+          if (typeof raw === "number") return raw > 0 && Number.isFinite(new Date(raw).getTime()) ? raw : null;
+          if (typeof raw !== "string") return null;
+          const m5 = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d+)?(Z|[+-](\d\d):(\d\d))$/i.exec(raw);
+          if (!m5 || +m5[2] < 1 || +m5[2] > 12 || +m5[3] < 1 || +m5[3] > new Date(Date.UTC(+m5[1], +m5[2], 0)).getUTCDate() || +m5[4] > 23 || +m5[5] > 59 || +m5[6] > 59 || +(m5[8] || 0) > 23 || +(m5[9] || 0) > 59) return null;
+          const ms = Date.parse(raw);
+          return ms > 0 && Number.isFinite(ms) ? ms : null;
+        },
+        seconds: function(raw) {
+          return typeof raw === "number" ? time.value(raw * 1e3) : null;
+        },
+        label: function(ms, now = Date.now()) {
+          const delta = (ms - now) / 1e3, age = Math.abs(delta);
+          const [unit, size] = age < 3600 ? ["m", 60] : age < 86400 ? ["h", 3600] : ["d", 86400];
+          return (delta > 0 ? "in " : "") + (age < 60 ? "<1m" : Math.floor(age / size) + unit);
+        },
+        detail: function(ms, context) {
+          const current = Intl.DateTimeFormat().resolvedOptions().timeZone;
+          if (current !== zone) {
+            zone = current;
+            exact = new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone: zone, timeZoneName: "longOffset" });
+          }
+          return context + " \xB7 " + exact.format(ms) + " \xB7 " + zone;
+        },
+        stamp: function(raw, context = "Time", reason, focus = true) {
+          const ms = time.value(raw), full = ms === null ? context + " \xB7 Time unknown: " + (reason || (raw == null ? "Source timestamp unavailable" : "Source timestamp invalid or missing a time zone")) : time.detail(ms, context);
+          return h5(ms === null ? "span" : "time", { class: "relative-time" + (ms === null ? " time-unknown" : ms > Date.now() ? " time-future" : ""), ...ms === null ? {} : { dateTime: new Date(ms).toISOString(), "data-time-ms": ms, "data-time-source": raw, "data-time-context": context }, title: full, "aria-label": full, tabIndex: focus ? 0 : void 0 }, ms === null ? "Time unknown" : time.label(ms));
+        },
+        refresh: function(root, now = Date.now()) {
+          for (const el of root.querySelectorAll("time[data-time-ms]")) {
+            const next = time.label(Number(el.dataset.timeMs), now);
+            if (el.textContent !== next) el.textContent = next;
+          }
+        },
+        mount: function(root) {
+          if (mounted.has(root)) return;
+          mounted.add(root);
+          const document2 = root.ownerDocument, tip = document2.createElement("div");
+          tip.className = "time-tooltip";
+          tip.setAttribute("role", "tooltip");
+          tip.hidden = true;
+          document2.body.append(tip);
+          let target = null;
+          const hide = () => {
+            tip.hidden = true;
+            target = null;
+          }, show = (node) => {
+            target = node?.closest(".relative-time,[data-tooltip]") || node?.closest("button,summary")?.querySelector(".relative-time");
+            if (!target) return hide();
+            if (target.dataset.timeMs) {
+              target.title = time.detail(Number(target.dataset.timeMs), target.dataset.timeContext);
+              target.setAttribute("aria-label", target.title);
+            }
+            tip.textContent = target.title;
+            tip.hidden = false;
+            const r4 = target.getBoundingClientRect();
+            tip.style.left = Math.max(4, Math.min(r4.left, document2.documentElement.clientWidth - tip.offsetWidth - 4)) + "px";
+            tip.style.top = Math.max(4, Math.min(r4.bottom + 4, document2.documentElement.clientHeight - tip.offsetHeight - 4)) + "px";
+          };
+          ui.listen(root, "focusin", (e4) => show(e4.target));
+          ui.listen(root, "focusout", hide);
+          ui.listen(root, "mouseover", (e4) => show(e4.target));
+          ui.listen(root, "mouseout", (e4) => {
+            if (!tip.contains(e4.relatedTarget)) hide();
+          });
+          ui.listen(root, "keydown", (e4) => {
+            if (e4.key === "Escape") hide();
+          });
+          ui.listen(root, "scroll", hide, true);
+          const tick = () => {
+            if (!root.isConnected) {
+              tip.remove();
+              return;
+            }
+            time.refresh(root);
+            if (target && !target.isConnected) hide();
+            ui.defer(tick, 6e4 - Date.now() % 6e4 + 1);
+          };
+          tick();
+        }
+      });
+      module.exports = time;
+    }
+  });
+
+  // src/task-health.js
+  var require_task_health = __commonJS({
+    "src/task-health.js"(exports, module) {
+      "use strict";
+      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
+      var { execution } = require_ui_runtime();
+      var time = require_relative_time();
+      module.exports = execution.module("task-health", {
+        warning: function(t4) {
+          return ["doing", "review"].includes(t4?.state) ? t4?.heartbeat?.warning || (t4?.heartbeat ? null : "Execution heartbeat unknown: source unavailable") : null;
+        },
+        details: function(t4) {
+          const b5 = t4?.heartbeat, p5 = b5?.progress;
+          const stamp = (seconds, source) => time.stamp(time.seconds(seconds), source, "No attributable observation");
+          return h5("section", { class: "task-health", "aria-label": "Execution health" }, h5("strong", null, "Execution health"), h5(
+            "dl",
+            null,
+            h5("dt", null, "Host / attempt"),
+            h5("dd", null, (b5?.host || t4?.host || "unknown") + " / " + (b5?.attempt ?? t4?.attempt ?? "unknown")),
+            h5("dt", null, "Heartbeat source"),
+            h5("dd", null, b5?.source || "unknown: source unavailable"),
+            h5("dt", null, "Last observation / age"),
+            h5("dd", null, stamp(b5?.observed, b5?.source || "Host heartbeat")),
+            h5("dt", null, "Freshness"),
+            h5("dd", null, (b5?.freshness || "unknown") + " \xB7 " + (b5?.reason || "Heartbeat unavailable")),
+            h5("dt", null, "Executor"),
+            h5("dd", null, (b5?.executor?.state || "unknown") + " \xB7 " + (b5?.executor?.reason || "No current native work confirmed")),
+            h5("dt", null, "Execution progress"),
+            h5("dd", null, (p5?.status || "unknown") + " \xB7 " + (p5?.reason || "Native progress unavailable")),
+            h5("dt", null, "Progress source"),
+            h5("dd", null, (p5?.source || "unknown") + (p5?.clock ? " \xB7 " + p5.clock : "")),
+            h5("dt", null, "Progress observation"),
+            h5("dd", null, stamp(p5?.observed, "Native progress observation")),
+            h5("dt", null, "Last completed event"),
+            h5("dd", null, stamp(p5?.last_event, "Native completed event")),
+            h5("dt", null, "Pending tools"),
+            h5("dd", null, p5?.pending_tools ?? "unknown"),
+            h5("dt", null, "Tool deadline"),
+            h5("dd", null, p5?.deadline ? stamp(p5.deadline, "Declared tool deadline") : p5?.pending_tools ? "No declared deadline; 15m progress window" : "not applicable")
+          ));
+        }
+      });
+    }
+  });
+
+  // src/ui-icons.json
+  var require_ui_icons = __commonJS({
+    "src/ui-icons.json"(exports, module) {
+      module.exports = { activity: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-activity"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />\n</svg>\n', "always-on-top": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-copy taskq-always-on-top"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" fill="currentColor" />\n  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />\n</svg>\n', archive: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-archive"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="20" height="5" x="2" y="3" rx="1" />\n  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />\n  <path d="M10 12h4" />\n</svg>\n', "archive-restore": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-archive-restore"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="20" height="5" x="2" y="3" rx="1" />\n  <path d="M4 8v11a2 2 0 0 0 2 2h2" />\n  <path d="M20 8v11a2 2 0 0 1-2 2h-2" />\n  <path d="m9 15 3-3 3 3" />\n  <path d="M12 12v9" />\n</svg>\n', "arrow-down": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-down"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 5v14" />\n  <path d="m19 12-7 7-7-7" />\n</svg>\n', "arrow-left": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-left"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m12 19-7-7 7-7" />\n  <path d="M19 12H5" />\n</svg>\n', "arrow-up": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-up"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m5 12 7-7 7 7" />\n  <path d="M12 19V5" />\n</svg>\n', bell: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-bell"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10.268 21a2 2 0 0 0 3.464 0" />\n  <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />\n</svg>\n', bot: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-bot"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 8V4H8" />\n  <rect width="16" height="12" x="4" y="8" rx="2" />\n  <path d="M2 14h2" />\n  <path d="M20 14h2" />\n  <path d="M15 13v2" />\n  <path d="M9 13v2" />\n</svg>\n', "chart-no-axes-column": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-chart-no-axes-column"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 21v-6" />\n  <path d="M12 21V3" />\n  <path d="M19 21V9" />\n</svg>\n', check: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 6 9 17l-5-5" />\n</svg>\n', "check-check": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-check-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M18 6 7 17l-5-5" />\n  <path d="m22 10-7.5 7.5L13 16" />\n</svg>\n', "circle-alert": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-alert"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="12" x2="12" y1="8" y2="12" />\n  <line x1="12" x2="12.01" y1="16" y2="16" />\n</svg>\n', "circle-check": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="m9 12 2 2 4-4" />\n</svg>\n', "circle-question-mark": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-question-mark"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />\n  <path d="M12 17h.01" />\n</svg>\n', "circle-slash": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-slash"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="9" x2="15" y1="15" y2="9" />\n</svg>\n', copy: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-copy"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />\n  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />\n</svg>\n', download: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-download"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 15V3" />\n  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />\n  <path d="m7 10 5 5 5-5" />\n</svg>\n', ellipsis: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-ellipsis"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="1" />\n  <circle cx="19" cy="12" r="1" />\n  <circle cx="5" cy="12" r="1" />\n</svg>\n', "external-link": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-external-link"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 3h6v6" />\n  <path d="M10 14 21 3" />\n  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />\n</svg>\n', "file-plus-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-file-plus-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M11.35 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v5.35" />\n  <path d="M14 2v5a1 1 0 0 0 1 1h5" />\n  <path d="M14 19h6" />\n  <path d="M17 16v6" />\n</svg>\n', "file-text": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-file-text"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />\n  <path d="M14 2v5a1 1 0 0 0 1 1h5" />\n  <path d="M10 9H8" />\n  <path d="M16 13H8" />\n  <path d="M16 17H8" />\n</svg>\n', focus: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-focus"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="3" />\n  <path d="M3 7V5a2 2 0 0 1 2-2h2" />\n  <path d="M17 3h2a2 2 0 0 1 2 2v2" />\n  <path d="M21 17v2a2 2 0 0 1-2 2h-2" />\n  <path d="M7 21H5a2 2 0 0 1-2-2v-2" />\n</svg>\n', "folder-open": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-folder-open"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />\n</svg>\n', "git-merge": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-merge"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M6 21V9a9 9 0 0 0 9 9" />\n</svg>\n', "git-pull-request": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-pull-request"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M13 6h3a2 2 0 0 1 2 2v7" />\n  <line x1="6" x2="6" y1="9" y2="21" />\n</svg>\n', grip: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-grip"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="5" r="1" />\n  <circle cx="19" cy="5" r="1" />\n  <circle cx="5" cy="5" r="1" />\n  <circle cx="12" cy="12" r="1" />\n  <circle cx="19" cy="12" r="1" />\n  <circle cx="5" cy="12" r="1" />\n  <circle cx="12" cy="19" r="1" />\n  <circle cx="19" cy="19" r="1" />\n  <circle cx="5" cy="19" r="1" />\n</svg>\n', history: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-history"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />\n  <path d="M3 3v5h5" />\n  <path d="M12 7v5l4 2" />\n</svg>\n', house: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-house"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />\n  <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />\n</svg>\n', inbox: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-inbox"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />\n  <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />\n</svg>\n', info: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-info"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M12 16v-4" />\n  <path d="M12 8h.01" />\n</svg>\n', "list-filter": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-list-filter"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M2 5h20" />\n  <path d="M6 12h12" />\n  <path d="M9 19h6" />\n</svg>\n', "list-ordered": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-list-ordered"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M11 5h10" />\n  <path d="M11 12h10" />\n  <path d="M11 19h10" />\n  <path d="M4 4h1v5" />\n  <path d="M4 9h2" />\n  <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />\n</svg>\n', "maximize-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-maximize-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 3h6v6" />\n  <path d="m21 3-7 7" />\n  <path d="m3 21 7-7" />\n  <path d="M9 21H3v-6" />\n</svg>\n', "messages-square": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-messages-square"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />\n  <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />\n</svg>\n', "minimize-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-minimize-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m14 10 7-7" />\n  <path d="M20 10h-6V4" />\n  <path d="m3 21 7-7" />\n  <path d="M4 14h6v6" />\n</svg>\n', "octagon-x": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-octagon-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m15 9-6 6" />\n  <path d="M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z" />\n  <path d="m9 9 6 6" />\n</svg>\n', "panel-left-close": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-panel-left-close"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M9 3v18" />\n  <path d="m16 15-3-3 3-3" />\n</svg>\n', "panels-top-left": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-panels-top-left"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M3 9h18" />\n  <path d="M9 21V9" />\n</svg>\n', paperclip: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-paperclip"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" />\n</svg>\n', pause: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pause"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect x="14" y="3" width="5" height="18" rx="1" />\n  <rect x="5" y="3" width="5" height="18" rx="1" />\n</svg>\n', pin: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />\n</svg>\n', "pin-off": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin-off"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89" />\n  <path d="m2 2 20 20" />\n  <path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11" />\n</svg>\n', plus: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-plus"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 12h14" />\n  <path d="M12 5v14" />\n</svg>\n', "rotate-ccw": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rotate-ccw"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />\n  <path d="M3 3v5h5" />\n</svg>\n', "rotate-cw": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rotate-cw"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />\n  <path d="M21 3v5h-5" />\n</svg>\n', "rows-3": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rows-3"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M21 9H3" />\n  <path d="M21 15H3" />\n</svg>\n', save: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-save"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />\n  <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />\n  <path d="M7 3v4a1 1 0 0 0 1 1h7" />\n</svg>\n', search: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-search"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m21 21-4.34-4.34" />\n  <circle cx="11" cy="11" r="8" />\n</svg>\n', settings: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-settings"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />\n  <circle cx="12" cy="12" r="3" />\n</svg>\n', shield: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-shield"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />\n</svg>\n', "sliders-horizontal": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-sliders-horizontal"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 5H3" />\n  <path d="M12 19H3" />\n  <path d="M14 3v4" />\n  <path d="M16 17v4" />\n  <path d="M21 12h-9" />\n  <path d="M21 19h-5" />\n  <path d="M21 5h-7" />\n  <path d="M8 10v4" />\n  <path d="M8 12H3" />\n</svg>\n', square: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-square"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n</svg>\n', "trash-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-trash-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 11v6" />\n  <path d="M14 11v6" />\n  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />\n  <path d="M3 6h18" />\n  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />\n</svg>\n', "triangle-alert": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-triangle-alert"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />\n  <path d="M12 9v4" />\n  <path d="M12 17h.01" />\n</svg>\n', type: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-type"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 4v16" />\n  <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" />\n  <path d="M9 20h6" />\n</svg>\n', "undo-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-undo-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M9 14 4 9l5-5" />\n  <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />\n</svg>\n', x: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M18 6 6 18" />\n  <path d="m6 6 12 12" />\n</svg>\n' };
+    }
+  });
+
   // src/project-blocks.js
   var require_project_blocks = __commonJS({
     "src/project-blocks.js"(exports, module) {
@@ -1985,14 +2133,15 @@ var TaskqTaskWorkspace = (() => {
           return target ? '<a href="' + target + '" data-url="' + target + '"' + (label ? ' aria-label="' + esc(label) + '" title="' + esc(label) + '"' : "") + ">" + text + "</a>" : text;
         },
         // #1592: `counts` ([{state,name,n}] in strip order), `partial` and `open` come from the Rust display model.
-        counters: function(counts, project = "", label = "All projects", partial = [], selected = null, open = null) {
+        counters: function(counts, project = "", label = "All projects", partial = [], selected = null, open = null, heldStart = null) {
           const total = Number.isSafeInteger(open) && open >= 0 ? open : "?";
           const items = (counts || []).map(({ state, name, n: n3 }) => {
             const [mark, kind] = marks[state] || ["circle", ""];
             if (n3 === 0 && selected === null) return "";
             const value = Number.isSafeInteger(n3) && n3 >= 0 ? n3 : "?";
             const title = label + " \xB7 " + name + ": " + (value === "?" ? "unknown" : value);
-            return '<button type="button" class="' + kind + '" data-tqp="tasks" data-project="' + esc(project) + '" data-state="' + state + '"' + (selected === null ? "" : ' aria-pressed="' + selected.includes(state) + '"') + ' aria-label="' + esc(title) + '" title="' + esc(title) + '">' + icon(mark) + (n3 === 0 ? "" : '<span class="tqp-count">' + value + "</span>") + "</button>";
+            const filter = '<button type="button" class="' + kind + '" data-tqp="tasks" data-project="' + esc(project) + '" data-state="' + state + '"' + (selected === null ? "" : ' aria-pressed="' + selected.includes(state) + '"') + ' aria-label="' + esc(title) + '" title="' + esc(title) + '">' + icon(mark) + (n3 === 0 ? "" : '<span class="tqp-count">' + value + "</span>") + "</button>";
+            return state === "held" && heldStart ? '<span class="held-control" role="group" aria-label="Held filter and admission">' + filter + '<button type="button" class="good" data-a="held-review" title="' + esc(heldStart.label) + '" aria-label="' + esc(heldStart.label) + '"' + (heldStart.disabled ? " disabled" : "") + ">" + icon("play") + "</button></span>" : filter;
           }).join("");
           return (partial.length ? '<small class="tqp-partial" title="' + esc(partial.join(", ")) + '">Partial: ' + esc(partial.join(", ")) + "</small>" : "") + (items ? '<div class="tqp-counts" aria-label="' + esc(label) + ' counters">' + items + (selected === null ? "" : '<button type="button" data-a="all-tasks" aria-pressed="' + !selected.length + '" aria-label="All tasks: ' + (total === "?" ? "unknown" : total) + ' open" title="All projects \xB7 open tasks">All tasks ' + total + "</button>") + "</div>" : "");
         },
@@ -2002,17 +2151,19 @@ var TaskqTaskWorkspace = (() => {
         aggregate: function(all, selected = null) {
           return '<section class="tqp" aria-label="All projects">' + counters(all.counts, "", "All projects", all.partial || [], selected, all.open) + "</section>";
         },
-        task: function(p5, row, global = false, compact = false) {
+        task: function(p5, row, global2 = false, compact = false) {
           const name = row.state_name ?? row.state, [mark, kind] = marks[row.state] || ["circle", ""];
           const board = row.key ? row.key.slice(0, row.key.lastIndexOf("/")) : p5.board.url;
-          const rt = row.runtime, brand = rt === "claude" ? "claude" : ["codex", "codex-app"].includes(rt) ? "openai" : "";
+          const rt = row.runtime, brand = rt === "claude" ? "claude" : ["codex", "codex-app"].includes(rt) ? "openai" : rt === "antigravity" ? "terminal" : "";
           const remote = row.host && !row.local_session;
           const badges = (remote ? '<span title="Remote host" aria-label="Remote host">' + icon("network") + "</span> " : "") + (rt ? icon(brand) + " " + esc(rt) : "");
           const target = url(row.session_url, !!row.local_session);
           const session = target ? link(row.session_url, icon("terminal"), "Open " + (rt || "agent") + " session", true) : row.host ? "<small" + (row.session_reason ? ' title="' + esc(row.session_reason) + '"' : "") + ">" + (remote ? "Session unavailable" : "Session starting or unavailable") + "</small>" : "";
           const since = !("since" in row) ? "" : row.age == null ? '<small class="tqp-age" title="Age unknown: no logged state change">age ?</small>' : '<small class="tqp-age" title="Since the last state change">' + esc(row.age) + "</small>";
-          const metadata = [since, global ? esc(p5.name) : "", row.host ? esc(row.host) : "", badges].filter(Boolean).join(" \xB7 ");
+          const metadata = [since, global2 ? esc(p5.name) : "", row.host ? esc(row.host) : "", badges].filter(Boolean).join(" \xB7 ");
           const wait = row.wait ? '<small class="tqp-execution-wait" role="status">' + esc(row.wait) + "</small>" : "";
+          const warning = require_task_health().warning(row);
+          const health = ["doing", "review"].includes(row.state) ? '<span class="task-health-warning"' + (warning ? ' role="status" tabindex="0" title="' + esc(warning) + '" aria-label="' + esc(warning) + '"' : ' aria-hidden="true"') + ">" + (warning ? icon("triangle-alert") + '<span class="task-health-tip" role="tooltip">' + esc(warning) + "</span>" : "") + "</span>" : "";
           const parked = (row.stage ? '<small class="tqp-stage" title="First open stage of the Acceptance items">Stage ' + esc(row.stage.k) + "/" + esc(row.stage.n) + "</small>" : "") + (row.until ? '<small class="tqp-parked">' + esc(parkedText(row)) + "</small>" : "");
           if (compact) {
             const elapsed = row.age != null ? '<span class="tqp-age">' + esc(row.age) + "</span>" : '<span class="tqp-age" title="Current stage elapsed unknown">?</span>';
@@ -2021,9 +2172,9 @@ var TaskqTaskWorkspace = (() => {
             const provider = p5.board.kind === "gitlab" ? "GitLab" : p5.board.kind === "github" ? "GitHub" : "recorded board";
             const forge = url(row.url) ? '<a class="task-board" href="' + url(row.url) + '" data-url="' + url(row.url) + '" aria-label="Open #' + esc(row.n) + " on " + provider + '" title="Open #' + esc(row.n) + " on " + provider + '">' + icon(p5.board.kind) + "</a>" : '<span class="task-board" aria-disabled="true" title="Issue target unavailable">' + icon(p5.board.kind) + "</span>";
             const run = (row.host && row.local_session === false ? '<span class="tqp-mark" title="Remote host ' + esc(row.host) + '" aria-label="Remote host">' + icon("network") + "</span>" : "") + runtime;
-            return '<div class="tqp tqp-task"><div class="tqp-task-head"><span class="task-stage ' + kind + '" aria-label="' + esc(name) + ' \xB7 current stage" title="' + esc(name) + ' \xB7 current stage">' + (compact && row.state === "ask" ? '<button type="button" class="question-shortcut" data-a="workspace" data-page="answer" data-root="' + esc(row.root || p5.root || "") + '" data-board="' + esc(board) + '" data-revision="' + esc(row.revision) + '" data-task="' + esc(row.n) + '" aria-label="Open question #' + esc(row.n) + '" title="Open question #' + esc(row.n) + '">' + icon(mark) + "</button>" : icon(mark)) + "</span>" + forge + '<button type="button" class="task-identity" data-a="task-detail" data-key="' + esc(row.key) + '" aria-controls="taskq-question-details" aria-expanded="false" aria-label="Details for ' + esc(p5.name) + " #" + row.n + '">' + (global ? esc(p5.name) + " " : "") + "#" + esc(row.n) + "</button>" + (row.state === "review" && row.enqueued ? '<span class="task-publication">' + esc(name) + "</span>" : "") + '<span class="task-when">' + run + elapsed + '</span></div><div class="tqp-task-title">' + link(row.url, esc(row.title), "Open task #" + row.n) + "</div>" + parked + "</div>";
+            return '<div class="tqp tqp-task"><div class="tqp-task-head"><span class="task-stage ' + kind + '" aria-label="' + esc(name) + ' \xB7 current stage" title="' + esc(name) + ' \xB7 current stage">' + (compact && row.state === "ask" ? '<button type="button" class="question-shortcut" data-a="workspace" data-page="answer" data-root="' + esc(row.root || p5.root || "") + '" data-board="' + esc(board) + '" data-revision="' + esc(row.revision) + '" data-task="' + esc(row.n) + '" aria-label="Open question #' + esc(row.n) + '" title="Open question #' + esc(row.n) + '">' + icon(mark) + "</button>" : icon(mark)) + "</span>" + forge + '<button type="button" class="task-identity" data-a="task-detail" data-key="' + esc(row.key) + '" aria-controls="taskq-question-details" aria-expanded="false" aria-label="Details for ' + esc(p5.name) + " #" + row.n + '">' + (global2 ? esc(p5.name) + " " : "") + "#" + esc(row.n) + "</button>" + (row.state === "review" && row.enqueued ? '<span class="task-publication">' + esc(name) + "</span>" : "") + '<span class="task-when">' + health + run + elapsed + '</span></div><div class="tqp-task-title">' + link(row.url, esc(row.title), "Open task #" + row.n) + "</div>" + parked + "</div>";
           }
-          return '<div class="tqp tqp-task"><div class="tqp-task-head"><span class="' + kind + '" title="' + esc(name) + '" aria-label="' + esc(name) + '">' + icon(mark) + "</span> " + link(row.url, icon(p5.board.kind) + " #" + esc(row.n), "Open task #" + row.n) + ' <span class="tqp-meta">' + metadata + "</span> " + session + " " + wait + '</div><div class="tqp-task-title">' + esc(row.title) + "</div>" + parked + "</div>";
+          return '<div class="tqp tqp-task"><div class="tqp-task-head"><span class="' + kind + '" title="' + esc(name) + '" aria-label="' + esc(name) + '">' + icon(mark) + "</span> " + link(row.url, icon(p5.board.kind) + " #" + esc(row.n), "Open task #" + row.n) + ' <span class="tqp-meta">' + metadata + "</span> " + session + " " + health + wait + '</div><div class="tqp-task-title">' + esc(row.title) + "</div>" + parked + "</div>";
         },
         handle: function(event, adapter) {
           const el = event.target.closest("[data-tqp],.tqp a[data-url]");
@@ -2035,7 +2186,8 @@ var TaskqTaskWorkspace = (() => {
           return true;
         }
       });
-      var assets = { "circle-x": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="m15 9-6 6" />\n  <path d="m9 9 6 6" />\n</svg>\n', "clock": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-clock"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M12 6v6l4 2" />\n</svg>\n', "folder": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-folder"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />\n</svg>\n', "circle-pause": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-pause"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="10" x2="10" y1="15" y2="9" />\n  <line x1="14" x2="14" y1="15" y2="9" />\n</svg>\n', "gitlab": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitLab</title><path d="m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"/></svg>', "git-pull-request": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-pull-request"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M13 6h3a2 2 0 0 1 2 2v7" />\n  <line x1="6" x2="6" y1="9" y2="21" />\n</svg>\n', "openai": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>OpenAI</title><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>', "play": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-play"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />\n</svg>\n', "terminal": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-terminal"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 19h8" />\n  <path d="m4 17 6-6-6-6" />\n</svg>\n', "message-circle-question": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-message-circle-question"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" />\n  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />\n  <path d="M12 17h.01" />\n</svg>\n', "github": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>', "circle": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n</svg>\n', "pin": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />\n</svg>\n', "link": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-link"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />\n  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />\n</svg>\n', "network": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-network"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect x="16" y="16" width="6" height="6" rx="1" />\n  <rect x="2" y="16" width="6" height="6" rx="1" />\n  <rect x="9" y="2" width="6" height="6" rx="1" />\n  <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />\n  <path d="M12 12V8" />\n</svg>\n', "claude": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>' };
+      var assets = { "circle-x": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="m15 9-6 6" />\n  <path d="m9 9 6 6" />\n</svg>\n', "clock": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-clock"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M12 6v6l4 2" />\n</svg>\n', "folder": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-folder"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />\n</svg>\n', "circle-dashed": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-dashed"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10.1 2.182a10 10 0 0 1 3.8 0" />\n  <path d="M13.9 21.818a10 10 0 0 1-3.8 0" />\n  <path d="M17.609 3.721a10 10 0 0 1 2.69 2.7" />\n  <path d="M2.182 13.9a10 10 0 0 1 0-3.8" />\n  <path d="M20.279 17.609a10 10 0 0 1-2.7 2.69" />\n  <path d="M21.818 10.1a10 10 0 0 1 0 3.8" />\n  <path d="M3.721 6.391a10 10 0 0 1 2.7-2.69" />\n  <path d="M6.391 20.279a10 10 0 0 1-2.69-2.7" />\n</svg>\n', "circle-pause": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-pause"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="10" x2="10" y1="15" y2="9" />\n  <line x1="14" x2="14" y1="15" y2="9" />\n</svg>\n', "gitlab": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitLab</title><path d="m23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z"/></svg>', "git-pull-request": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-pull-request"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M13 6h3a2 2 0 0 1 2 2v7" />\n  <line x1="6" x2="6" y1="9" y2="21" />\n</svg>\n', "openai": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>OpenAI</title><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>', "play": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-play"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />\n</svg>\n', "terminal": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-terminal"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 19h8" />\n  <path d="m4 17 6-6-6-6" />\n</svg>\n', "message-circle-question": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-message-circle-question"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" />\n  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />\n  <path d="M12 17h.01" />\n</svg>\n', "github": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>', "circle": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n</svg>\n', "pin": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />\n</svg>\n', "link": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-link"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />\n  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />\n</svg>\n', "network": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-network"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect x="16" y="16" width="6" height="6" rx="1" />\n  <rect x="2" y="16" width="6" height="6" rx="1" />\n  <rect x="9" y="2" width="6" height="6" rx="1" />\n  <path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3" />\n  <path d="M12 12V8" />\n</svg>\n', "claude": '<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>Claude</title><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>' };
+      assets["triangle-alert"] = require_ui_icons()["triangle-alert"];
       var marks = {
         doing: ["play", "good"],
         review: ["git-pull-request", "review"],
@@ -2043,8 +2195,8 @@ var TaskqTaskWorkspace = (() => {
         failed: ["circle-x", "danger"],
         ready: ["circle", ""],
         waiting: ["link", ""],
-        later: ["clock", ""],
-        held: ["circle-pause", ""]
+        later: ["circle-pause", ""],
+        held: ["circle-dashed", ""]
       };
       var { esc } = execution.module("project-blocks", { esc: (x5) => String(x5 ?? "").replace(/[&<>"']/g, (c4) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c4]) });
       var { icon } = execution.module("project-blocks", { icon: (name) => (assets[name] || "").replace("<svg", '<svg aria-hidden="true" focusable="false" data-icon="' + name + '"') });
@@ -2059,13 +2211,6 @@ var TaskqTaskWorkspace = (() => {
       });
       var api = { marks, assets, counters, summary, aggregate, task, handle, parked: parkedText, destinations };
       module.exports = api;
-    }
-  });
-
-  // src/ui-icons.json
-  var require_ui_icons = __commonJS({
-    "src/ui-icons.json"(exports, module) {
-      module.exports = { activity: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-activity"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />\n</svg>\n', "always-on-top": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-copy taskq-always-on-top"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" fill="currentColor" />\n  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />\n</svg>\n', archive: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-archive"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="20" height="5" x="2" y="3" rx="1" />\n  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />\n  <path d="M10 12h4" />\n</svg>\n', "archive-restore": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-archive-restore"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="20" height="5" x="2" y="3" rx="1" />\n  <path d="M4 8v11a2 2 0 0 0 2 2h2" />\n  <path d="M20 8v11a2 2 0 0 1-2 2h-2" />\n  <path d="m9 15 3-3 3 3" />\n  <path d="M12 12v9" />\n</svg>\n', "arrow-down": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-down"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 5v14" />\n  <path d="m19 12-7 7-7-7" />\n</svg>\n', "arrow-left": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-left"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m12 19-7-7 7-7" />\n  <path d="M19 12H5" />\n</svg>\n', "arrow-up": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-arrow-up"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m5 12 7-7 7 7" />\n  <path d="M12 19V5" />\n</svg>\n', bell: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-bell"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10.268 21a2 2 0 0 0 3.464 0" />\n  <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />\n</svg>\n', bot: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-bot"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 8V4H8" />\n  <rect width="16" height="12" x="4" y="8" rx="2" />\n  <path d="M2 14h2" />\n  <path d="M20 14h2" />\n  <path d="M15 13v2" />\n  <path d="M9 13v2" />\n</svg>\n', "chart-no-axes-column": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-chart-no-axes-column"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 21v-6" />\n  <path d="M12 21V3" />\n  <path d="M19 21V9" />\n</svg>\n', check: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 6 9 17l-5-5" />\n</svg>\n', "check-check": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-check-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M18 6 7 17l-5-5" />\n  <path d="m22 10-7.5 7.5L13 16" />\n</svg>\n', "circle-alert": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-alert"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="12" x2="12" y1="8" y2="12" />\n  <line x1="12" x2="12.01" y1="16" y2="16" />\n</svg>\n', "circle-check": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-check"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="m9 12 2 2 4-4" />\n</svg>\n', "circle-question-mark": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-question-mark"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />\n  <path d="M12 17h.01" />\n</svg>\n', "circle-slash": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-circle-slash"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <line x1="9" x2="15" y1="15" y2="9" />\n</svg>\n', copy: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-copy"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />\n  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />\n</svg>\n', download: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-download"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 15V3" />\n  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />\n  <path d="m7 10 5 5 5-5" />\n</svg>\n', ellipsis: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-ellipsis"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="1" />\n  <circle cx="19" cy="12" r="1" />\n  <circle cx="5" cy="12" r="1" />\n</svg>\n', "external-link": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-external-link"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 3h6v6" />\n  <path d="M10 14 21 3" />\n  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />\n</svg>\n', "file-plus-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-file-plus-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M11.35 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v5.35" />\n  <path d="M14 2v5a1 1 0 0 0 1 1h5" />\n  <path d="M14 19h6" />\n  <path d="M17 16v6" />\n</svg>\n', "file-text": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-file-text"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />\n  <path d="M14 2v5a1 1 0 0 0 1 1h5" />\n  <path d="M10 9H8" />\n  <path d="M16 13H8" />\n  <path d="M16 17H8" />\n</svg>\n', focus: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-focus"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="3" />\n  <path d="M3 7V5a2 2 0 0 1 2-2h2" />\n  <path d="M17 3h2a2 2 0 0 1 2 2v2" />\n  <path d="M21 17v2a2 2 0 0 1-2 2h-2" />\n  <path d="M7 21H5a2 2 0 0 1-2-2v-2" />\n</svg>\n', "folder-open": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-folder-open"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />\n</svg>\n', "git-merge": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-merge"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M6 21V9a9 9 0 0 0 9 9" />\n</svg>\n', "git-pull-request": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-git-pull-request"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="18" cy="18" r="3" />\n  <circle cx="6" cy="6" r="3" />\n  <path d="M13 6h3a2 2 0 0 1 2 2v7" />\n  <line x1="6" x2="6" y1="9" y2="21" />\n</svg>\n', grip: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-grip"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="5" r="1" />\n  <circle cx="19" cy="5" r="1" />\n  <circle cx="5" cy="5" r="1" />\n  <circle cx="12" cy="12" r="1" />\n  <circle cx="19" cy="12" r="1" />\n  <circle cx="5" cy="12" r="1" />\n  <circle cx="12" cy="19" r="1" />\n  <circle cx="19" cy="19" r="1" />\n  <circle cx="5" cy="19" r="1" />\n</svg>\n', history: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-history"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />\n  <path d="M3 3v5h5" />\n  <path d="M12 7v5l4 2" />\n</svg>\n', house: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-house"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />\n  <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />\n</svg>\n', inbox: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-inbox"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />\n  <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />\n</svg>\n', info: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-info"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <circle cx="12" cy="12" r="10" />\n  <path d="M12 16v-4" />\n  <path d="M12 8h.01" />\n</svg>\n', "list-filter": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-list-filter"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M2 5h20" />\n  <path d="M6 12h12" />\n  <path d="M9 19h6" />\n</svg>\n', "list-ordered": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-list-ordered"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M11 5h10" />\n  <path d="M11 12h10" />\n  <path d="M11 19h10" />\n  <path d="M4 4h1v5" />\n  <path d="M4 9h2" />\n  <path d="M6.5 20H3.4c0-1 2.6-1.925 2.6-3.5a1.5 1.5 0 0 0-2.6-1.02" />\n</svg>\n', "maximize-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-maximize-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15 3h6v6" />\n  <path d="m21 3-7 7" />\n  <path d="m3 21 7-7" />\n  <path d="M9 21H3v-6" />\n</svg>\n', "messages-square": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-messages-square"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />\n  <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />\n</svg>\n', "minimize-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-minimize-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m14 10 7-7" />\n  <path d="M20 10h-6V4" />\n  <path d="m3 21 7-7" />\n  <path d="M4 14h6v6" />\n</svg>\n', "octagon-x": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-octagon-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m15 9-6 6" />\n  <path d="M2.586 16.726A2 2 0 0 1 2 15.312V8.688a2 2 0 0 1 .586-1.414l4.688-4.688A2 2 0 0 1 8.688 2h6.624a2 2 0 0 1 1.414.586l4.688 4.688A2 2 0 0 1 22 8.688v6.624a2 2 0 0 1-.586 1.414l-4.688 4.688a2 2 0 0 1-1.414.586H8.688a2 2 0 0 1-1.414-.586z" />\n  <path d="m9 9 6 6" />\n</svg>\n', "panel-left-close": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-panel-left-close"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M9 3v18" />\n  <path d="m16 15-3-3 3-3" />\n</svg>\n', "panels-top-left": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-panels-top-left"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M3 9h18" />\n  <path d="M9 21V9" />\n</svg>\n', paperclip: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-paperclip"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" />\n</svg>\n', pause: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pause"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect x="14" y="3" width="5" height="18" rx="1" />\n  <rect x="5" y="3" width="5" height="18" rx="1" />\n</svg>\n', pin: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />\n</svg>\n', "pin-off": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-pin-off"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 17v5" />\n  <path d="M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89" />\n  <path d="m2 2 20 20" />\n  <path d="M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11" />\n</svg>\n', plus: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-plus"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M5 12h14" />\n  <path d="M12 5v14" />\n</svg>\n', "rotate-ccw": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rotate-ccw"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />\n  <path d="M3 3v5h5" />\n</svg>\n', "rotate-cw": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rotate-cw"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" />\n  <path d="M21 3v5h-5" />\n</svg>\n', "rows-3": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-rows-3"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n  <path d="M21 9H3" />\n  <path d="M21 15H3" />\n</svg>\n', save: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-save"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />\n  <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />\n  <path d="M7 3v4a1 1 0 0 0 1 1h7" />\n</svg>\n', search: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-search"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m21 21-4.34-4.34" />\n  <circle cx="11" cy="11" r="8" />\n</svg>\n', settings: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-settings"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />\n  <circle cx="12" cy="12" r="3" />\n</svg>\n', shield: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-shield"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />\n</svg>\n', "sliders-horizontal": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-sliders-horizontal"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 5H3" />\n  <path d="M12 19H3" />\n  <path d="M14 3v4" />\n  <path d="M16 17v4" />\n  <path d="M21 12h-9" />\n  <path d="M21 19h-5" />\n  <path d="M21 5h-7" />\n  <path d="M8 10v4" />\n  <path d="M8 12H3" />\n</svg>\n', square: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-square"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <rect width="18" height="18" x="3" y="3" rx="2" />\n</svg>\n', "trash-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-trash-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M10 11v6" />\n  <path d="M14 11v6" />\n  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />\n  <path d="M3 6h18" />\n  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />\n</svg>\n', "triangle-alert": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-triangle-alert"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />\n  <path d="M12 9v4" />\n  <path d="M12 17h.01" />\n</svg>\n', type: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-type"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M12 4v16" />\n  <path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2" />\n  <path d="M9 20h6" />\n</svg>\n', "undo-2": '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-undo-2"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M9 14 4 9l5-5" />\n  <path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11" />\n</svg>\n', x: '<!-- @license lucide-static v1.17.0 - ISC -->\n<svg\n  class="lucide lucide-x"\n  xmlns="http://www.w3.org/2000/svg"\n  width="24"\n  height="24"\n  viewBox="0 0 24 24"\n  fill="none"\n  stroke="currentColor"\n  stroke-width="2"\n  stroke-linecap="round"\n  stroke-linejoin="round"\n>\n  <path d="M18 6 6 18" />\n  <path d="m6 6 12 12" />\n</svg>\n' };
     }
   });
 
@@ -2508,11 +2653,15 @@ var TaskqTaskWorkspace = (() => {
           if (local.receipt && local.receipt.state === "saved") return applied(group, now) === "applied" && JSON.stringify(revs(group)) !== JSON.stringify(local.receipt.from) ? "applied" : "saved";
           if (local.receipt) return local.receipt.state;
           if (!local.draft) return cap && cap.edit && fields(group).length ? "view" : "read-only";
-          if (JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) return "conflict";
+          if (!local.draft.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) return "conflict";
           return local.draft.review ? "review" : "editing";
         },
         step: function(group, local, cap, ev, newId, now) {
-          const st = status(group, local, cap, now), l5 = { ...local };
+          const l5 = { ...local };
+          if (l5.draft?.rebind && JSON.stringify(l5.draft.base) !== JSON.stringify(revs(group))) {
+            l5.draft = { ...l5.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f4) => [f4.key, l5.draft.touched[f4.key] ? l5.draft.values[f4.key] : shown(f4)])), rebind: false };
+          }
+          const st = status(group, l5, cap, now);
           switch (ev.type) {
             case "open":
               if (!["view", "applied", "rejected", "superseded"].includes(st)) return { local, send: null };
@@ -2530,21 +2679,26 @@ var TaskqTaskWorkspace = (() => {
               if (st === "review") l5.draft = { ...l5.draft, review: false };
               return { local: l5, send: null };
             case "rebase":
-              if (st === "conflict") l5.draft = { ...l5.draft, base: revs(group), review: false };
+              if (st === "conflict") l5.draft = { ...l5.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f4) => [f4.key, l5.draft.touched[f4.key] ? l5.draft.values[f4.key] : shown(f4)])), review: false };
               return { local: l5, send: null };
             case "cancel":
               return ["editing", "review", "conflict"].includes(st) ? { local: fresh(), send: null } : { local, send: null };
             case "confirm": {
               if (st !== "review") return { local, send: null };
               l5.op = { id: newId(), ops: changes(group, l5.draft) };
-              l5.receipt = { state: "sending", from: revs(group) };
+              l5.receipt = { state: "sending", from: revs(group), draft: { ...l5.draft, review: false } };
               l5.draft = null;
               return { local: l5, send: l5.op };
             }
-            case "receipt":
+            case "receipt": {
               if (!l5.op || ev.opId !== l5.op.id) return { local, send: null };
+              const d5 = l5.receipt?.draft, changed = JSON.stringify(l5.receipt?.from) !== JSON.stringify(revs(group));
+              if (ev.state === "rejected" && d5 && (l5.op.ops || []).some((o4) => o4.policy_schema === "taskq.host-capacity/1") && (/host policy changed|revision/i.test(ev.reason || "") || changed)) {
+                return { local: { draft: { base: revs(group), values: Object.fromEntries(fields(group).map((f4) => [f4.key, d5.touched[f4.key] ? d5.values[f4.key] : shown(f4)])), touched: d5.touched, review: false, error: ev.reason || RECEIPT.conflict, rebind: !changed }, op: null, receipt: null }, send: null };
+              }
               l5.receipt = { ...l5.receipt, state: ["saved", "rejected", "unknown"].includes(ev.state) ? ev.state : "unknown", reason: ev.reason, saved_revision: ev.saved_revision };
               return { local: l5, send: null };
+            }
             case "retry":
               return st === "unknown" ? { local: { ...l5, receipt: { ...l5.receipt, state: "sending", reason: null } }, send: l5.op } : { local, send: null };
             case "dismiss":
@@ -2554,6 +2708,9 @@ var TaskqTaskWorkspace = (() => {
           }
         },
         render: function(group, local, cap, now) {
+          if (local.draft?.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) {
+            local = { ...local, draft: { ...local.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f5) => [f5.key, local.draft.touched[f5.key] ? local.draft.values[f5.key] : shown(f5)])), rebind: false } };
+          }
           const st = status(group, local, cap, now), f4 = freshness(group, now), s4 = scopes(group), id = "rsc-" + String(group.key || "").replace(/[^\w-]/g, "_");
           let h5 = '<section class="rsc" data-rsc-state="' + st + '" aria-label="' + esc("Capacity of " + (schemaOf(s4.host, "taskq.host-capacity/1") ? "all registered projects" : group.labels?.project || "project") + " on " + (group.labels?.host || "this host")) + '">';
           h5 += '<p class="rsc-row"><span>Policy</span><span class="rsc-muted">' + esc(policy(group)) + "</span></p>";
@@ -2630,6 +2787,9 @@ var TaskqTaskWorkspace = (() => {
           return execution.module("resource-controls.mount.controller", {
             update(g5) {
               group = g5;
+              if (local.draft?.rebind && JSON.stringify(local.draft.base) !== JSON.stringify(revs(group))) {
+                local = { ...local, draft: { ...local.draft, base: revs(group), values: Object.fromEntries(fields(group).map((f4) => [f4.key, local.draft.touched[f4.key] ? local.draft.values[f4.key] : shown(f4)])), rebind: false } };
+              }
               paint();
             },
             editing() {
@@ -2734,8 +2894,8 @@ var TaskqTaskWorkspace = (() => {
         workRender: function(groups, w5, cap, now, host) {
           const ws = workStatus(groups, w5, cap, now), st = ws.state, sel = picked(groups, w5), d5 = w5.draft;
           const busy = st === "review" || st === "receipts";
-          let h5 = '<section class="rsc rsc-work" data-rsc-state="' + st + '" aria-label="' + esc("Work mode on " + (host || "this host")) + '">';
-          h5 += '<p class="rsc-row"><span>Work mode</span><span class="rsc-muted">' + esc((host || "this host") + " \xB7 selected projects") + "</span></p>";
+          let h5 = '<section class="rsc rsc-work" data-rsc-state="' + st + '" aria-label="' + esc("Balancing on " + (host || "this host")) + '">';
+          h5 += '<p class="rsc-row"><span>Balancing</span><span class="rsc-muted">' + esc((host || "this host") + " \xB7 selected projects") + "</span></p>";
           h5 += '<fieldset class="rsc-scope"><legend>Projects</legend>' + groups.map((g5) => '<label><input type="checkbox" data-rsc-select="' + esc(g5.key) + '"' + (w5.selected[g5.key] ? " checked" : "") + (busy ? " disabled" : "") + ">" + esc(g5.labels && g5.labels.project || g5.key) + "</label>").join("") + '<p class="rsc-muted">Other projects remain unchanged.</p></fieldset>';
           if (sel.length) h5 += '<p class="rsc-muted">' + esc(sel.map((g5) => (g5.labels && g5.labels.project || g5.key) + ": " + policy(g5)).join(" \xB7 ")) + "</p>";
           if (st === "receipts") {
@@ -2746,7 +2906,7 @@ var TaskqTaskWorkspace = (() => {
             const done = Object.values(ws.each).every((s4) => s4 === "applied" || s4 === "rejected");
             return h5 + (done ? '<button type="button" data-rsc="dismiss">Done</button>' : "") + "</section>";
           }
-          if (st === "view" || st === "read-only") return h5 + '<button type="button" data-rsc="open"' + (st === "view" ? "" : " disabled") + ">Edit work mode</button>" + (st === "read-only" ? '<p class="rsc-muted">' + (sel.length ? "A selected project is read-only here" : "Select projects to change") + "</p>" : "") + "</section>";
+          if (st === "view" || st === "read-only") return h5 + '<button type="button" data-rsc="open"' + (st === "view" ? "" : " disabled") + ">Edit Balancing</button>" + (st === "read-only" ? '<p class="rsc-muted">' + (sel.length ? "A selected project is read-only here" : "Select projects to change") + "</p>" : "") + "</section>";
           if (st === "review") return h5 + '<div class="rsc-review" role="alert"><p>' + esc("Apply on " + (host || "this host") + "?") + "</p>" + sel.map((g5) => {
             const r4 = review(g5, d5);
             return "<p>" + esc((g5.labels && g5.labels.project || g5.key) + ": " + (r4.length ? r4.join(", ") : "unchanged")) + "</p>";
@@ -2840,7 +3000,7 @@ var TaskqTaskWorkspace = (() => {
       var STATES = ["view", "editing", "review", "conflict", "sending", "saved", "applied", "rejected", "unknown", "read-only", "superseded"];
       var FRESH = 60;
       var { esc } = execution.module("resource-controls", { esc: (s4) => String(s4 == null ? "" : s4).replace(/[&<>"']/g, (c4) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c4]) });
-      var { rtName } = execution.module("resource-controls", { rtName: (rt) => ({ claude: "Claude", codex: "Codex", "codex-app": "Codex app" })[rt] || rt });
+      var { rtName } = execution.module("resource-controls", { rtName: (rt) => ({ claude: "Claude", codex: "Codex", "codex-app": "Codex app", antigravity: "Antigravity" })[rt] || rt });
       var BLOCKERS = {
         cpu: "CPU",
         memory: "memory",
@@ -2939,1228 +3099,2019 @@ var TaskqTaskWorkspace = (() => {
     }
   });
 
-  // src/reports.js
-  var require_reports = __commonJS({
-    "src/reports.js"(exports, module) {
-      "use strict";
-      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
-      var ui = require_ui_runtime();
-      var { execution } = ui;
-      var { create, body } = execution.module("reports", {
-        create: function({ send = ui.send, draw, defer = ui.defer, id = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b5) => b5.toString(16).padStart(2, "0")).join("") }) {
-          let expanded = false, projects = [], pages = /* @__PURE__ */ new Map(), pending = /* @__PURE__ */ new Map(), selected = null, notice = "", full = false, draft = null, successor = null, readFailure = "", readQueue = [];
-          const receipts = /* @__PURE__ */ new Map(), outcomes = /* @__PURE__ */ new Map(), key = (root, n3) => root + "#" + n3;
-          const receiptKey = (root, n3, sha) => key(root, n3) + "@" + sha;
-          const active = (op) => selected?.root === op.root && selected.n === op.n && selected.sha === op.sha;
-          function outcome(op, text, next, shown = active(op)) {
-            const k5 = receiptKey(op.root, op.n, op.sha), prior = outcomes.get(k5) || {}, value = { notice: text === void 0 ? prior.notice || "" : text, successor: next === void 0 ? prior.successor || null : next };
-            outcomes.set(k5, value);
-            if (shown) {
-              notice = value.notice;
-              successor = value.successor;
-            }
-          }
-          function targets(ps) {
-            const seen = /* @__PURE__ */ new Set();
-            return ps.filter((p5) => {
-              const board = p5.issues || p5.root;
-              if (seen.has(board)) return false;
-              seen.add(board);
-              return true;
-            });
-          }
-          function request(root, action, extra = {}) {
-            if ([...pending.values()].some((p5) => p5.root === root && p5.n === extra.n && p5.sha === extra.sha && (action === "read" || p5.action !== "read"))) return;
-            const op = { id: id(), root, action, ...extra };
-            pending.set(op.id, op);
-            send({ a: "reports", ...op });
-            defer(() => {
-              if (pending.delete(op.id)) {
-                if (op.action === "read") readFailure = "Result read outcome unknown; waiting for service readback.";
-                outcome(op, "Result outcome unknown; waiting for service readback.");
-                api.readNext();
-                draw();
-              }
-            }, 18e4);
-          }
-          function summary(text, heading) {
-            const lines = (text || "").split("\n"), start = lines.findIndex((l5) => l5.replace(/^#+\s*/, "").trim().toLowerCase() === heading.toLowerCase());
-            if (start < 0) return "";
-            const rest = lines.slice(start + 1), end = rest.findIndex((l5) => /^#{1,6}\s/.test(l5));
-            return rest.slice(0, end < 0 ? void 0 : end).join("\n").trim();
-          }
-          function field(text, label) {
-            const lines = (text || "").split("\n"), start = lines.findIndex((l5) => l5.startsWith(label + ":"));
-            if (start < 0) return "Unknown: not recorded in the accepted hand-in.";
-            const rest = lines.slice(start + 1), end = rest.findIndex((l5) => /^(Changed|Checks|Open|Report):/.test(l5) && !l5.startsWith(label + ":"));
-            return [lines[start], ...rest.slice(0, end < 0 ? void 0 : end)].map((l5) => l5.startsWith(label + ":") ? l5.slice(label.length + 1).trim() : l5).join("\n");
-          }
-          function remember(op, report) {
-            const k5 = receiptKey(op.root, op.n, op.sha), won = receipts.get(k5);
-            if (won?.sha === op.sha && won.visible === false) return won;
-            const fields = { sha: report.sha };
-            for (const field2 of ["read", "decision", "visible", "pending_decision", "tasks_made", "comments_through", "later_until"]) if (Object.hasOwn(report, field2)) fields[field2] = report[field2];
-            if (op.action === "read" && won?.sha === op.sha) {
-              if (["later", "accepted"].includes(won.decision)) fields.decision = won.decision;
-              if (won.pending_decision === "make") fields.pending_decision = "make";
-            }
-            if (Number.isSafeInteger(won?.comments_through) && Number.isSafeInteger(fields.comments_through)) fields.comments_through = Math.max(won.comments_through, fields.comments_through);
-            const merged = { ...won?.sha === op.sha ? won : {}, ...fields };
-            receipts.set(k5, merged);
-            return merged;
-          }
-          const api = execution.module("reports.view", {
-            sync(ps) {
-              projects = targets(ps);
-              for (const p5 of projects) {
-                const data = p5.reports;
-                pages.set(p5.root, { rows: (data?.reports || []).flatMap((r4) => {
-                  const k5 = receiptKey(p5.root, r4.n, r4.sha), won = receipts.get(k5);
-                  if (Number.isSafeInteger(r4.comments_through) && Number.isSafeInteger(won?.comments_through) && r4.comments_through >= won.comments_through) receipts.delete(k5);
-                  const row = receipts.has(k5) ? { ...r4, ...won } : r4;
-                  return row.visible === false ? [] : [row];
-                }), unknown: data?.complete !== true, reason: data?.reason || (data?.complete === true ? "" : "Reports not collected yet") });
-              }
-              if (selected) {
-                const row = api.rows().find((r4) => key(r4.root, r4.n) === key(selected.root, selected.n) && r4.sha === selected.sha);
-                selected = row ? { ...selected, ...row } : null;
-              }
-            },
-            toggle(ps) {
-              return execution.action("reports.list.open", () => {
-                api.sync(ps);
-                expanded = !expanded;
-                draw();
-              })();
-            },
-            refresh() {
-              api.sync(projects);
-              draw();
-            },
-            rows() {
-              return projects.flatMap((p5) => (pages.get(p5.root)?.rows || []).map((r4) => ({ ...r4, root: p5.root }))).sort((a4, b5) => (b5.closed || 0) - (a4.closed || 0) || b5.n - a4.n);
-            },
-            unread() {
-              return api.rows().filter((r4) => !r4.read);
-            },
-            // R6 Decide: mirrors reports::decide; an undated or past Later returns, the oldest close first.
-            undecided(r4) {
-              const until = Date.parse(r4.later_until || "");
-              return r4.kind !== "task" && r4.visible !== false && !r4.pending_decision && (!r4.decision || r4.decision === "none" || r4.decision === "later" && !(until > Date.now()));
-            },
-            decide(rows = api.rows()) {
-              return rows.filter(api.undecided).sort((a4, b5) => (a4.closed || 0) - (b5.closed || 0) || a4.n - b5.n);
-            },
-            count() {
-              return projects.every((p5) => pages.has(p5.root) && !pages.get(p5.root).unknown) ? api.unread().length : null;
-            },
-            current() {
-              return selected;
-            },
-            feedback() {
-              return notice;
-            },
-            readFailure() {
-              return readFailure;
-            },
-            markRead(rows) {
-              readFailure = "";
-              const seen = new Set([...readQueue, ...pending.values()].map((r4) => receiptKey(r4.root, r4.n, r4.sha)));
-              for (const r4 of rows) if (!seen.has(receiptKey(r4.root, r4.n, r4.sha))) {
-                readQueue.push(r4);
-                seen.add(receiptKey(r4.root, r4.n, r4.sha));
-              }
-              api.readNext();
-            },
-            // M14: serialize bulk reads through the existing bounded native command queue.
-            readNext() {
-              if ([...pending.values()].some((p5) => p5.action === "read")) return;
-              const r4 = readQueue.shift();
-              if (r4) request(r4.root, "read", { n: r4.n, sha: r4.sha });
-            },
-            open(root, n3) {
-              return execution.action("reports.card.open", () => {
-                const r4 = api.rows().find((r5) => r5.root === root && r5.n === n3);
-                if (!r4) return;
-                selected = { ...r4 };
-                expanded = true;
-                full = false;
-                const prior = outcomes.get(receiptKey(root, n3, r4.sha));
-                notice = prior?.notice || "";
-                draft = null;
-                successor = prior?.successor || null;
-                draw();
-                if ((r4.body || r4.kind === "task") && !r4.read) request(root, "read", { n: n3, sha: r4.sha });
-              })();
-            },
-            move(step) {
-              const rows = api.rows(), i4 = rows.findIndex((r5) => r5.root === selected?.root && r5.n === selected?.n), r4 = rows[i4 + step];
-              if (r4) api.open(r4.root, r4.n);
-            },
-            act(action, text, until) {
-              if (!selected) return;
-              outcome(selected, "", null);
-              request(selected.root, action, { n: selected.n, sha: selected.sha, ...text === void 0 ? {} : { text }, ...until === void 0 ? {} : { until } });
-              draw();
-            },
-            receive(r4) {
-              const op = pending.get(r4.id);
-              if (!op || op.root !== r4.root) return false;
-              pending.delete(r4.id);
-              const shown = active(op);
-              if (r4.reason) {
-                if (op.action === "read") readFailure = r4.reason;
-                if (r4.report?.n === op.n && r4.report.sha === op.sha) remember(op, r4.report);
-                const made = Array.isArray(r4.receipts) ? r4.receipts : [], uncertain = r4.receipt?.task;
-                outcome(op, r4.reason + (made.length ? " \xB7 Created held drafts: " + made.map((n3) => "#" + n3).join(", ") : "") + (uncertain > 0 && !made.includes(uncertain) ? " \xB7 Unverified draft: #" + uncertain : ""), void 0, shown);
-                api.readNext();
-                draw();
-                return true;
-              }
-              if (r4.report?.n === op.n && r4.report.sha === op.sha) {
-                const p5 = pages.get(r4.root), report = remember(op, r4.report);
-                if (p5) p5.rows = p5.rows.flatMap((row) => row.n !== op.n || row.sha !== op.sha ? [row] : report.visible === false ? [] : [{ ...row, ...report, closed: row.closed }]);
-                if (selected && selected.sha === op.sha && key(selected.root, selected.n) === key(r4.root, op.n)) selected = report.visible === false ? null : { ...selected, ...report, closed: selected.closed };
-                if (op.action === "later" && shown && draft === "later") draft = null;
-                if (op.action !== "read") outcome(op, report.visible === false ? report.decision === "made" ? "Created held drafts: " + (report.tasks_made || []).map((n3) => "#" + n3).join(", ") : "Report dropped." : op.action === "later" ? "Later: back in Decide on " + (report.later_until || op.until || "").slice(0, 10) + "." : "", void 0, shown);
-                if (r4.successor > 0) {
-                  outcome(op, "Created held draft. Read it back and start it separately.", { n: r4.successor, url: r4.successor_url || (typeof r4.report.url === "string" ? r4.report.url.replace(/\d+$/, String(r4.successor)) : null) }, shown);
-                  if (shown && draft === op.action) draft = null;
-                }
-                if (op.action === "accept") outcome(op, "Result accepted.", void 0, shown);
+  // node_modules/prismjs/components/prism-core.js
+  var require_prism_core = __commonJS({
+    "node_modules/prismjs/components/prism-core.js"(exports, module) {
+      var _self = typeof window !== "undefined" ? window : typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope ? self : {};
+      var Prism2 = (function(_self2) {
+        var lang = /(?:^|\s)lang(?:uage)?-([\w-]+)(?=\s|$)/i;
+        var uniqueId = 0;
+        var plainTextGrammar = {};
+        var _5 = {
+          /**
+           * By default, Prism will attempt to highlight all code elements (by calling {@link Prism.highlightAll}) on the
+           * current page after the page finished loading. This might be a problem if e.g. you wanted to asynchronously load
+           * additional languages or plugins yourself.
+           *
+           * By setting this value to `true`, Prism will not automatically highlight all code elements on the page.
+           *
+           * You obviously have to change this value before the automatic highlighting started. To do this, you can add an
+           * empty Prism object into the global scope before loading the Prism script like this:
+           *
+           * ```js
+           * window.Prism = window.Prism || {};
+           * Prism.manual = true;
+           * // add a new <script> to load Prism's script
+           * ```
+           *
+           * @default false
+           * @type {boolean}
+           * @memberof Prism
+           * @public
+           */
+          manual: _self2.Prism && _self2.Prism.manual,
+          /**
+           * By default, if Prism is in a web worker, it assumes that it is in a worker it created itself, so it uses
+           * `addEventListener` to communicate with its parent instance. However, if you're using Prism manually in your
+           * own worker, you don't want it to do this.
+           *
+           * By setting this value to `true`, Prism will not add its own listeners to the worker.
+           *
+           * You obviously have to change this value before Prism executes. To do this, you can add an
+           * empty Prism object into the global scope before loading the Prism script like this:
+           *
+           * ```js
+           * window.Prism = window.Prism || {};
+           * Prism.disableWorkerMessageHandler = true;
+           * // Load Prism's script
+           * ```
+           *
+           * @default false
+           * @type {boolean}
+           * @memberof Prism
+           * @public
+           */
+          disableWorkerMessageHandler: _self2.Prism && _self2.Prism.disableWorkerMessageHandler,
+          /**
+           * A namespace for utility methods.
+           *
+           * All function in this namespace that are not explicitly marked as _public_ are for __internal use only__ and may
+           * change or disappear at any time.
+           *
+           * @namespace
+           * @memberof Prism
+           */
+          util: {
+            encode: function encode(tokens) {
+              if (tokens instanceof Token) {
+                return new Token(tokens.type, encode(tokens.content), tokens.alias);
+              } else if (Array.isArray(tokens)) {
+                return tokens.map(encode);
               } else {
-                if (op.action === "read") readFailure = "Result read receipt unknown; waiting for service readback.";
-                outcome(op, "Report receipt unknown; waiting for service readback.", void 0, shown);
+                return tokens.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\u00a0/g, " ");
               }
-              api.readNext();
-              draw();
-              return true;
             },
-            click(b5, ps) {
-              const action = b5.dataset.report;
-              if (!action) return false;
-              if (action === "toggle") api.toggle(ps);
-              else if (action === "refresh") api.refresh();
-              else if (action === "open") api.open(b5.dataset.root, Number(b5.dataset.n));
-              else if (action === "full") {
-                full = !full;
-                draw();
-              } else if (action === "back") {
-                selected = null;
-                draw();
-              } else if (action === "previous") api.move(-1);
-              else if (action === "next") api.move(1);
-              else if (["followup", "reopen", "later"].includes(action)) {
-                draft = action;
-                draw();
-              } else if (action === "later-save") {
-                const day = b5.closest(".report-card")?.querySelector("[data-later-until]")?.value, at = day && /* @__PURE__ */ new Date(day + "T12:00:00Z");
-                if (at > Date.now()) api.act("later", void 0, at.toISOString().replace(/\.\d{3}Z$/, "Z"));
-                else {
-                  notice = "Later needs a future revisit date.";
-                  draw();
-                }
-              } else if (action === "create") {
-                const text = b5.closest(".report-card")?.querySelector("[data-result-reason]")?.value;
-                api.act(draft, text);
-              } else if (["accept", "make", "drop"].includes(action)) api.act(action);
-              return true;
+            /**
+             * Returns the name of the type of the given value.
+             *
+             * @param {any} o
+             * @returns {string}
+             * @example
+             * type(null)      === 'Null'
+             * type(undefined) === 'Undefined'
+             * type(123)       === 'Number'
+             * type('foo')     === 'String'
+             * type(true)      === 'Boolean'
+             * type([1, 2])    === 'Array'
+             * type({})        === 'Object'
+             * type(String)    === 'Function'
+             * type(/abc+/)    === 'RegExp'
+             */
+            type: function(o4) {
+              return Object.prototype.toString.call(o4).slice(8, -1);
             },
-            threads() {
-              return api.rows().map((r4) => ({ id: "task:" + (projects.find((p5) => p5.root === r4.root)?.issues || r4.root) + "/" + r4.n, root: r4.root, report: r4.n, title: r4.title, result: r4.result, updated: r4.closed * 1e3, status: r4.kind === "task" ? "Finished" : "Report", marker: api.undecided(r4) ? "Needs decision" : r4.read ? "" : r4.kind === "task" ? "New result" : "" }));
-            },
-            section(ps, reader = false) {
-              api.sync(ps);
-              const loaded = api.count() !== null, rows = api.rows(), busy = selected && [...pending.values()].some((p5) => p5.root === selected.root && p5.n === selected.n && p5.action !== "read"), project = (root) => projects.find((p5) => p5.root === root)?.name || "Project unavailable";
-              const ordinary = selected?.kind === "task", position = rows.findIndex((r4) => r4.root === selected?.root && r4.n === selected?.n), decide = api.decide(rows), age = (r4) => r4.closed ? Math.max(0, Math.floor((Date.now() / 1e3 - r4.closed) / 86400)) + "d" : "age unknown";
-              const day = (t4) => new Date(t4).toISOString().slice(0, 10), row = (r4, d5) => h5("button", { class: "project report-row", "data-report": "open", "data-root": r4.root, "data-n": r4.n, key: key(r4.root, r4.n) }, h5("span", { class: "meta" }, project(r4.root) + " \xB7 #" + r4.n + " \xB7 " + (r4.read ? "Read" : "Unread") + (d5 ? " \xB7 Decide \xB7 " + (r4.experiment_verdict || "verdict unknown") + " \xB7 " + age(r4) : "")), h5("span", null, r4.title));
-              return h5(
-                "section",
-                { class: "reports-section group", "aria-label": "Results", key: "reports" },
-                !reader && h5("button", { class: "project", type: "button", "data-report": "toggle", "aria-expanded": String(expanded) }, "Results \xB7 " + (loaded ? rows.length : "unknown"), api.unread().length ? " \xB7 " + api.unread().length + " new" : ""),
-                expanded && h5(
-                  "div",
-                  { class: "reports-content body" },
-                  selected && h5("div", { class: "options" }, h5("button", { "data-report": "back" }, reader ? "All events" : "All results"), h5("button", { "data-report": "previous", disabled: position <= 0 }, "Previous"), h5("button", { "data-report": "next", disabled: position < 0 || position >= rows.length - 1 }, "Next")),
-                  notice && h5("p", { role: "status" }, notice),
-                  successor && h5(successor.url ? "a" : "span", { href: successor.url, "data-url": successor.url }, "Read held draft #" + successor.n),
-                  projects.map((p5) => pages.get(p5.root)?.reason && h5("p", { role: "status", key: p5.root }, p5.name + ": " + pages.get(p5.root).reason)),
-                  selected ? h5(
-                    "article",
-                    { class: "report-card", "aria-label": ordinary ? "Completed result" : "Research report" },
-                    h5("h2", null, selected.title),
-                    h5("p", { class: "meta" }, project(selected.root) + " \xB7 ", h5("a", { href: selected.url, "data-url": selected.url }, "#" + selected.n), " \xB7 " + (selected.read ? "Read" : "Unread")),
-                    selected.reason && h5("p", { role: "status" }, "Result unknown: " + selected.reason),
-                    ordinary ? [
-                      ...["Changed", "Checks", "Open"].map((label) => h5("div", { key: label }, h5("h3", null, label), body(field(selected.body, label)))),
-                      selected.pr && h5("a", { href: selected.pr, "data-url": selected.pr }, "Open PR"),
-                      selected.verdict && h5("details", null, h5("summary", null, "Review and delivery"), body(selected.verdict)),
-                      h5("div", { class: "options" }, ["accept", "followup", "reopen"].map((action) => h5("button", { "data-report": action, disabled: !!busy || action === "accept" && selected.decision === "accepted" }, { accept: selected.decision === "accepted" ? "Accepted" : "Accept", followup: "Follow-up task", reopen: "Reopen" }[action]))),
-                      draft && h5("div", { key: draft }, h5("label", null, (draft === "reopen" ? "Reopen" : "Follow-up") + " reason", h5("input", { "data-result-reason": "", maxLength: 180, required: true, "aria-label": "Reason", placeholder: "What needs to change?" })), h5("p", { class: "meta" }, "Creates a linked held successor. The original stays closed. Read the draft back before starting it."), h5("button", { "data-report": "create", disabled: !!busy }, "Create held draft"))
-                    ] : [
-                      selected.body ? [h5("h3", null, "Question"), body(summary(selected.body, "Question")), h5("h3", null, "Recommendation"), body(summary(selected.body, "Recommendation"))] : h5("p", null, "Report content unknown; waiting for background collection."),
-                      selected.tasks && h5("div", null, h5("h3", null, "Proposed tasks"), selected.tasks.length ? selected.tasks.map((t4, i4) => h5("details", { key: i4 }, h5("summary", null, i4 + 1 + ". " + t4.title), h5("p", null, t4.goal), h5("ul", null, t4.acceptance?.map((a4) => h5("li", null, a4))), t4.scope?.map((s4) => h5("p", null, s4)), h5("p", { class: "meta" }, [t4.type, t4.runtime, t4.priority && "Priority " + t4.priority].filter(Boolean).join(" \xB7 ")))) : h5("p", null, "No follow-up tasks proposed.")),
-                      h5("p", { class: "meta" }, "Make tasks creates held drafts linked to this report. Start them separately."),
-                      selected.pending_decision === "make" && h5("p", { role: "status" }, "Make tasks is pending. Retry to reconcile the held drafts."),
-                      h5("div", { class: "options" }, ["make", "later", "drop"].map((action) => h5("button", { "data-report": action, disabled: !!busy || !selected.body || action === "make" && !selected.tasks?.length || action === "drop" && selected.pending_decision === "make" }, { make: selected.pending_decision === "make" ? "Retry Make tasks" : "Make tasks", later: "Later", drop: "Drop" }[action]))),
-                      draft === "later" && h5("div", { key: "later" }, h5("label", null, "Revisit on", h5("input", { type: "date", "data-later-until": "", min: day(Date.now() + 864e5), value: day(Date.now() + 7 * 864e5), "aria-label": "Revisit date" })), h5("p", { class: "meta" }, "The report returns to Decide on this date."), h5("button", { "data-report": "later-save", disabled: !!busy }, "Keep until this date")),
-                      selected.body && h5("div", null, h5("button", { "data-report": "full", "aria-expanded": String(full) }, full ? "Hide full report" : "Full report"), full && h5("div", { class: "report-body" }, body(selected.body)))
-                    ]
-                  ) : [decide.length ? [h5("h3", { key: "decide" }, "Decide \xB7 " + decide.length), ...decide.map((r4) => row(r4, true))] : null, rows.length ? rows.filter((r4) => !decide.includes(r4)).map((r4) => row(r4, false)) : loaded && h5("p", null, "No results waiting for review.")]
-                )
-              );
-            }
-          });
-          return api;
-        },
-        // Keep untrusted Markdown as text/vnodes; evidence URLs are the only active content. No raw HTML.
-        body: function(text) {
-          const prose = text.replace(/```taskq-tasks\n[\s\S]*?```/g, "").replace(/(^|\n)#{1,6}[ \t]+Proposed tasks[ \t]*(?=\n|$)/gi, "$1").replace(/(^|\n)(#{1,6} [^\n]+)\n/g, "$1$2\n\n");
-          return prose.split(/\n\s*\n/).map((p5, i4) => {
-            const heading = /^#{1,6}\s+(.+)$/.exec(p5.trim());
-            if (heading) return h5("h3", { key: i4 }, heading[1]);
-            const parts = p5.split(/(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>\])]+)/g).map((s4, k5) => {
-              const link = /^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/.exec(s4), url = link?.[2] || (/^https?:\/\//.test(s4) ? s4 : null);
-              return url ? h5("a", { key: k5, href: url, "data-url": url }, link?.[1] || url) : s4;
-            });
-            return h5("p", { key: i4, style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }, parts);
-          });
-        }
-      });
-      module.exports = { create };
-    }
-  });
-
-  // src/notification-panel.js
-  var require_notification_panel = __commonJS({
-    "src/notification-panel.js"(exports, module) {
-      "use strict";
-      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
-      var { icon } = require_ui_icons2();
-      var { execution } = require_ui_runtime();
-      var kinds = { ask: "Question", close: "Finished", failed: "Failed", gone: "Attempt ended", blocked: "Blocked" };
-      var api = execution.module("notificationPanel", {
-        // M14: result SHA owns result reads; local event markers never become queue/decision state.
-        rows: function(projects = [], results = [], marks = {}) {
-          const seen = /* @__PURE__ */ new Set(), rows = [], ids = /* @__PURE__ */ new Set(), closed = new Set(results.map((r4) => r4.root + "#" + r4.n));
-          for (const p5 of projects) {
-            const board = p5.issues || p5.root;
-            if (seen.has(board)) continue;
-            seen.add(board);
-            const add = (r4) => {
-              r4.id = JSON.stringify([board, r4.source, r4.n, r4.source === "result" ? r4.sha : [r4.at, r4.kind, r4.event]]);
-              r4.read = r4.source === "result" ? !!r4.read : marks[r4.id] === "read" || marks[r4.id] === "cleared";
-              if (marks[r4.id] !== "cleared" && !ids.has(r4.id)) {
-                ids.add(r4.id);
-                rows.push(r4);
+            /**
+             * Returns a unique number for the given object. Later calls will still return the same number.
+             *
+             * @param {Object} obj
+             * @returns {number}
+             */
+            objId: function(obj) {
+              if (!obj["__id"]) {
+                Object.defineProperty(obj, "__id", { value: ++uniqueId });
               }
-            };
-            for (const r4 of results.filter((r5) => r5.root === p5.root)) add({ ...r4, source: "result", resultKind: r4.kind, kind: "close", at: r4.closed, project: p5.name });
-            for (const e4 of p5.events || []) {
-              if (!kinds[e4[1]] || e4[1] === "close" && closed.has(p5.root + "#" + e4[3])) continue;
-              const task = (p5.tasks || []).find((t4) => t4.n === e4[3]), result = results.find((r4) => r4.root === p5.root && r4.n === e4[3]);
-              add({ source: "event", root: p5.root, project: p5.name, n: e4[3], at: e4[0], kind: e4[1], event: e4[2], title: task?.title || result?.title || "Task #" + e4[3] });
-            }
-          }
-          return rows.sort((a4, b5) => b5.at - a4.at || b5.n - a4.n || a4.id.localeCompare(b5.id));
-        },
-        groups: function(rows) {
-          const groups = [], active = /* @__PURE__ */ new Map();
-          for (const row of rows) {
-            const series = /^(.*?)\b([1-9]\d*)\/([1-9]\d*)\b/.exec(row.title), ordinal = series && Number(series[2]);
-            const key = series && ordinal <= Number(series[3]) ? JSON.stringify([row.root, row.kind, series[1], series[3]]) : null, prior = active.get(key);
-            if (key && prior && prior.rows.at(-1).at - row.at <= 600 && !prior.ordinals.has(ordinal)) {
-              prior.rows.push(row);
-              prior.ordinals.add(ordinal);
-            } else {
-              const group = { title: series?.[1].trim(), rows: [row], ordinals: /* @__PURE__ */ new Set([ordinal]) };
-              groups.push(group);
-              if (key) active.set(key, group);
-            }
-          }
-          return groups;
-        },
-        create: function({ view, reports, send, draw, openCard }) {
-          let notice = "";
-          const model = execution.module("notificationPanel.view", {
-            rows() {
-              return api.rows(view.S.projects || [], reports.rows(), view.S.notify?.inbox || {});
+              return obj["__id"];
             },
-            reasons() {
-              return [.../* @__PURE__ */ new Set([...reports.count() === null ? ["Results incomplete; check result collection."] : [], ...(view.S.projects || []).flatMap((p5) => p5.events_error || p5.alive === false ? [p5.name + ": " + (p5.events_error || "project observation stale")] : [])])];
-            },
-            label() {
-              const n3 = model.rows().filter((r4) => !r4.read).length;
-              return "Notifications \xB7 " + n3 + (model.reasons().length ? " loaded unread \xB7 history incomplete" : " unread");
-            },
-            bell() {
-              const n3 = model.rows().filter((r4) => !r4.read).length, label = model.label();
-              return h5("button", { class: "notifications-entry", type: "button", "data-route": "notifications", title: label, "aria-label": label }, icon("bell"), n3 > 0 && h5("span", { class: "badge", "aria-hidden": "true" }, n3 > 99 ? "99+" : String(n3)), model.reasons().length > 0 && h5("span", { class: "notification-warning", "aria-hidden": "true" }, icon("circle-alert")));
-            },
-            save(action, rows) {
-              if (rows.length) send({ a: "notification-state", action, ids: rows.map((r4) => r4.id) });
-            },
-            read(rows) {
-              model.save("read", rows.filter((r4) => r4.source !== "result" && !r4.read));
-              reports.markRead(rows.filter((r4) => r4.source === "result" && !r4.read));
-            },
-            receive(r4) {
-              notice = r4.reason || "";
-              draw();
-            },
-            click(b5) {
-              const action = b5.dataset.notification;
-              if (!action) return false;
-              const rows = model.rows();
-              if (action === "read") model.read(rows);
-              else if (action === "clear") model.save("clear", rows.filter((r4) => r4.read));
-              else if (action === "open") {
-                const row = rows.find((r4) => r4.id === b5.dataset.id);
-                if (row) {
-                  if (row.source === "result") reports.open(row.root, row.n);
-                  else {
-                    model.read([row]);
-                    openCard({ ...row, title: row.title });
+            /**
+             * Creates a deep clone of the given object.
+             *
+             * The main intended use of this function is to clone language definitions.
+             *
+             * @param {T} o
+             * @param {Record<number, any>} [visited]
+             * @returns {T}
+             * @template T
+             */
+            clone: function deepClone(o4, visited) {
+              visited = visited || {};
+              var clone;
+              var id;
+              switch (_5.util.type(o4)) {
+                case "Object":
+                  id = _5.util.objId(o4);
+                  if (visited[id]) {
+                    return visited[id];
                   }
-                }
-              }
-              return true;
-            },
-            body() {
-              const rows = model.rows(), reasons = model.reasons(), row = (r4) => h5("button", { class: "project notification-row" + (!r4.read ? " unread" : ""), "data-notification": "open", "data-id": r4.id, key: r4.id }, h5("span", { class: "meta" }, (r4.read ? "Read" : "Unread") + " \xB7 " + (r4.source === "result" && r4.resultKind !== "task" ? "Report ready" : kinds[r4.kind]) + " \xB7 " + r4.project + " \xB7 #" + r4.n), h5("span", null, r4.title));
-              return h5(
-                "section",
-                { "aria-label": "Notifications", class: "notification-panel" },
-                h5("div", { class: "options" }, h5("button", { "data-notification": "read", disabled: !rows.some((r4) => !r4.read) }, "Mark all read"), h5("button", { "data-notification": "clear", disabled: !rows.some((r4) => r4.read) }, "Clear read"), h5("button", { "data-route": "notification-settings" }, "Delivery settings")),
-                notice && h5("p", { role: "alert" }, notice),
-                !reports.current() && reports.feedback() && h5("p", { role: "status" }, reports.feedback()),
-                reports.readFailure() && h5("p", { role: "status" }, reports.readFailure()),
-                reasons.map((reason) => h5("p", { role: "status", class: "meta", key: reason }, reason)),
-                reports.current() ? reports.section(view.S.projects, true) : rows.length ? api.groups(rows).map((g5) => g5.rows.length === 1 ? row(g5.rows[0]) : h5("details", { class: "notification-series", "data-notification-group": "", "data-view-key": "notification-series:" + g5.rows[0].id, key: g5.rows[0].id }, h5("summary", null, g5.title + " \xB7 " + g5.rows.length + " events \xB7 " + g5.rows.filter((r4) => !r4.read).length + " unread"), g5.rows.map(row))) : h5("p", null, reasons.length ? "No loaded notifications. History incomplete." : "No notifications.")
-              );
-            }
-          });
-          return model;
-        }
-      });
-      module.exports = api;
-    }
-  });
-
-  // src/tray-view-state.js
-  var require_tray_view_state = __commonJS({
-    "src/tray-view-state.js"(exports, module) {
-      "use strict";
-      var { execution } = require_ui_runtime();
-      var { normalize, create } = execution.module("tray.viewState", {
-        normalize: function(saved, snapshot, routes, root = "home") {
-          const roots = new Set((snapshot.projects || []).map((p5) => p5.root)), states = new Set(Object.keys(require_project_blocks().marks));
-          const { entry } = execution.module("tray.viewState.normalize", {
-            entry: function(value) {
-              const v4 = value && typeof value === "object" ? value : {};
-              if (v4.page === "messages" && root === "conversations") return entry({ ...v4, page: root, section: "inbox" });
-              let page = typeof v4.page === "string" ? v4.page : root;
-              const project = roots.has(page) ? page : null;
-              if (!project && !Object.hasOwn(routes, page)) page = v4.project || page.startsWith("/") ? Object.hasOwn(routes, "projects") ? "projects" : root : page.startsWith("settings/") && Object.hasOwn(routes, "settings") ? "settings" : Object.hasOwn(routes, v4.parent) ? v4.parent : root;
-              const valid = page === v4.page, open = {};
-              const work = valid && v4.working && typeof v4.working === "object" && !Array.isArray(v4.working) ? Object.fromEntries(Object.entries(v4.working).filter(([root2, on]) => roots.has(root2) && on === true)) : null;
-              if (valid && v4.open && typeof v4.open === "object") {
-                for (const [k5, b5] of Object.entries(v4.open)) if (typeof b5 === "boolean" && k5.length <= 240) open[k5] = b5;
-              }
-              return {
-                page,
-                operation: root !== "home" && v4.operation && typeof v4.operation.operation === "string" ? { operation: v4.operation.operation, root: typeof v4.operation.root === "string" ? v4.operation.root : null } : null,
-                project: roots.has(page) ? page : null,
-                parent: routes[page]?.parent || root,
-                taskFilter: valid && Array.isArray(v4.taskFilter) ? [...new Set(v4.taskFilter.filter((s4) => states.has(s4)))] : null,
-                working: work && (Object.keys(work).length || !Object.keys(v4.working).length) ? work : null,
-                aiRoot: roots.has(v4.aiRoot) || root !== "home" && typeof v4.aiRoot === "string" ? v4.aiRoot : null,
-                answer: root !== "home" && v4.answer && typeof v4.answer.board === "string" && Number.isSafeInteger(v4.answer.task) && v4.answer.task > 0 ? { board: v4.answer.board, task: v4.answer.task, revision: v4.answer.revision, root: v4.answer.root } : null,
-                ...root !== "home" ? { messageFilter: ["all", "pending", "archived"].includes(v4.messageFilter) ? v4.messageFilter : "all", message: typeof v4.message === "string" && /^[a-f0-9]{64}$/.test(v4.message) ? v4.message : null, section: v4.section === "inbox" ? "inbox" : null } : {},
-                scroll: valid && Number.isFinite(v4.scroll) && v4.scroll >= 0 ? v4.scroll : 0,
-                open,
-                focus: valid && v4.focus && /^(BUTTON|A|SUMMARY|INPUT|SELECT|TEXTAREA|H1|DIV)$/.test(v4.focus.tag) && typeof v4.focus.key === "string" && v4.focus.key.length <= 2048 && Number.isInteger(v4.focus.index) && v4.focus.index >= 0 && v4.focus.index < 4096 ? v4.focus : null,
-                unavailable: !valid && typeof v4.page === "string" ? "Requested destination is no longer available." : typeof v4.unavailable === "string" ? v4.unavailable.slice(0, 160) : null
-              };
-            }
-          });
-          if (saved?.schema !== 1) return { schema: 1, current: entry(null), trail: [], ...root === "home" ? { dashboard: require_task_views().normalize(null) } : {} };
-          return { schema: 1, ...root === "home" ? { dashboard: require_task_views().normalize(saved.dashboard, saved.current) } : {}, current: entry(saved.current), trail: (Array.isArray(saved.trail) ? saved.trail : []).slice(-32).filter((v4) => v4 && entry(v4).page === v4.page).map(entry) };
-        },
-        create: function(view, { menu, document: document2, send, defer, cancel, routes, trail, root = "home" }) {
-          let hydrated = false, timer = null, last = "", restoring = false;
-          const api = execution.module("tray.viewState.instance", {
-            groups: function() {
-              return Object.fromEntries([...menu.querySelectorAll("details[data-view-key]:not(.shell-overflow)")].map((d5) => [d5.dataset.viewKey, d5.open]));
-            },
-            capture: function() {
-              const active = document2.activeElement?.closest?.(".shell-overflow")?.querySelector("summary") || document2.activeElement, key = active && JSON.stringify(active.dataset), focus = active && menu.contains?.(active) ? { tag: active.tagName, key, index: [...menu.querySelectorAll(active.tagName)].filter((e4) => JSON.stringify(e4.dataset) === key).indexOf(active) } : null;
-              return { page: view.page, operation: view.operation, project: view.S?.projects?.some((p5) => p5.root === view.page) ? view.page : null, parent: routes[view.page]?.parent || root, taskFilter: view.taskFilter, working: view.working, aiRoot: view.aiRoot, answer: view.answer, messageFilter: view.messageFilter, message: view.message, section: view.section, scroll: (menu.querySelector(".content") || document2.scrollingElement)?.scrollTop || 0, open: api.groups(), focus, unavailable: view.unavailable };
-            },
-            apply: function(v4) {
-              view.page = v4.page;
-              view.operation = v4.operation;
-              view.answer = v4.answer;
-              view.message = v4.message;
-              view.messageFilter = v4.messageFilter;
-              view.section = v4.section;
-              view.taskFilter = v4.taskFilter;
-              view.working = v4.working;
-              view.aiRoot = v4.aiRoot;
-              view.disclosures = v4.open;
-              view.restoreScroll = v4.scroll;
-              view.restoreFocus = v4.focus;
-              view.unavailable = v4.unavailable;
-            },
-            focus: function(saved) {
-              const target = saved ? [...menu.querySelectorAll(saved.tag)].filter((e4) => JSON.stringify(e4.dataset) === saved.key)[saved.index] : null;
-              (target?.checkVisibility?.() && !target.disabled ? target : menu.querySelector("h1"))?.focus({ preventScroll: true });
-            },
-            hydrate: function(snapshot) {
-              if (snapshot.page !== void 0) {
-                hydrated = true;
-                return;
-              }
-              if (!hydrated) {
-                hydrated = true;
-                const state = normalize(snapshot.navigation, snapshot, routes, root);
-                api.apply(state.current);
-                if (root === "home") {
-                  view.dashboard = state.dashboard;
-                  if (!snapshot.navigation?.dashboard && snapshot.navigation?.current?.taskFilter?.length) {
-                    const p5 = snapshot.projects.find((p6) => p6.root === state.current.page);
-                    if (p5) require_task_views().current(view.dashboard).working.projects = [require_task_views().identity(p5)];
-                  }
-                }
-                trail.push(...state.trail);
-              } else {
-                const current = api.capture(), state = normalize({ schema: 1, current, trail }, snapshot, routes, root);
-                if (state.current.page !== view.page || JSON.stringify(state.current.working) !== JSON.stringify(view.working) || JSON.stringify(state.current.taskFilter) !== JSON.stringify(view.taskFilter)) api.apply(state.current);
-                view.aiRoot = state.current.aiRoot;
-                for (let i4 = trail.length - 1; i4 >= 0; i4--) {
-                  const clean = normalize({ schema: 1, current: trail[i4] }, snapshot, routes, root).current;
-                  if (clean.page !== trail[i4].page) trail.splice(i4, 1);
-                  else Object.assign(trail[i4], clean);
-                }
-              }
-            },
-            restore: function(open) {
-              restoring = true;
-              for (const d5 of menu.querySelectorAll("details[data-view-key]")) if (typeof open?.[d5.dataset.viewKey] === "boolean" && d5.open !== open[d5.dataset.viewKey]) d5.open = open[d5.dataset.viewKey];
-              restoring = false;
-            },
-            flush: function() {
-              cancel(timer);
-              timer = null;
-              if (!hydrated || view.S?.page !== void 0) return;
-              if (root === "home" && view.dashboard && view.page === "home") require_task_views().current(view.dashboard).scroll = (menu.querySelector(".content") || document2.scrollingElement)?.scrollTop || 0;
-              const navigation = normalize({ schema: 1, current: api.capture(), trail, ...root === "home" ? { dashboard: view.dashboard } : {} }, view.S, routes, root), text = JSON.stringify(navigation);
-              if (text !== last) {
-                last = text;
-                send({ a: "set", navigation });
-              }
-            },
-            schedule: function() {
-              if (restoring) return;
-              cancel(timer);
-              timer = defer(api.flush, 100);
-            }
-          });
-          return api;
-        }
-      });
-      module.exports = { normalize, create };
-    }
-  });
-
-  // src/anchored-popover.js
-  var require_anchored_popover = __commonJS({
-    "src/anchored-popover.js"(exports, module) {
-      "use strict";
-      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
-      var { execution } = require_ui_runtime();
-      module.exports = execution.module("anchoredPopover", {
-        render: function({ id = "taskq-popover", label, children }) {
-          return h5("section", { id, popover: "manual", role: "dialog", "aria-label": label, class: "anchored-popover", tabindex: -1 }, children);
-        },
-        place: function(element, anchor) {
-          if (!element || !anchor) return;
-          if (element.showPopover && !element.matches(":popover-open")) element.showPopover();
-          const gap = 6, pad = 8, w5 = window.innerWidth, h6 = window.innerHeight;
-          element.style.maxWidth = Math.max(0, w5 - 2 * pad) + "px";
-          element.style.maxHeight = Math.max(0, h6 - 2 * pad) + "px";
-          const r4 = element.getBoundingClientRect(), below = h6 - anchor.bottom - gap - pad, above = anchor.top - gap - pad;
-          const top = below >= r4.height || below >= above ? anchor.bottom + gap : anchor.top - gap - r4.height;
-          element.style.left = Math.max(pad, Math.min(anchor.left, w5 - r4.width - pad)) + "px";
-          element.style.top = Math.max(pad, Math.min(top, h6 - r4.height - pad)) + "px";
-        }
-      });
-    }
-  });
-
-  // src/task-dashboard.js
-  var require_task_dashboard = __commonJS({
-    "src/task-dashboard.js"(exports, module) {
-      "use strict";
-      var { h: h5, Fragment } = (init_preact(), __toCommonJS(preact_exports));
-      var ui = require_ui_runtime();
-      var { execution } = ui;
-      var views = require_task_views();
-      var blocks = require_project_blocks();
-      var popover = require_anchored_popover();
-      var { icon, button } = require_ui_icons2();
-      var outcomes = { success: ["circle-check", "", "Completed"], not_planned: ["circle-slash", "", "Not planned"], unknown: ["circle-question-mark", "", "Outcome unknown"] };
-      module.exports = execution.module("taskDashboard", {
-        // P-W4: `owned` is the View window surface; the menu sends `views-open` when native offers that window, else keeps the overlay.
-        create: function(view, { menu, present, send, app, owned = false, window: window2 = globalThis, document: document2 = window2.document }) {
-          const crypto2 = window2.crypto || globalThis.crypto, CSS2 = window2.CSS || globalThis.CSS;
-          let restore = true, requests = 0;
-          const pinReads = /* @__PURE__ */ new Map();
-          let transcript = null;
-          const api = execution.module("taskDashboard.instance", {
-            model: function() {
-              const m5 = view.dashboard || (view.dashboard = views.normalize(null, { taskFilter: view.taskFilter }));
-              m5.collapsed = m5.collapsed.filter((id) => view.S.projects.some((p5) => views.identity(p5) === id));
-              return m5;
-            },
-            current: function() {
-              return views.current(api.model());
-            },
-            criteria: function() {
-              return api.current().working;
-            },
-            set: function(patch) {
-              Object.assign(api.criteria(), patch);
-              present();
-            },
-            projects: function() {
-              return views.scope(view.S.projects, api.criteria());
-            },
-            unique: function(ps) {
-              return ps.filter((p5, i4) => ps.findIndex((q4) => views.identity(q4) === views.identity(p5)) === i4);
-            },
-            live: function() {
-              return app.unique(view.S.projects.flatMap(app.tasks)).filter((t4) => t4.state !== "closed");
-            },
-            ref: function(t4) {
-              return t4.boardIdentity + "#" + t4.n;
-            },
-            rows: function() {
-              return app.unique(api.projects().flatMap(app.tasks)).filter((t4) => t4.state !== "closed" && views.matches(t4, api.criteria().query)).sort(views.compare);
-            },
-            anchor: function(target) {
-              const r4 = target.getBoundingClientRect();
-              return { left: r4.left, top: r4.top, bottom: r4.bottom };
-            },
-            // MP13: details open only from click, Enter or Space on the identity (native button activation); `focus` moves focus into them.
-            open: function(kind, target, key = null, focus = true) {
-              view.popup = { kind, key, anchor: api.anchor(target) };
-              if (kind === "task") api.current().open = key;
-              present();
-              if (focus) menu.querySelector("#taskq-question-details,.task-transcript-page,#taskq-popover")?.focus({ preventScroll: true });
-            },
-            close: function(focus = true) {
-              const p5 = view.popup;
-              if (!p5) return;
-              view.popup = null;
-              if (p5.kind === "task") api.current().open = null;
-              if (p5.kind === "transcript") view.restoreScroll = transcript?.returnScroll || 0;
-              present();
-              if (focus) {
-                const target = p5.kind === "task" ? menu.querySelector('[data-a="task-detail"][data-key="' + CSS2.escape(p5.key) + '"]') : p5.kind === "transcript" ? menu.querySelector('[data-a="completed-transcript"][data-ref="' + CSS2.escape(p5.key) + '"]') : menu.querySelector('[data-a="' + (p5.kind === "views" ? "view-list" : "view-editor") + '"]');
-                (target || menu.querySelector("[data-a=view-list]"))?.focus({ preventScroll: true });
-              }
-            },
-            // M2: collapse is presentation only; the name and the two adjacent shortcuts keep independent targets.
-            projectHeader: function(p5, shown, tasks, reason) {
-              const board = p5.board_kind === "gitlab" ? "GitLab" : "GitHub", id = views.identity(p5), open = !api.model().collapsed.includes(id), controls = "project-tasks-" + encodeURIComponent(id), folder = typeof p5.root === "string" && !!p5.root.trim();
-              const questions = tasks.filter((t4) => t4.state === "ask").length, label = reason ? "Matching and total task counts and open questions unknown: " + reason : shown + " tasks shown matching the current filter; " + tasks.length + " open tasks in total; " + questions + " open questions";
-              const statuses = !open && h5("div", { class: "project-statuses" }, reason ? h5("span", { role: "img", title: "Status counts unknown: " + reason, "aria-label": "Status counts unknown: " + reason }, "?") : view.S.display.states.map(({ id: state, name }) => {
-                const n3 = tasks.filter((t4) => t4.state === state).length;
-                if (!n3) return null;
-                const [mark, tone] = blocks.marks[state] || ["circle-question-mark", ""];
-                return h5("span", { class: "project-state " + tone, "data-state": state, role: "img", title: name + ": " + n3, "aria-label": name + ": " + n3, key: state }, icon(mark), n3);
-              }));
-              return h5(
-                "header",
-                { class: "project-group project-shortcuts" },
-                button("arrow-down", (open ? "Collapse " : "Expand ") + p5.name + " tasks", { "data-a": "project-collapse", "data-project": id, "aria-expanded": String(open), "aria-controls": controls, class: "compact-action project-collapse" }),
-                h5("div", { class: "project-heading" }, h5("h2", null, h5("button", { class: "project-overview", "data-route": p5.root, title: "Open " + p5.name + " project overview" }, p5.name)), h5("span", { class: "project-counts", title: label, "aria-label": label }, h5("span", null, (reason ? "?" : shown) + " / " + (reason ? "?" : tasks.length)), (reason || questions > 0) && h5("span", { class: "project-questions" }, " (?" + (reason ? "?" : questions) + ")")), statuses),
-                h5("div", { class: "project-actions" }, h5("a", { class: "project-board compact-action", href: p5.issues, "data-url": p5.issues, title: "Open " + p5.name + " board on " + board, "aria-label": "Open " + p5.name + " board on " + board }, icon(p5.board_kind)), button("folder", folder ? "Open " + p5.name + " project folder on this computer" : "Project folder unavailable: registered root missing", { "data-a": "folder", "data-root": p5.root, disabled: !folder, class: "compact-action project-folder" }))
-              );
-            },
-            bar: function() {
-              const m5 = api.model(), v4 = api.current(), c4 = v4.working, searching = !!c4.query || !!view.searchOpen;
-              return h5(
-                Fragment,
-                null,
-                h5("div", { class: "viewbar" }, h5("div", { class: "view-picks" }, h5("button", { "data-a": "view-list", "aria-haspopup": "dialog", "aria-expanded": String(view.popup?.kind === "views") }, v4.name, views.dirty(v4) ? " *" : ""), m5.views.filter((x5) => x5.pinned && x5.id !== m5.selected).map((x5) => h5("button", { "data-a": "view-select", "data-id": x5.id, key: x5.id }, x5.name))), views.dirty(v4) && button("rotate-ccw", "Reset " + v4.name + " to its saved criteria", { "data-a": "view-reset" }), button("search", "Search tasks", { "data-a": "search-open", "aria-controls": "task-query", "aria-expanded": String(searching) }), button("sliders-horizontal", "Edit view conditions", { "data-a": "view-editor", "aria-haspopup": "dialog", "aria-expanded": String(view.popup?.kind === "editor") })),
-                // #1775: search is one icon until opened; a query keeps the field visible
-                searching && h5("div", { class: "task-search" }, icon("search"), h5("input", { id: "task-query", type: "search", "data-task-query": "", maxLength: 1024, "aria-label": "Search tasks", placeholder: "Search tasks", value: c4.query }), c4.query && button("x", "Clear task search", { "data-a": "search-clear" }))
-              );
-            },
-            // P-W1: global pins once, first, as ordinary rows in the one shared scroll; unavailable references keep a sourced outcome or explicit unknown.
-            // Exact reads use canonical board identity, never a pin URL or the loaded Completed page.
-            pinRead: function(pin, retry = false) {
-              let e4 = pinReads.get(pin.ref);
-              const now = Date.now();
-              if (e4?.loading || e4 && !retry && now - e4.at < 6e4) return e4;
-              const cut = pin.ref.lastIndexOf("#"), n3 = Number(pin.ref.slice(cut + 1)), p5 = view.S.projects.find((p6) => views.identity(p6) === pin.ref.slice(0, cut));
-              if (!p5 || !Number.isSafeInteger(n3) || n3 <= 0) return { reason: "Registered board unavailable" };
-              e4 = { ...e4, ref: pin.ref, root: p5.root, task: n3, kind: p5.board_kind, project: p5.name, id: "pin-" + ++requests, at: now, loading: true, reason: null };
-              pinReads.set(pin.ref, e4);
-              e4.timer = ui.defer(() => api.receive({ root: e4.root, id: e4.id, reason: "No board response within 65 seconds" }), 65e3);
-              send({ a: "completed", root: e4.root, id: e4.id, task: n3 });
-              return e4;
-            },
-            unpin: function(ref) {
-              ui.cancel(pinReads.get(ref)?.expiry);
-              api.model().pins = api.model().pins.filter((p5) => p5.ref !== ref);
-            },
-            pins: function() {
-              const m5 = api.model();
-              if (!m5.pins.length) return null;
-              const live = api.live();
-              const rows = m5.pins.map((pin) => {
-                const t4 = live.find((t5) => api.ref(t5) === pin.ref);
-                if (t4) {
-                  delete pin.closedSeen;
-                  const prior = pinReads.get(pin.ref);
-                  ui.cancel(prior?.timer);
-                  ui.cancel(prior?.expiry);
-                  pinReads.delete(pin.ref);
-                  return app.taskRow(t4, true);
-                }
-                const e4 = api.pinRead(pin), c4 = e4?.value, closed = c4?.state === "closed";
-                if (closed) {
-                  pin.closedSeen = Number.isFinite(c4.closed) && c4.closed > 0 ? c4.closed : pin.closedSeen || view.S.now;
-                  const remaining = pin.closedSeen + 86400 - view.S.now;
-                  if (!e4.expiry && remaining > 0) e4.expiry = ui.defer(() => {
-                    const current = pinReads.get(pin.ref);
-                    if (current) current.expiry = null;
-                    if (current?.value?.state === "closed" && !api.live().some((t5) => api.ref(t5) === pin.ref)) {
-                      api.unpin(pin.ref);
-                      present();
+                  clone = /** @type {Record<string, any>} */
+                  {};
+                  visited[id] = clone;
+                  for (var key in o4) {
+                    if (o4.hasOwnProperty(key)) {
+                      clone[key] = deepClone(o4[key], visited);
                     }
-                  }, remaining * 1e3);
-                  if (Number.isFinite(remaining) && remaining <= 0) {
-                    api.unpin(pin.ref);
-                    return null;
+                  }
+                  return (
+                    /** @type {any} */
+                    clone
+                  );
+                case "Array":
+                  id = _5.util.objId(o4);
+                  if (visited[id]) {
+                    return visited[id];
+                  }
+                  clone = [];
+                  visited[id] = clone;
+                  /** @type {Array} */
+                  /** @type {any} */
+                  o4.forEach(function(v4, i4) {
+                    clone[i4] = deepClone(v4, visited);
+                  });
+                  return (
+                    /** @type {any} */
+                    clone
+                  );
+                default:
+                  return o4;
+              }
+            },
+            /**
+             * Returns the Prism language of the given element set by a `language-xxxx` or `lang-xxxx` class.
+             *
+             * If no language is set for the element or the element is `null` or `undefined`, `none` will be returned.
+             *
+             * @param {Element} element
+             * @returns {string}
+             */
+            getLanguage: function(element) {
+              while (element) {
+                var m5 = lang.exec(element.className);
+                if (m5) {
+                  return m5[1].toLowerCase();
+                }
+                element = element.parentElement;
+              }
+              return "none";
+            },
+            /**
+             * Sets the Prism `language-xxxx` class of the given element.
+             *
+             * @param {Element} element
+             * @param {string} language
+             * @returns {void}
+             */
+            setLanguage: function(element, language) {
+              element.className = element.className.replace(RegExp(lang, "gi"), "");
+              element.classList.add("language-" + language);
+            },
+            /**
+             * Returns the script element that is currently executing.
+             *
+             * This does __not__ work for line script element.
+             *
+             * @returns {HTMLScriptElement | null}
+             */
+            currentScript: function() {
+              if (typeof document === "undefined") {
+                return null;
+              }
+              if (document.currentScript && document.currentScript.tagName === "SCRIPT" && 1 < 2) {
+                return (
+                  /** @type {any} */
+                  document.currentScript
+                );
+              }
+              try {
+                throw new Error();
+              } catch (err) {
+                var src = (/at [^(\r\n]*\((.*):[^:]+:[^:]+\)$/i.exec(err.stack) || [])[1];
+                if (src) {
+                  var scripts = document.getElementsByTagName("script");
+                  for (var i4 in scripts) {
+                    if (scripts[i4].src == src) {
+                      return scripts[i4];
+                    }
                   }
                 }
-                const [mark, tone, label] = closed ? api.outcome(c4) : ["circle-question-mark", "", c4?.state === "open" ? "Open \xB7 refresh project" : e4?.loading ? "Reading board\u2026" : "Unavailable \xB7 state unknown"];
-                return h5(
-                  "div",
-                  { class: "task-row completed-row", key: pin.ref, "data-pin": pin.ref },
-                  h5("span", { class: tone, title: label, "aria-label": label }, icon(mark)),
-                  h5("a", { class: "detail-title", href: c4?.url || pin.url, "data-url": c4?.url || pin.url, "data-pin-open": pin.ref }, c4?.title || pin.title || pin.ref),
-                  h5("div", { class: "meta" }, e4.project ? e4.project + " #" + e4.task + " \xB7 " : "", label, closed && c4.close ? " \xB7 " + c4.close : "", e4?.reason ? " \xB7 " + e4.reason : "", closed && c4.error ? " \xB7 Details unavailable: " + c4.error : "", e4?.reason && h5("button", { "data-a": "pin-retry", "data-ref": pin.ref }, "Retry board read")),
-                  h5("div", { class: "row-actions" }, closed && h5(Fragment, null, h5("a", { href: c4.url, "data-url": c4.url, "data-pin-open": pin.ref }, "Open issue"), c4.pr && h5("a", { href: c4.pr, "data-url": c4.pr, "data-pin-open": pin.ref }, "Open PR"), h5("button", { "data-a": "pin-transcript", "data-ref": pin.ref }, "Open transcript")), button("pin-off", "Unpin " + (c4?.title || pin.title || pin.ref), { "data-a": "task-unpin", "data-ref": pin.ref }))
-                );
-              });
-              return rows.some(Boolean) && h5("section", { class: "task-pins", "aria-label": "Pinned tasks" }, h5("h2", null, icon("pin"), " Pinned"), rows);
-            },
-            readTranscript: function(e4, before) {
-              transcript = { ...transcript, root: e4.root, task: e4.task, title: e4.value?.title || transcript?.title, value: e4.value || transcript?.value, ref: e4.ref || transcript?.ref, id: "transcript-" + ++requests, loading: true, reason: null };
-              const r4 = transcript;
-              r4.timer = ui.defer(() => api.receive({ root: r4.root, id: r4.id, reason: "No transcript response within 65 seconds" }), 65e3);
-              send({ a: "completed", root: r4.root, id: r4.id, task: r4.task, transcript: true, ...before == null ? {} : { before } });
-            },
-            transcript: function() {
-              const t4 = transcript, p5 = t4?.page, c4 = t4?.value, [mark, tone, label] = c4 ? api.outcome(c4) : ["circle-question-mark", "", "Outcome unknown"];
-              return h5("section", { class: "task-transcript-page", tabindex: -1, "aria-label": "Read-only task transcript" }, h5("div", { class: "popover-heading" }, h5("h2", null, t4?.title || "Task transcript"), button("arrow-left", "Back to tasks", { "data-a": "popup-close" })), h5("p", { class: "meta" }, icon(mark), h5("span", { class: tone }, label), c4?.close ? " \xB7 " + c4.close : "", c4?.result ? " \xB7 " + c4.result : ""), h5("div", { class: "row-actions" }, c4?.url && h5("a", { href: c4.url, "data-url": c4.url }, "Open issue"), c4?.pr && h5("a", { href: c4.pr, "data-url": c4.pr }, "Open PR")), h5("p", { class: "meta" }, "Read-only native transcript"), t4?.loading && h5("p", { role: "status" }, "Reading transcript\u2026"), t4?.reason && h5("p", { role: "status" }, "Transcript unavailable: " + t4.reason), p5 && h5("div", { class: "pin-transcript" }, p5.start > 0 && h5("button", { "data-a": "pin-transcript-earlier", disabled: t4.loading }, "Load earlier"), p5.items.map((i4, k5) => h5("p", { key: k5 }, h5("strong", null, i4.role + " \xB7 "), i4.text)), !p5.items.length && h5("p", { class: "meta" }, "No messages in this chunk.")));
-            },
-            list: function() {
-              if (view.popup?.kind === "transcript") return api.transcript();
-              if (api.current().id === "completed") return h5(Fragment, null, api.pins(), api.bar(), api.completed());
-              const ps = api.projects(), c4 = api.criteria(), all = api.rows(), pinned = new Set(api.model().pins.map((p5) => p5.ref)), matching = all.filter((t4) => !c4.states.length || c4.states.includes(t4.state)), rows = matching.filter((t4) => !pinned.has(api.ref(t4))), live = api.live();
-              const loaded = ps.filter((p5) => p5.complete === true && p5.tasks_live !== false && p5.issues), names = loaded.map((p5) => p5.name), partial = [.../* @__PURE__ */ new Set([...loaded.flatMap((p5) => p5.partial || []), ...view.S.display.all.partial.filter((n3) => names.includes(n3))])], missing = c4.projects.filter((id) => !view.S.projects.some((p5) => views.identity(p5) === id));
-              if (missing.length) partial.push("Selected projects unavailable");
-              const counted = all.filter((t4) => loaded.some((p5) => p5.root === t4.root)), known = (loaded.length > 0 || ps.length === 0) && !partial.length;
-              const errors = ps.filter((p5) => !loaded.includes(p5)).map((p5) => p5.name + ": " + (p5.error || "Project snapshot incomplete or stale"));
-              const counts = { counts: view.S.display.states.map(({ id, name }) => ({ state: id, name, n: known ? counted.filter((t4) => t4.state === id).length : null })), open: known ? counted.length : null };
-              const listing = c4.group === "combined" ? rows.map((t4) => app.taskRow(t4, true)) : api.unique(ps).map((p5) => {
-                const id = views.identity(p5), group = rows.filter((t4) => t4.boardIdentity === id), sources = (loaded.some((q4) => views.identity(q4) === id) ? loaded : ps).filter((q4) => views.identity(q4) === id), reason = sources.flatMap((q4) => [...q4.partial || [], ...q4.complete !== true || q4.tasks_live === false ? [q4.error || "Project snapshot incomplete or stale"] : [], ...view.S.display.all.partial.includes(q4.name) ? ["Project task data incomplete"] : []]).join("; ");
-                return group.length ? h5("section", { class: "all-tasks-project", key: id }, api.projectHeader(p5, matching.filter((t4) => t4.boardIdentity === id).length, live.filter((t4) => t4.boardIdentity === id), reason), h5("div", { class: "project-tasks", id: "project-tasks-" + encodeURIComponent(id), hidden: api.model().collapsed.includes(id) }, group.map((t4) => app.taskRow(t4, false)))) : null;
-              });
-              return h5(Fragment, null, api.pins(), api.bar(), h5("header", { class: "filter-header tqp" }, h5("div", { class: "state-filters", dangerouslySetInnerHTML: { __html: blocks.counters(counts.counts, "", "Selected projects", partial, c4.states, counts.open) } }), rows.filter((t4) => t4.state === "held").length > 1 && h5("span", { class: "held-shortcut" }, app.startButton(rows))), errors.map((reason) => h5("p", { class: "meta", role: "status", key: reason }, reason)), app.answerNotices(), rows.length ? listing : h5("div", { class: "body meta" }, !known ? "Tasks unknown" : "No matching tasks", " ", h5("button", { "data-a": "filter-reset" }, "Reset")));
-            },
-            // MP14: Completed reads board history pages on demand through the tray (`taskq status --closed`); nothing is stored.
-            since: function(period) {
-              const days = { "7d": 7, "30d": 30 }[period];
-              return days && Number.isFinite(view.S.now) ? view.S.now - days * 86400 : null;
-            },
-            request: function(e4) {
-              e4.loading = true;
-              e4.reason = null;
-              e4.id = String(++requests);
-              const id = e4.id;
-              e4.timer = ui.defer(() => api.receive({ root: e4.root, id, reason: "No history response within 65 seconds" }), 65e3);
-              send({ a: "completed", root: e4.root, id, page: e4.page + 1, ...e4.since == null ? {} : { since: e4.since } });
-            },
-            history: function() {
-              const c4 = api.criteria(), key = JSON.stringify([c4.projects, c4.period]), prior = view.completed;
-              if (api.current().id === "completed" && prior?.key !== key) {
-                const since = api.since(c4.period);
-                prior?.entries.forEach((e4) => ui.cancel(e4.timer));
-                view.completed = { key, entries: api.unique(api.projects()).map((p5) => {
-                  const old = prior?.entries.find((e4) => e4.identity === views.identity(p5));
-                  return { root: p5.root, name: p5.name, kind: p5.board_kind, identity: views.identity(p5), page: 0, more: true, tasks: old?.tasks || [], shown: old?.shown || [], replace: true, since };
-                }) };
-                view.completed.entries.forEach(api.request);
+                return null;
               }
-              const entries = view.completed?.entries || [];
-              return { entries, rows: entries.flatMap((e4) => e4.tasks.map((t4) => ({ ...t4, project: e4.name, kind: e4.kind, ref: e4.identity + "#" + t4.n }))) };
             },
-            receive: function(page) {
-              if (transcript?.id === page.id && transcript.root === page.root) {
-                ui.cancel(transcript.timer);
-                transcript.loading = false;
-                transcript.reason = page.reason || page.transcript?.reason;
-                transcript.page = page.transcript?.items ? page.transcript : transcript.page;
-                present();
-                return;
-              }
-              const pin = [...pinReads.values()].find((e5) => e5.id === page.id && e5.root === page.root);
-              if (pin) {
-                if (!pin.loading) return;
-                ui.cancel(pin.timer);
-                pin.loading = false;
-                pin.reason = page.reason;
-                pin.value = !page.reason && page.tasks?.[0]?.n === pin.task ? page.tasks[0] : null;
-                if (!pin.value && !pin.reason) pin.reason = "Board response omitted the task";
-                present();
-                return;
-              }
-              const e4 = view.completed?.entries.find((e5) => e5.id === page.id && e5.root === page.root);
-              if (!e4?.loading) return;
-              ui.cancel(e4.timer);
-              e4.loading = false;
-              if (page.reason) e4.reason = page.reason;
-              if (!page.reason || page.source === "service" && page.tasks?.length && !e4.tasks.length) {
-                if (e4.replace) {
-                  e4.tasks = [];
-                  e4.replace = false;
+            /**
+             * Returns whether a given class is active for `element`.
+             *
+             * The class can be activated if `element` or one of its ancestors has the given class and it can be deactivated
+             * if `element` or one of its ancestors has the negated version of the given class. The _negated version_ of the
+             * given class is just the given class with a `no-` prefix.
+             *
+             * Whether the class is active is determined by the closest ancestor of `element` (where `element` itself is
+             * closest ancestor) that has the given class or the negated version of it. If neither `element` nor any of its
+             * ancestors have the given class or the negated version of it, then the default activation will be returned.
+             *
+             * In the paradoxical situation where the closest ancestor contains __both__ the given class and the negated
+             * version of it, the class is considered active.
+             *
+             * @param {Element} element
+             * @param {string} className
+             * @param {boolean} [defaultActivation=false]
+             * @returns {boolean}
+             */
+            isActive: function(element, className, defaultActivation) {
+              var no = "no-" + className;
+              while (element) {
+                var classList = element.classList;
+                if (classList.contains(className)) {
+                  return true;
                 }
-                e4.page = page.page || e4.page + 1;
-                e4.more = page.more === true;
-                e4.tasks.push(...(page.tasks || []).filter((t4) => !e4.tasks.some((x5) => x5.n === t4.n)));
+                if (classList.contains(no)) {
+                  return false;
+                }
+                element = element.parentElement;
               }
-              present();
-            },
-            outcome: function(t4) {
-              return t4.outcome === "success" && typeof t4.merged === "string" && t4.merged ? ["git-merge", "review", "Merged"] : outcomes[t4.outcome] || outcomes.unknown;
-            },
-            completed: function() {
-              const c4 = api.criteria(), { entries } = api.history(), pinned = new Set(api.model().pins.map((p5) => p5.ref));
-              const shown = entries.flatMap((e4) => {
-                if (!e4.replace) e4.shown = e4.tasks.filter((t4) => views.matches(t4, c4.query) && (!c4.outcomes.length || c4.outcomes.includes(t4.outcome in outcomes ? t4.outcome : "unknown")));
-                return e4.shown.map((t4) => ({ ...t4, project: e4.name, kind: e4.kind, ref: e4.identity + "#" + t4.n }));
-              }).filter((t4) => !pinned.has(t4.ref)).sort((a4, b5) => (b5.closed ?? 0) - (a4.closed ?? 0) || b5.n - a4.n);
-              const loading = entries.some((e4) => e4.loading), more = entries.filter((e4) => e4.more && !e4.loading && !e4.reason);
-              return h5(
-                Fragment,
-                null,
-                shown.map((t4) => {
-                  const [mark, tone, label] = api.outcome(t4);
-                  return h5(
-                    "div",
-                    { class: "task-row completed-row", key: t4.ref, "data-completed": t4.ref },
-                    h5("span", { class: tone, title: label, "aria-label": label }, icon(mark)),
-                    h5("a", { class: "detail-title", href: t4.url, "data-url": t4.url }, t4.title),
-                    h5("div", { class: "meta" }, icon(t4.kind), " ", t4.project + " #" + t4.n, " \xB7 ", label, " \xB7 ", Number.isFinite(t4.closed) ? new Date(t4.closed * 1e3).toISOString().slice(0, 10) : "closed date unknown", t4.result ? " \xB7 " + t4.result : "", t4.pr && h5(Fragment, null, " \xB7 ", h5("a", { href: t4.pr, "data-url": t4.pr }, icon("git-pull-request"), "PR"))),
-                    h5("button", { "data-a": "completed-transcript", "data-ref": t4.ref }, "Open transcript")
-                  );
-                }),
-                entries.map((e4) => h5(
-                  "p",
-                  { class: "meta", role: e4.reason ? "alert" : "status", key: "source" + e4.identity, "data-history-source": e4.identity },
-                  e4.name + ": " + (e4.loading ? "Reading page " + (e4.page + 1) + "\u2026" : e4.reason ? "History unavailable \xB7 " + e4.reason : "Page " + e4.page + " loaded \xB7 " + e4.tasks.length + " rows" + (e4.more ? " \xB7 more available" : "")),
-                  e4.replace && e4.shown.length > 0 ? " \xB7 Showing previous rows" : "",
-                  e4.reason && h5("button", { "data-a": "completed-retry", "data-root": e4.root, "aria-label": "Retry " + e4.name + " history" }, "Retry")
-                )),
-                !loading && !shown.length && h5("div", { class: "body meta" }, entries.some((e4) => e4.reason) ? "Completed history incomplete" : entries.length ? "No completed tasks match" : "No projects selected"),
-                more.length > 0 && h5("button", { class: "completed-more", "data-a": "completed-more" }, "Load more")
-              );
-            },
-            conditions: function() {
-              const c4 = api.criteria(), done = api.current().id === "completed";
-              return h5(
-                Fragment,
-                null,
-                h5("fieldset", null, h5("legend", null, "Projects"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "view-facet", "data-facet": "projects", "data-value": "", "aria-pressed": String(!c4.projects.length) }, "All projects"), api.unique(view.S.projects).map((p5) => h5("div", { class: "project-choice", key: views.identity(p5) }, h5("label", null, h5("input", { type: "checkbox", "data-project": views.identity(p5), "aria-label": "Include " + p5.name, disabled: !views.identity(p5), checked: !c4.projects.length || c4.projects.includes(views.identity(p5)) })), h5("button", { "data-a": "view-facet", "data-facet": "projects", "data-value": views.identity(p5), disabled: !views.identity(p5), "aria-label": "Show only " + p5.name, "aria-pressed": String(c4.projects.length === 1 && c4.projects[0] === views.identity(p5)) }, p5.name))))),
-                done ? h5(
-                  Fragment,
-                  null,
-                  h5("fieldset", null, h5("legend", null, "Period"), h5("div", { class: "options" }, [["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]].map(([value, label]) => h5("button", { "data-a": "view-period", "data-value": value, "aria-pressed": String(c4.period === value) }, label)))),
-                  h5("fieldset", null, h5("legend", null, "Outcome"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "view-facet", "data-facet": "outcomes", "data-value": "", "aria-pressed": String(!c4.outcomes.length) }, "All outcomes"), Object.entries(outcomes).map(([id, [mark, , label]]) => h5("button", { "data-a": "view-facet", "data-facet": "outcomes", "data-value": id, "aria-pressed": String(c4.outcomes.includes(id)) }, icon(mark), label))))
-                ) : (
-                  // #1700 A4: each state choice keeps its token tone (Review purple), as on the task rows.
-                  h5("fieldset", null, h5("legend", null, "States"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "all-tasks", "aria-pressed": String(!c4.states.length) }, "All states"), view.S.display.states.map(({ id: s4, name: n3 }) => h5("button", { "data-a": "view-facet", "data-facet": "states", "data-value": s4, "aria-pressed": String(c4.states.includes(s4)) }, h5("span", { class: blocks.marks[s4][1] || null }, icon(blocks.marks[s4][0])), n3))))
-                )
-              );
-            },
-            actions: function() {
-              const c4 = api.criteria(), v4 = api.current();
-              return h5(
-                Fragment,
-                null,
-                v4.id !== "completed" && h5("fieldset", null, h5("legend", null, "Display"), h5("div", { class: "options" }, [["combined", "All together"], ["project", "By project"]].map(([value, label]) => h5("button", { "data-a": "view-group", "data-value": value, "aria-pressed": String(c4.group === value) }, label)))),
-                !owned && api.naming(),
-                h5("div", { class: "options" }, h5("button", { "data-a": "view-save", disabled: !views.dirty(v4) }, icon("save"), "Save"), h5("button", { "data-a": "view-save-as", "aria-expanded": String(!!view.naming) }, "Save as\u2026"), h5("button", { "data-a": "view-reset" }, icon("rotate-ccw"), "Reset"), h5("button", { "data-a": "popup-close" }, "Done"))
-              );
-            },
-            naming: function() {
-              const v4 = api.current();
-              return view.naming && h5("div", { class: "view-naming" }, h5("input", { "data-view-name": "", "aria-label": "New view name", value: v4.draft, maxLength: 80, placeholder: "View name" }), h5("button", { "data-a": "view-add", disabled: !v4.draft.trim() || api.model().views.length >= 64 }, "Create"), h5("button", { "data-a": "view-cancel" }, "Cancel"));
-            },
-            cancelNaming: function() {
-              view.naming = false;
-              present();
-              menu.querySelector('[data-a="view-save-as"]')?.focus();
-            },
-            editor: function() {
-              return h5(Fragment, null, h5("div", { class: "popover-heading" }, h5("strong", null, "View"), button("x", "Close view editor", { "data-a": "popup-close" })), api.conditions(), api.actions());
-            },
-            // P-V1: Delete beside each custom view; the shortcut pin stays a separate control; one persisted Undo receipt.
-            presets: function() {
-              const m5 = api.model();
-              return h5(
-                owned ? "fieldset" : Fragment,
-                null,
-                owned ? h5("legend", null, "Saved views") : h5("div", { class: "popover-heading" }, h5("strong", null, "Saved views"), button("x", "Close saved views", { "data-a": "popup-close" })),
-                m5.views.map((v4) => h5("div", { class: "saved-view", key: v4.id }, h5("button", { "data-a": "view-select", "data-id": v4.id, "aria-pressed": String(v4.id === m5.selected) }, v4.name, views.dirty(v4) ? " *" : ""), button(v4.pinned ? "pin" : "pin-off", (v4.pinned ? "Remove shortcut for " : "Add shortcut for ") + v4.name, { "data-a": "view-pin", "data-id": v4.id, "aria-pressed": String(v4.pinned) }), !views.builtin(v4.id) && button("trash-2", "Delete view " + v4.name, { "data-a": "view-delete", "data-id": v4.id }))),
-                m5.undo && h5("div", { class: "view-receipt", role: "status" }, "Deleted ", h5("strong", null, m5.undo.view.name), button("undo-2", "Undo deleting " + m5.undo.view.name, { "data-a": "view-undo" })),
-                owned ? api.naming() : h5(Fragment, null, api.naming(), h5("button", { "data-a": "view-save-as", "aria-expanded": String(!!view.naming) }, "Save as\u2026")),
-                view.viewError && h5("p", { role: "alert" }, view.viewError)
-              );
-            },
-            // #1781: details carry a short question cue; the full question and options read in Conversations (input-scroll 04).
-            question: function(t4) {
-              if (t4.state !== "ask") return t4.card && h5("p", { class: "task-card-text" }, t4.card);
-              const q4 = t4.question, text = (q4?.parsed ? q4.problem : q4?.text) || t4.card || "Open the question to read and answer.";
-              return h5("p", { class: "task-card-text question-cue" }, text.length > 170 ? text.slice(0, 167) + "\u2026" : text);
-            },
-            // § 2 visual evidence: ask images as thumbnails that open full size; the link alone without the service's copy.
-            images: function(q4) {
-              const im = (q4?.evidence || []).filter((e4) => e4.image);
-              return im.length > 0 && h5("p", { class: "task-images" }, im.map((e4) => h5("a", { key: e4.url, href: e4.url, "data-url": e4.url, title: "Open " + e4.label + " full size" }, /^data:image\/(png|jpeg|gif|webp);base64,/.test(e4.src || "") ? h5("img", { class: "task-thumb", src: e4.src, alt: e4.label }) : e4.label + " \u2197")));
-            },
-            // M3/MP13: every open task has one detail surface in the main list scroll.
-            attention: function(t4) {
-              const im = t4.state === "ask" && api.images(t4.question), open = view.popup?.kind === "task" && view.popup.key === t4.key;
-              return h5(Fragment, null, im, open && h5("section", { id: "taskq-question-details", class: "task-inline-details question-task-details " + (blocks.marks[t4.state]?.[1] || ""), tabindex: -1, "aria-label": "Task details for #" + t4.n }, api.detail(t4)));
-            },
-            detail: function(t4) {
-              if (!t4) return null;
-              const p5 = view.S.projects.find((p6) => p6.root === t4.root), pinned = views.pinned(api.model(), api.ref(t4));
-              return h5(
-                Fragment,
-                null,
-                h5("div", { class: "popover-heading" }, app.answerSlot(t4, false), button(pinned ? "pin-off" : "pin", pinned ? "Unpin task" : "Pin task", { "data-a": "task-pin", "aria-pressed": String(pinned) }), button("x", "Close task details", { "data-a": "popup-close" })),
-                t4.wait && h5("p", { role: "status" }, t4.wait),
-                t4.publication?.reason && !t4.wait && h5("p", { role: "status" }, t4.publication.reason),
-                t4.enqueued && !t4.publication?.reason && h5("p", { class: "meta" }, "CI progress unknown in this snapshot."),
-                t4.failed && h5("p", { class: "alert" }, t4.failed),
-                t4.later && !t4.until && h5("p", { role: "status" }, t4.later),
-                api.question(t4),
-                t4.result && h5("p", { class: "task-card-text" }, "Result: " + t4.result),
-                h5("div", { class: "task-destinations" }, blocks.destinations(t4).map((d5) => d5.url ? h5("a", { href: d5.url, "data-url": d5.url, "data-destination": d5.kind }, icon(d5.kind === "native" ? "external-link" : "network"), d5.label) : h5("p", { class: "meta", "data-destination": d5.kind }, d5.label + " unavailable: " + d5.reason))),
-                (t4.blocked || []).map((b5) => h5("p", null, h5("a", { href: b5.url, "data-url": b5.url }, b5.ref), " \xB7 " + b5.reason)),
-                h5("div", { class: "row-actions" }, t4.state === "held" && app.startButton([t4]), h5("span", { dangerouslySetInnerHTML: { __html: require_task_controls().render(t4, { key: t4.key, url: t4.url, board: p5.board_kind, except: ["start"] }) } })),
-                h5(
-                  "details",
-                  { class: "task-more", "data-view-key": "more:" + t4.key },
-                  h5("summary", null, icon("info"), "Task info"),
-                  h5(
-                    "dl",
-                    null,
-                    h5("dt", null, "Runtime"),
-                    h5("dd", null, t4.runtime || "unknown"),
-                    h5("dt", null, "Host"),
-                    h5("dd", null, t4.host || "unknown"),
-                    h5("dt", null, "Role"),
-                    h5("dd", null, t4.role || "unknown"),
-                    h5("dt", null, "Session"),
-                    h5("dd", null, t4.session || t4.session_reason || "Session unavailable"),
-                    h5("dt", null, "Attempt"),
-                    h5("dd", null, t4.attempt || "unknown"),
-                    h5("dt", null, "Revision"),
-                    h5("dd", null, t4.revision ?? "unknown"),
-                    h5("dt", null, "Total age"),
-                    h5("dd", null, t4.total_age ?? "unknown"),
-                    h5("dt", null, "Steps"),
-                    h5("dd", null, Array.isArray(t4.steps) ? t4.steps.filter((s4) => s4.complete === true).length + " completed" : "unknown")
-                  ),
-                  Array.isArray(t4.steps) && t4.steps.length ? h5("ol", { class: "task-steps" }, t4.steps.map((s4) => h5("li", null, s4.state, " \xB7 ", s4.age ?? "duration unknown", s4.complete ? "" : " \xB7 current"))) : h5("p", { class: "meta" }, "Ordered stage history unavailable in this snapshot.")
-                ),
-                app.answerNotices(p5.issues)
-              );
-            },
-            // P-W4: the menu takes the View window's model whole; a switched view restores its own scroll and open task.
-            adopt: function(value) {
-              const prior = view.dashboard?.selected;
-              view.dashboard = views.normalize(value);
-              if (prior !== view.dashboard.selected) {
-                view.restoreScroll = api.current().scroll;
-                restore = true;
+              return !!defaultActivation;
+            }
+          },
+          /**
+           * This namespace contains all currently loaded languages and the some helper functions to create and modify languages.
+           *
+           * @namespace
+           * @memberof Prism
+           * @public
+           */
+          languages: {
+            /**
+             * The grammar for plain, unformatted text.
+             */
+            plain: plainTextGrammar,
+            plaintext: plainTextGrammar,
+            text: plainTextGrammar,
+            txt: plainTextGrammar,
+            /**
+             * Creates a deep copy of the language with the given id and appends the given tokens.
+             *
+             * If a token in `redef` also appears in the copied language, then the existing token in the copied language
+             * will be overwritten at its original position.
+             *
+             * ## Best practices
+             *
+             * Since the position of overwriting tokens (token in `redef` that overwrite tokens in the copied language)
+             * doesn't matter, they can technically be in any order. However, this can be confusing to others that trying to
+             * understand the language definition because, normally, the order of tokens matters in Prism grammars.
+             *
+             * Therefore, it is encouraged to order overwriting tokens according to the positions of the overwritten tokens.
+             * Furthermore, all non-overwriting tokens should be placed after the overwriting ones.
+             *
+             * @param {string} id The id of the language to extend. This has to be a key in `Prism.languages`.
+             * @param {Grammar} redef The new tokens to append.
+             * @returns {Grammar} The new language created.
+             * @public
+             * @example
+             * Prism.languages['css-with-colors'] = Prism.languages.extend('css', {
+             *     // Prism.languages.css already has a 'comment' token, so this token will overwrite CSS' 'comment' token
+             *     // at its original position
+             *     'comment': { ... },
+             *     // CSS doesn't have a 'color' token, so this token will be appended
+             *     'color': /\b(?:red|green|blue)\b/
+             * });
+             */
+            extend: function(id, redef) {
+              var lang2 = _5.util.clone(_5.languages[id]);
+              for (var key in redef) {
+                lang2[key] = redef[key];
               }
-              present();
+              return lang2;
             },
-            popup: function() {
-              const p5 = view.popup;
-              if (!p5 || ["task", "transcript"].includes(p5.kind)) return null;
-              return popover.render({ label: p5.kind === "editor" ? "View editor" : "Saved views", children: p5.kind === "editor" ? api.editor() : api.presets() });
+            /**
+             * Inserts tokens _before_ another token in a language definition or any other grammar.
+             *
+             * ## Usage
+             *
+             * This helper method makes it easy to modify existing languages. For example, the CSS language definition
+             * not only defines CSS highlighting for CSS documents, but also needs to define highlighting for CSS embedded
+             * in HTML through `<style>` elements. To do this, it needs to modify `Prism.languages.markup` and add the
+             * appropriate tokens. However, `Prism.languages.markup` is a regular JavaScript object literal, so if you do
+             * this:
+             *
+             * ```js
+             * Prism.languages.markup.style = {
+             *     // token
+             * };
+             * ```
+             *
+             * then the `style` token will be added (and processed) at the end. `insertBefore` allows you to insert tokens
+             * before existing tokens. For the CSS example above, you would use it like this:
+             *
+             * ```js
+             * Prism.languages.insertBefore('markup', 'cdata', {
+             *     'style': {
+             *         // token
+             *     }
+             * });
+             * ```
+             *
+             * ## Special cases
+             *
+             * If the grammars of `inside` and `insert` have tokens with the same name, the tokens in `inside`'s grammar
+             * will be ignored.
+             *
+             * This behavior can be used to insert tokens after `before`:
+             *
+             * ```js
+             * Prism.languages.insertBefore('markup', 'comment', {
+             *     'comment': Prism.languages.markup.comment,
+             *     // tokens after 'comment'
+             * });
+             * ```
+             *
+             * ## Limitations
+             *
+             * The main problem `insertBefore` has to solve is iteration order. Since ES2015, the iteration order for object
+             * properties is guaranteed to be the insertion order (except for integer keys) but some browsers behave
+             * differently when keys are deleted and re-inserted. So `insertBefore` can't be implemented by temporarily
+             * deleting properties which is necessary to insert at arbitrary positions.
+             *
+             * To solve this problem, `insertBefore` doesn't actually insert the given tokens into the target object.
+             * Instead, it will create a new object and replace all references to the target object with the new one. This
+             * can be done without temporarily deleting properties, so the iteration order is well-defined.
+             *
+             * However, only references that can be reached from `Prism.languages` or `insert` will be replaced. I.e. if
+             * you hold the target object in a variable, then the value of the variable will not change.
+             *
+             * ```js
+             * var oldMarkup = Prism.languages.markup;
+             * var newMarkup = Prism.languages.insertBefore('markup', 'comment', { ... });
+             *
+             * assert(oldMarkup !== Prism.languages.markup);
+             * assert(newMarkup === Prism.languages.markup);
+             * ```
+             *
+             * @param {string} inside The property of `root` (e.g. a language id in `Prism.languages`) that contains the
+             * object to be modified.
+             * @param {string} before The key to insert before.
+             * @param {Grammar} insert An object containing the key-value pairs to be inserted.
+             * @param {Object<string, any>} [root] The object containing `inside`, i.e. the object that contains the
+             * object to be modified.
+             *
+             * Defaults to `Prism.languages`.
+             * @returns {Grammar} The new grammar object.
+             * @public
+             */
+            insertBefore: function(inside, before, insert, root) {
+              root = root || /** @type {any} */
+              _5.languages;
+              var grammar = root[inside];
+              var ret = {};
+              for (var token in grammar) {
+                if (grammar.hasOwnProperty(token)) {
+                  if (token == before) {
+                    for (var newToken in insert) {
+                      if (insert.hasOwnProperty(newToken)) {
+                        ret[newToken] = insert[newToken];
+                      }
+                    }
+                  }
+                  if (!insert.hasOwnProperty(token)) {
+                    ret[token] = grammar[token];
+                  }
+                }
+              }
+              var old = root[inside];
+              root[inside] = ret;
+              _5.languages.DFS(_5.languages, function(key, value) {
+                if (value === old && key != inside) {
+                  this[key] = ret;
+                }
+              });
+              return ret;
             },
-            place: function() {
-              if (restore && view.S && view.page === "home") {
-                restore = false;
-                const key = api.current().open, trigger = key && menu.querySelector('[data-a="task-detail"][data-key="' + CSS2.escape(key) + '"]');
-                if (!view.popup && trigger) {
-                  api.open("task", trigger, key, false);
+            // Traverse a language definition with Depth First Search
+            DFS: function DFS(o4, callback, type, visited) {
+              visited = visited || {};
+              var objId = _5.util.objId;
+              for (var i4 in o4) {
+                if (o4.hasOwnProperty(i4)) {
+                  callback.call(o4, i4, o4[i4], type || i4);
+                  var property = o4[i4];
+                  var propertyType = _5.util.type(property);
+                  if (propertyType === "Object" && !visited[objId(property)]) {
+                    visited[objId(property)] = true;
+                    DFS(property, callback, null, visited);
+                  } else if (propertyType === "Array" && !visited[objId(property)]) {
+                    visited[objId(property)] = true;
+                    DFS(property, callback, i4, visited);
+                  }
+                }
+              }
+            }
+          },
+          plugins: {},
+          /**
+           * This is the most high-level function in Prism’s API.
+           * It fetches all the elements that have a `.language-xxxx` class and then calls {@link Prism.highlightElement} on
+           * each one of them.
+           *
+           * This is equivalent to `Prism.highlightAllUnder(document, async, callback)`.
+           *
+           * @param {boolean} [async=false] Same as in {@link Prism.highlightAllUnder}.
+           * @param {HighlightCallback} [callback] Same as in {@link Prism.highlightAllUnder}.
+           * @memberof Prism
+           * @public
+           */
+          highlightAll: function(async, callback) {
+            _5.highlightAllUnder(document, async, callback);
+          },
+          /**
+           * Fetches all the descendants of `container` that have a `.language-xxxx` class and then calls
+           * {@link Prism.highlightElement} on each one of them.
+           *
+           * The following hooks will be run:
+           * 1. `before-highlightall`
+           * 2. `before-all-elements-highlight`
+           * 3. All hooks of {@link Prism.highlightElement} for each element.
+           *
+           * @param {ParentNode} container The root element, whose descendants that have a `.language-xxxx` class will be highlighted.
+           * @param {boolean} [async=false] Whether each element is to be highlighted asynchronously using Web Workers.
+           * @param {HighlightCallback} [callback] An optional callback to be invoked on each element after its highlighting is done.
+           * @memberof Prism
+           * @public
+           */
+          highlightAllUnder: function(container, async, callback) {
+            var env = {
+              callback,
+              container,
+              selector: 'code[class*="language-"], [class*="language-"] code, code[class*="lang-"], [class*="lang-"] code'
+            };
+            _5.hooks.run("before-highlightall", env);
+            env.elements = Array.prototype.slice.apply(env.container.querySelectorAll(env.selector));
+            _5.hooks.run("before-all-elements-highlight", env);
+            for (var i4 = 0, element; element = env.elements[i4++]; ) {
+              _5.highlightElement(element, async === true, env.callback);
+            }
+          },
+          /**
+           * Highlights the code inside a single element.
+           *
+           * The following hooks will be run:
+           * 1. `before-sanity-check`
+           * 2. `before-highlight`
+           * 3. All hooks of {@link Prism.highlight}. These hooks will be run by an asynchronous worker if `async` is `true`.
+           * 4. `before-insert`
+           * 5. `after-highlight`
+           * 6. `complete`
+           *
+           * Some the above hooks will be skipped if the element doesn't contain any text or there is no grammar loaded for
+           * the element's language.
+           *
+           * @param {Element} element The element containing the code.
+           * It must have a class of `language-xxxx` to be processed, where `xxxx` is a valid language identifier.
+           * @param {boolean} [async=false] Whether the element is to be highlighted asynchronously using Web Workers
+           * to improve performance and avoid blocking the UI when highlighting very large chunks of code. This option is
+           * [disabled by default](https://prismjs.com/faq.html#why-is-asynchronous-highlighting-disabled-by-default).
+           *
+           * Note: All language definitions required to highlight the code must be included in the main `prism.js` file for
+           * asynchronous highlighting to work. You can build your own bundle on the
+           * [Download page](https://prismjs.com/download.html).
+           * @param {HighlightCallback} [callback] An optional callback to be invoked after the highlighting is done.
+           * Mostly useful when `async` is `true`, since in that case, the highlighting is done asynchronously.
+           * @memberof Prism
+           * @public
+           */
+          highlightElement: function(element, async, callback) {
+            var language = _5.util.getLanguage(element);
+            var grammar = _5.languages[language];
+            _5.util.setLanguage(element, language);
+            var parent = element.parentElement;
+            if (parent && parent.nodeName.toLowerCase() === "pre") {
+              _5.util.setLanguage(parent, language);
+            }
+            var code = element.textContent;
+            var env = {
+              element,
+              language,
+              grammar,
+              code
+            };
+            function insertHighlightedCode(highlightedCode) {
+              env.highlightedCode = highlightedCode;
+              _5.hooks.run("before-insert", env);
+              env.element.innerHTML = env.highlightedCode;
+              _5.hooks.run("after-highlight", env);
+              _5.hooks.run("complete", env);
+              callback && callback.call(env.element);
+            }
+            _5.hooks.run("before-sanity-check", env);
+            parent = env.element.parentElement;
+            if (parent && parent.nodeName.toLowerCase() === "pre" && !parent.hasAttribute("tabindex")) {
+              parent.setAttribute("tabindex", "0");
+            }
+            if (!env.code) {
+              _5.hooks.run("complete", env);
+              callback && callback.call(env.element);
+              return;
+            }
+            _5.hooks.run("before-highlight", env);
+            if (!env.grammar) {
+              insertHighlightedCode(_5.util.encode(env.code));
+              return;
+            }
+            if (async && _self2.Worker) {
+              var worker = new Worker(_5.filename);
+              worker.onmessage = function(evt) {
+                insertHighlightedCode(evt.data);
+              };
+              worker.postMessage(JSON.stringify({
+                language: env.language,
+                code: env.code,
+                immediateClose: true
+              }));
+            } else {
+              insertHighlightedCode(_5.highlight(env.code, env.grammar, env.language));
+            }
+          },
+          /**
+           * Low-level function, only use if you know what you’re doing. It accepts a string of text as input
+           * and the language definitions to use, and returns a string with the HTML produced.
+           *
+           * The following hooks will be run:
+           * 1. `before-tokenize`
+           * 2. `after-tokenize`
+           * 3. `wrap`: On each {@link Token}.
+           *
+           * @param {string} text A string with the code to be highlighted.
+           * @param {Grammar} grammar An object containing the tokens to use.
+           *
+           * Usually a language definition like `Prism.languages.markup`.
+           * @param {string} language The name of the language definition passed to `grammar`.
+           * @returns {string} The highlighted HTML.
+           * @memberof Prism
+           * @public
+           * @example
+           * Prism.highlight('var foo = true;', Prism.languages.javascript, 'javascript');
+           */
+          highlight: function(text, grammar, language) {
+            var env = {
+              code: text,
+              grammar,
+              language
+            };
+            _5.hooks.run("before-tokenize", env);
+            if (!env.grammar) {
+              throw new Error('The language "' + env.language + '" has no grammar.');
+            }
+            env.tokens = _5.tokenize(env.code, env.grammar);
+            _5.hooks.run("after-tokenize", env);
+            return Token.stringify(_5.util.encode(env.tokens), env.language);
+          },
+          /**
+           * This is the heart of Prism, and the most low-level function you can use. It accepts a string of text as input
+           * and the language definitions to use, and returns an array with the tokenized code.
+           *
+           * When the language definition includes nested tokens, the function is called recursively on each of these tokens.
+           *
+           * This method could be useful in other contexts as well, as a very crude parser.
+           *
+           * @param {string} text A string with the code to be highlighted.
+           * @param {Grammar} grammar An object containing the tokens to use.
+           *
+           * Usually a language definition like `Prism.languages.markup`.
+           * @returns {TokenStream} An array of strings and tokens, a token stream.
+           * @memberof Prism
+           * @public
+           * @example
+           * let code = `var foo = 0;`;
+           * let tokens = Prism.tokenize(code, Prism.languages.javascript);
+           * tokens.forEach(token => {
+           *     if (token instanceof Prism.Token && token.type === 'number') {
+           *         console.log(`Found numeric literal: ${token.content}`);
+           *     }
+           * });
+           */
+          tokenize: function(text, grammar) {
+            var rest = grammar.rest;
+            if (rest) {
+              for (var token in rest) {
+                grammar[token] = rest[token];
+              }
+              delete grammar.rest;
+            }
+            var tokenList = new LinkedList();
+            addAfter(tokenList, tokenList.head, text);
+            matchGrammar(text, tokenList, grammar, tokenList.head, 0);
+            return toArray(tokenList);
+          },
+          /**
+           * @namespace
+           * @memberof Prism
+           * @public
+           */
+          hooks: {
+            all: {},
+            /**
+             * Adds the given callback to the list of callbacks for the given hook.
+             *
+             * The callback will be invoked when the hook it is registered for is run.
+             * Hooks are usually directly run by a highlight function but you can also run hooks yourself.
+             *
+             * One callback function can be registered to multiple hooks and the same hook multiple times.
+             *
+             * @param {string} name The name of the hook.
+             * @param {HookCallback} callback The callback function which is given environment variables.
+             * @public
+             */
+            add: function(name, callback) {
+              var hooks = _5.hooks.all;
+              hooks[name] = hooks[name] || [];
+              hooks[name].push(callback);
+            },
+            /**
+             * Runs a hook invoking all registered callbacks with the given environment variables.
+             *
+             * Callbacks will be invoked synchronously and in the order in which they were registered.
+             *
+             * @param {string} name The name of the hook.
+             * @param {Object<string, any>} env The environment variables of the hook passed to all callbacks registered.
+             * @public
+             */
+            run: function(name, env) {
+              var callbacks = _5.hooks.all[name];
+              if (!callbacks || !callbacks.length) {
+                return;
+              }
+              for (var i4 = 0, callback; callback = callbacks[i4++]; ) {
+                callback(env);
+              }
+            }
+          },
+          Token
+        };
+        _self2.Prism = _5;
+        function Token(type, content, alias, matchedStr) {
+          this.type = type;
+          this.content = content;
+          this.alias = alias;
+          this.length = (matchedStr || "").length | 0;
+        }
+        Token.stringify = function stringify(o4, language) {
+          if (typeof o4 == "string") {
+            return o4;
+          }
+          if (Array.isArray(o4)) {
+            var s4 = "";
+            o4.forEach(function(e4) {
+              s4 += stringify(e4, language);
+            });
+            return s4;
+          }
+          var env = {
+            type: o4.type,
+            content: stringify(o4.content, language),
+            tag: "span",
+            classes: ["token", o4.type],
+            attributes: {},
+            language
+          };
+          var aliases = o4.alias;
+          if (aliases) {
+            if (Array.isArray(aliases)) {
+              Array.prototype.push.apply(env.classes, aliases);
+            } else {
+              env.classes.push(aliases);
+            }
+          }
+          _5.hooks.run("wrap", env);
+          var attributes = "";
+          for (var name in env.attributes) {
+            attributes += " " + name + '="' + (env.attributes[name] || "").replace(/"/g, "&quot;") + '"';
+          }
+          return "<" + env.tag + ' class="' + env.classes.join(" ") + '"' + attributes + ">" + env.content + "</" + env.tag + ">";
+        };
+        function matchPattern(pattern, pos, text, lookbehind) {
+          pattern.lastIndex = pos;
+          var match = pattern.exec(text);
+          if (match && lookbehind && match[1]) {
+            var lookbehindLength = match[1].length;
+            match.index += lookbehindLength;
+            match[0] = match[0].slice(lookbehindLength);
+          }
+          return match;
+        }
+        function matchGrammar(text, tokenList, grammar, startNode, startPos, rematch) {
+          for (var token in grammar) {
+            if (!grammar.hasOwnProperty(token) || !grammar[token]) {
+              continue;
+            }
+            var patterns = grammar[token];
+            patterns = Array.isArray(patterns) ? patterns : [patterns];
+            for (var j4 = 0; j4 < patterns.length; ++j4) {
+              if (rematch && rematch.cause == token + "," + j4) {
+                return;
+              }
+              var patternObj = patterns[j4];
+              var inside = patternObj.inside;
+              var lookbehind = !!patternObj.lookbehind;
+              var greedy = !!patternObj.greedy;
+              var alias = patternObj.alias;
+              if (greedy && !patternObj.pattern.global) {
+                var flags = patternObj.pattern.toString().match(/[imsuy]*$/)[0];
+                patternObj.pattern = RegExp(patternObj.pattern.source, flags + "g");
+              }
+              var pattern = patternObj.pattern || patternObj;
+              for (var currentNode = startNode.next, pos = startPos; currentNode !== tokenList.tail; pos += currentNode.value.length, currentNode = currentNode.next) {
+                if (rematch && pos >= rematch.reach) {
+                  break;
+                }
+                var str = currentNode.value;
+                if (tokenList.length > text.length) {
                   return;
                 }
-              }
-              if (view.popup) {
-                const selector = view.popup.kind === "task" ? '[data-a="task-detail"][data-key="' + CSS2.escape(view.popup.key) + '"]' : '[data-a="' + (view.popup.kind === "views" ? "view-list" : "view-editor") + '"]', trigger = menu.querySelector(selector);
-                if (trigger) view.popup.anchor = api.anchor(trigger);
-              }
-              for (const b5 of menu.querySelectorAll('[data-a="task-detail"]')) {
-                b5.setAttribute("aria-expanded", String(view.popup?.kind === "task" && view.popup.key === b5.dataset.key));
-                b5.setAttribute("aria-controls", "taskq-question-details");
-                b5.removeAttribute("aria-haspopup");
-              }
-              if (view.popup && !["task", "transcript"].includes(view.popup.kind)) popover.place(menu.querySelector("#taskq-popover"), view.popup.anchor);
-            },
-            click: function(e4) {
-              const link = e4.target.closest("[data-pin-open]");
-              if (link && pinReads.get(link.dataset.pinOpen)?.value?.state === "closed") {
-                api.unpin(link.dataset.pinOpen);
-                ui.defer(present, 0);
-                return false;
-              }
-              const b5 = e4.target.closest("button");
-              if (!b5 || b5.disabled) return false;
-              const d5 = b5.dataset, m5 = api.model();
-              if (d5.a === "search-open") {
-                view.searchOpen = !!api.criteria().query || !view.searchOpen;
-                present();
-                menu.querySelector(view.searchOpen ? "[data-task-query]" : "[data-a=search-open]")?.focus({ preventScroll: true });
-                return true;
-              }
-              if (d5.a === "search-clear") {
-                api.criteria().query = "";
-                view.searchOpen = false;
-                present();
-                menu.querySelector("[data-a=search-open]")?.focus({ preventScroll: true });
-                return true;
-              }
-              if (d5.a === "project-collapse") {
-                const closing = !m5.collapsed.includes(d5.project);
-                m5.collapsed = closing ? [...m5.collapsed, d5.project] : m5.collapsed.filter((id) => id !== d5.project);
-                if (closing && view.popup?.kind === "task" && api.live().some((t4) => t4.key === view.popup.key && t4.boardIdentity === d5.project)) api.close(false);
-                else present();
-                return true;
-              }
-              if (d5.a === "task-detail") {
-                if (view.popup?.kind === "task" && view.popup.key === d5.key) api.close();
-                else api.open("task", b5, d5.key, true);
-                return true;
-              }
-              if ((d5.a === "view-editor" || d5.a === "view-list") && view.viewsWindow) {
-                send({ a: "views-open" });
-                return true;
-              }
-              if (d5.a === "view-editor" || d5.a === "view-list") {
-                if (view.popup?.kind === (d5.a === "view-editor" ? "editor" : "views")) api.close();
-                else api.open(d5.a === "view-editor" ? "editor" : "views", b5);
-                return true;
-              }
-              if (d5.a === "popup-close") {
-                if (owned) send({ a: "hide" });
-                else api.close();
-                return true;
-              }
-              if (d5.a === "task-pin") {
-                const t4 = api.live().find((t5) => t5.key === view.popup?.key);
-                if (t4) views.toggle(m5, { ref: api.ref(t4), title: t4.title, url: t4.url });
-                api.close();
-                return true;
-              }
-              if (d5.a === "task-unpin") {
-                api.unpin(d5.ref);
-                present();
-                return true;
-              }
-              if (d5.a === "pin-retry") {
-                api.pinRead({ ref: d5.ref }, true);
-                present();
-                return true;
-              }
-              if (d5.a === "pin-transcript" || d5.a === "completed-transcript") {
-                const returnScroll = menu.querySelector(".content")?.scrollTop || 0, entry = d5.a === "pin-transcript" ? pinReads.get(d5.ref) : api.history().entries.flatMap((e5) => e5.tasks.map((t4) => ({ ref: e5.identity + "#" + t4.n, root: e5.root, task: t4.n, value: t4 }))).find((e5) => e5.ref === d5.ref);
-                if (entry?.value?.state === "closed") {
-                  transcript = { returnScroll };
-                  api.readTranscript(entry);
-                  api.unpin(d5.ref);
-                  api.open("transcript", b5, d5.ref);
-                  const content = menu.querySelector(".content");
-                  if (content) content.scrollTop = 0;
+                if (str instanceof Token) {
+                  continue;
                 }
-                return true;
-              }
-              if (d5.a === "pin-transcript-earlier") {
-                if (transcript?.page?.start > 0 && !transcript.loading) {
-                  api.readTranscript(transcript, transcript.page.start);
-                  present();
-                }
-                return true;
-              }
-              if (d5.a === "view-select") {
-                if (!owned) api.current().scroll = menu.querySelector(".content")?.scrollTop || 0;
-                m5.selected = d5.id;
-                view.popup = null;
-                view.restoreScroll = api.current().scroll;
-                restore = true;
-                present();
-                menu.querySelector('[data-a="view-list"]')?.focus();
-                return true;
-              }
-              if (d5.a === "view-pin") {
-                const v4 = m5.views.find((v5) => v5.id === d5.id);
-                if (v4) v4.pinned = !v4.pinned;
-                present();
-                return true;
-              }
-              if (d5.a === "view-delete") {
-                if (views.remove(m5, d5.id)) {
-                  if (m5.selected === "all") view.restoreScroll = api.current().scroll;
-                  present();
-                  menu.querySelector((owned ? "" : "#taskq-popover ") + '[data-a="view-undo"]')?.focus();
-                }
-                return true;
-              }
-              if (d5.a === "view-undo") {
-                views.undo(m5);
-                present();
-                menu.querySelector((owned ? "" : "#taskq-popover ") + '[data-a="view-select"][aria-pressed="true"]')?.focus();
-                return true;
-              }
-              if (d5.a === "view-save-as") {
-                view.naming = true;
-                present();
-                menu.querySelector("[data-view-name]")?.focus();
-                return true;
-              }
-              if (d5.a === "view-cancel") {
-                api.cancelNaming();
-                return true;
-              }
-              if (d5.a === "view-add") {
-                if (views.add(m5, api.current().draft, "view-" + Array.from(crypto2.getRandomValues(new Uint8Array(16)), (b6) => b6.toString(16).padStart(2, "0")).join(""))) {
-                  view.naming = false;
-                  view.popup = null;
-                  present();
-                  menu.querySelector('[data-a="view-select"][aria-pressed="true"], [data-a="view-list"]')?.focus();
-                }
-                return true;
-              }
-              if (d5.a === "view-facet") {
-                const value = d5.value, key = d5.facet, current = api.criteria()[key];
-                if (!["states", "projects", "outcomes"].includes(key)) return true;
-                api.set({ [key]: !value ? [] : key === "projects" ? [value] : current.includes(value) ? current.filter((x5) => x5 !== value) : [...current, value] });
-                return true;
-              }
-              if (d5.a === "view-group") {
-                api.set({ group: d5.value });
-                return true;
-              }
-              if (d5.a === "view-period") {
-                api.set({ period: d5.value });
-                return true;
-              }
-              if (d5.a === "completed-retry") {
-                const entry = view.completed?.entries.find((e5) => e5.root === d5.root && e5.reason && !e5.loading);
-                if (entry) {
-                  api.request(entry);
-                  present();
-                }
-                return true;
-              }
-              if (d5.a === "completed-more") {
-                view.completed?.entries.filter((e5) => e5.more && !e5.loading && !e5.reason).forEach(api.request);
-                present();
-                return true;
-              }
-              if (d5.a === "view-save") {
-                views.save(m5);
-                present();
-                return true;
-              }
-              if (d5.a === "view-reset" || d5.a === "filter-reset") {
-                views.reset(m5);
-                present();
-                return true;
-              }
-              if (d5.a === "all-tasks") {
-                api.set({ states: [] });
-                return true;
-              }
-              return false;
-            },
-            mount: function() {
-              ui.listen(menu, "focusin", (e4) => {
-                if (e4.target.hasAttribute("data-task-query")) view.searchOpen = true;
-              });
-              ui.listen(menu, "focusout", (e4) => {
-                if (e4.target.hasAttribute("data-task-query")) ui.defer(() => {
-                  if (!api.criteria().query && view.searchOpen && !document2.activeElement?.closest(".task-search")) {
-                    view.searchOpen = false;
-                    present();
+                var removeCount = 1;
+                var match;
+                if (greedy) {
+                  match = matchPattern(pattern, pos, text, lookbehind);
+                  if (!match || match.index >= text.length) {
+                    break;
                   }
-                }, 0);
-              });
-              ui.listen(document2, "keydown", (e4) => {
-                if (e4.key === "Escape" && e4.target.hasAttribute?.("data-task-query")) {
-                  e4.preventDefault();
-                  e4.stopImmediatePropagation();
-                  if (!api.criteria().query) view.searchOpen = false;
-                  present();
-                  menu.querySelector("[data-a=search-open]")?.focus({ preventScroll: true });
+                  var from = match.index;
+                  var to = match.index + match[0].length;
+                  var p5 = pos;
+                  p5 += currentNode.value.length;
+                  while (from >= p5) {
+                    currentNode = currentNode.next;
+                    p5 += currentNode.value.length;
+                  }
+                  p5 -= currentNode.value.length;
+                  pos = p5;
+                  if (currentNode.value instanceof Token) {
+                    continue;
+                  }
+                  for (var k5 = currentNode; k5 !== tokenList.tail && (p5 < to || typeof k5.value === "string"); k5 = k5.next) {
+                    removeCount++;
+                    p5 += k5.value.length;
+                  }
+                  removeCount--;
+                  str = text.slice(pos, p5);
+                  match.index -= pos;
+                } else {
+                  match = matchPattern(pattern, 0, str, lookbehind);
+                  if (!match) {
+                    continue;
+                  }
                 }
-              }, true);
-              ui.listen(menu, "change", (e4) => {
-                if (!e4.target.hasAttribute("data-project")) return;
-                const value = e4.target.dataset.project, current = api.criteria().projects, selected = current.length ? current : api.unique(view.S.projects).map(views.identity).filter(Boolean);
-                api.set({ projects: e4.target.checked ? [...selected, value] : selected.filter((x5) => x5 !== value) });
-              });
-              ui.listen(document2, "keydown", (e4) => {
-                if (e4.key === "Escape" && view.naming) {
-                  e4.preventDefault();
-                  e4.stopImmediatePropagation();
-                  api.cancelNaming();
+                var from = match.index;
+                var matchStr = match[0];
+                var before = str.slice(0, from);
+                var after = str.slice(from + matchStr.length);
+                var reach = pos + str.length;
+                if (rematch && reach > rematch.reach) {
+                  rematch.reach = reach;
                 }
-              }, true);
-              ui.listen(menu, "input", (e4) => {
-                if (e4.target.hasAttribute("data-task-query")) {
-                  api.criteria().query = e4.target.value;
-                  present();
+                var removeFrom = currentNode.prev;
+                if (before) {
+                  removeFrom = addAfter(tokenList, removeFrom, before);
+                  pos += before.length;
                 }
-                if (e4.target.hasAttribute("data-view-name")) {
-                  api.current().draft = e4.target.value.slice(0, 80);
-                  present();
+                removeRange(tokenList, removeFrom, removeCount);
+                var wrapped = new Token(token, inside ? _5.tokenize(matchStr, inside) : matchStr, alias, matchStr);
+                currentNode = addAfter(tokenList, removeFrom, wrapped);
+                if (after) {
+                  addAfter(tokenList, currentNode, after);
                 }
-              });
-              ui.listen(document2, "pointerdown", (e4) => {
-                if (view.popup && !["task", "transcript"].includes(view.popup.kind) && !e4.target.closest('#taskq-popover,#taskq-question-details,[data-a="task-detail"],[data-a="view-editor"],[data-a="view-list"]')) api.close(false);
-              });
-              ui.listen(window2, "resize", api.place);
-              ui.listen(menu, "scroll", api.place, true);
+                if (removeCount > 1) {
+                  var nestedRematch = {
+                    cause: token + "," + j4,
+                    reach
+                  };
+                  matchGrammar(text, tokenList, grammar, currentNode.prev, pos, nestedRematch);
+                  if (rematch && nestedRematch.reach > rematch.reach) {
+                    rematch.reach = nestedRematch.reach;
+                  }
+                }
+              }
             }
-          });
-          return api;
+          }
+        }
+        function LinkedList() {
+          var head = { value: null, prev: null, next: null };
+          var tail = { value: null, prev: head, next: null };
+          head.next = tail;
+          this.head = head;
+          this.tail = tail;
+          this.length = 0;
+        }
+        function addAfter(list, node, value) {
+          var next = node.next;
+          var newNode = { value, prev: node, next };
+          node.next = newNode;
+          next.prev = newNode;
+          list.length++;
+          return newNode;
+        }
+        function removeRange(list, node, count) {
+          var next = node.next;
+          for (var i4 = 0; i4 < count && next !== list.tail; i4++) {
+            next = next.next;
+          }
+          node.next = next;
+          next.prev = node;
+          list.length -= i4;
+        }
+        function toArray(list) {
+          var array = [];
+          var node = list.head.next;
+          while (node !== list.tail) {
+            array.push(node.value);
+            node = node.next;
+          }
+          return array;
+        }
+        if (!_self2.document) {
+          if (!_self2.addEventListener) {
+            return _5;
+          }
+          if (!_5.disableWorkerMessageHandler) {
+            _self2.addEventListener("message", function(evt) {
+              var message = JSON.parse(evt.data);
+              var lang2 = message.language;
+              var code = message.code;
+              var immediateClose = message.immediateClose;
+              _self2.postMessage(_5.highlight(code, _5.languages[lang2], lang2));
+              if (immediateClose) {
+                _self2.close();
+              }
+            }, false);
+          }
+          return _5;
+        }
+        var script = _5.util.currentScript();
+        if (script) {
+          _5.filename = script.src;
+          if (script.hasAttribute("data-manual")) {
+            _5.manual = true;
+          }
+        }
+        function highlightAutomaticallyCallback() {
+          if (!_5.manual) {
+            _5.highlightAll();
+          }
+        }
+        if (!_5.manual) {
+          var readyState = document.readyState;
+          if (readyState === "loading" || readyState === "interactive" && script && script.defer) {
+            document.addEventListener("DOMContentLoaded", highlightAutomaticallyCallback);
+          } else {
+            if (window.requestAnimationFrame) {
+              window.requestAnimationFrame(highlightAutomaticallyCallback);
+            } else {
+              window.setTimeout(highlightAutomaticallyCallback, 16);
+            }
+          }
+        }
+        return _5;
+      })(_self);
+      if (typeof module !== "undefined" && module.exports) {
+        module.exports = Prism2;
+      }
+      if (typeof global !== "undefined") {
+        global.Prism = Prism2;
+      }
+    }
+  });
+
+  // node_modules/prismjs/components/prism-markup.js
+  var require_prism_markup = __commonJS({
+    "node_modules/prismjs/components/prism-markup.js"() {
+      Prism.languages.markup = {
+        "comment": {
+          pattern: /<!--(?:(?!<!--)[\s\S])*?-->/,
+          greedy: true
+        },
+        "prolog": {
+          pattern: /<\?[\s\S]+?\?>/,
+          greedy: true
+        },
+        "doctype": {
+          // https://www.w3.org/TR/xml/#NT-doctypedecl
+          pattern: /<!DOCTYPE(?:[^>"'[\]]|"[^"]*"|'[^']*')+(?:\[(?:[^<"'\]]|"[^"]*"|'[^']*'|<(?!!--)|<!--(?:[^-]|-(?!->))*-->)*\]\s*)?>/i,
+          greedy: true,
+          inside: {
+            "internal-subset": {
+              pattern: /(^[^\[]*\[)[\s\S]+(?=\]>$)/,
+              lookbehind: true,
+              greedy: true,
+              inside: null
+              // see below
+            },
+            "string": {
+              pattern: /"[^"]*"|'[^']*'/,
+              greedy: true
+            },
+            "punctuation": /^<!|>$|[[\]]/,
+            "doctype-tag": /^DOCTYPE/i,
+            "name": /[^\s<>'"]+/
+          }
+        },
+        "cdata": {
+          pattern: /<!\[CDATA\[[\s\S]*?\]\]>/i,
+          greedy: true
+        },
+        "tag": {
+          pattern: /<\/?(?!\d)[^\s>\/=$<%]+(?:\s(?:\s*[^\s>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s'">=]+(?=[\s>]))|(?=[\s/>])))+)?\s*\/?>/,
+          greedy: true,
+          inside: {
+            "tag": {
+              pattern: /^<\/?[^\s>\/]+/,
+              inside: {
+                "punctuation": /^<\/?/,
+                "namespace": /^[^\s>\/:]+:/
+              }
+            },
+            "special-attr": [],
+            "attr-value": {
+              pattern: /=\s*(?:"[^"]*"|'[^']*'|[^\s'">=]+)/,
+              inside: {
+                "punctuation": [
+                  {
+                    pattern: /^=/,
+                    alias: "attr-equals"
+                  },
+                  {
+                    pattern: /^(\s*)["']|["']$/,
+                    lookbehind: true
+                  }
+                ]
+              }
+            },
+            "punctuation": /\/?>/,
+            "attr-name": {
+              pattern: /[^\s>\/]+/,
+              inside: {
+                "namespace": /^[^\s>\/:]+:/
+              }
+            }
+          }
+        },
+        "entity": [
+          {
+            pattern: /&[\da-z]{1,8};/i,
+            alias: "named-entity"
+          },
+          /&#x?[\da-f]{1,8};/i
+        ]
+      };
+      Prism.languages.markup["tag"].inside["attr-value"].inside["entity"] = Prism.languages.markup["entity"];
+      Prism.languages.markup["doctype"].inside["internal-subset"].inside = Prism.languages.markup;
+      Prism.hooks.add("wrap", function(env) {
+        if (env.type === "entity") {
+          env.attributes["title"] = env.content.replace(/&amp;/, "&");
         }
       });
+      Object.defineProperty(Prism.languages.markup.tag, "addInlined", {
+        /**
+         * Adds an inlined language to markup.
+         *
+         * An example of an inlined language is CSS with `<style>` tags.
+         *
+         * @param {string} tagName The name of the tag that contains the inlined language. This name will be treated as
+         * case insensitive.
+         * @param {string} lang The language key.
+         * @example
+         * addInlined('style', 'css');
+         */
+        value: function addInlined(tagName, lang) {
+          var includedCdataInside = {};
+          includedCdataInside["language-" + lang] = {
+            pattern: /(^<!\[CDATA\[)[\s\S]+?(?=\]\]>$)/i,
+            lookbehind: true,
+            inside: Prism.languages[lang]
+          };
+          includedCdataInside["cdata"] = /^<!\[CDATA\[|\]\]>$/i;
+          var inside = {
+            "included-cdata": {
+              pattern: /<!\[CDATA\[[\s\S]*?\]\]>/i,
+              inside: includedCdataInside
+            }
+          };
+          inside["language-" + lang] = {
+            pattern: /[\s\S]+/,
+            inside: Prism.languages[lang]
+          };
+          var def = {};
+          def[tagName] = {
+            pattern: RegExp(/(<__[^>]*>)(?:<!\[CDATA\[(?:[^\]]|\](?!\]>))*\]\]>|(?!<!\[CDATA\[)[\s\S])*?(?=<\/__>)/.source.replace(/__/g, function() {
+              return tagName;
+            }), "i"),
+            lookbehind: true,
+            greedy: true,
+            inside
+          };
+          Prism.languages.insertBefore("markup", "cdata", def);
+        }
+      });
+      Object.defineProperty(Prism.languages.markup.tag, "addAttribute", {
+        /**
+         * Adds an pattern to highlight languages embedded in HTML attributes.
+         *
+         * An example of an inlined language is CSS with `style` attributes.
+         *
+         * @param {string} attrName The name of the tag that contains the inlined language. This name will be treated as
+         * case insensitive.
+         * @param {string} lang The language key.
+         * @example
+         * addAttribute('style', 'css');
+         */
+        value: function(attrName, lang) {
+          Prism.languages.markup.tag.inside["special-attr"].push({
+            pattern: RegExp(
+              /(^|["'\s])/.source + "(?:" + attrName + ")" + /\s*=\s*(?:"[^"]*"|'[^']*'|[^\s'">=]+(?=[\s>]))/.source,
+              "i"
+            ),
+            lookbehind: true,
+            inside: {
+              "attr-name": /^[^\s=]+/,
+              "attr-value": {
+                pattern: /=[\s\S]+/,
+                inside: {
+                  "value": {
+                    pattern: /(^=\s*(["']|(?!["'])))\S[\s\S]*(?=\2$)/,
+                    lookbehind: true,
+                    alias: [lang, "language-" + lang],
+                    inside: Prism.languages[lang]
+                  },
+                  "punctuation": [
+                    {
+                      pattern: /^=/,
+                      alias: "attr-equals"
+                    },
+                    /"|'/
+                  ]
+                }
+              }
+            }
+          });
+        }
+      });
+      Prism.languages.html = Prism.languages.markup;
+      Prism.languages.mathml = Prism.languages.markup;
+      Prism.languages.svg = Prism.languages.markup;
+      Prism.languages.xml = Prism.languages.extend("markup", {});
+      Prism.languages.ssml = Prism.languages.xml;
+      Prism.languages.atom = Prism.languages.xml;
+      Prism.languages.rss = Prism.languages.xml;
+    }
+  });
+
+  // node_modules/prismjs/components/prism-css.js
+  var require_prism_css = __commonJS({
+    "node_modules/prismjs/components/prism-css.js"() {
+      (function(Prism2) {
+        var string = /(?:"(?:\\(?:\r\n|[\s\S])|[^"\\\r\n])*"|'(?:\\(?:\r\n|[\s\S])|[^'\\\r\n])*')/;
+        Prism2.languages.css = {
+          "comment": /\/\*[\s\S]*?\*\//,
+          "atrule": {
+            pattern: RegExp("@[\\w-](?:" + /[^;{\s"']|\s+(?!\s)/.source + "|" + string.source + ")*?" + /(?:;|(?=\s*\{))/.source),
+            inside: {
+              "rule": /^@[\w-]+/,
+              "selector-function-argument": {
+                pattern: /(\bselector\s*\(\s*(?![\s)]))(?:[^()\s]|\s+(?![\s)])|\((?:[^()]|\([^()]*\))*\))+(?=\s*\))/,
+                lookbehind: true,
+                alias: "selector"
+              },
+              "keyword": {
+                pattern: /(^|[^\w-])(?:and|not|only|or)(?![\w-])/,
+                lookbehind: true
+              }
+              // See rest below
+            }
+          },
+          "url": {
+            // https://drafts.csswg.org/css-values-3/#urls
+            pattern: RegExp("\\burl\\((?:" + string.source + "|" + /(?:[^\\\r\n()"']|\\[\s\S])*/.source + ")\\)", "i"),
+            greedy: true,
+            inside: {
+              "function": /^url/i,
+              "punctuation": /^\(|\)$/,
+              "string": {
+                pattern: RegExp("^" + string.source + "$"),
+                alias: "url"
+              }
+            }
+          },
+          "selector": {
+            pattern: RegExp(`(^|[{}\\s])[^{}\\s](?:[^{};"'\\s]|\\s+(?![\\s{])|` + string.source + ")*(?=\\s*\\{)"),
+            lookbehind: true
+          },
+          "string": {
+            pattern: string,
+            greedy: true
+          },
+          "property": {
+            pattern: /(^|[^-\w\xA0-\uFFFF])(?!\s)[-_a-z\xA0-\uFFFF](?:(?!\s)[-\w\xA0-\uFFFF])*(?=\s*:)/i,
+            lookbehind: true
+          },
+          "important": /!important\b/i,
+          "function": {
+            pattern: /(^|[^-a-z0-9])[-a-z0-9]+(?=\()/i,
+            lookbehind: true
+          },
+          "punctuation": /[(){};:,]/
+        };
+        Prism2.languages.css["atrule"].inside.rest = Prism2.languages.css;
+        var markup = Prism2.languages.markup;
+        if (markup) {
+          markup.tag.addInlined("style", "css");
+          markup.tag.addAttribute("style", "css");
+        }
+      })(Prism);
+    }
+  });
+
+  // node_modules/prismjs/components/prism-clike.js
+  var require_prism_clike = __commonJS({
+    "node_modules/prismjs/components/prism-clike.js"() {
+      Prism.languages.clike = {
+        "comment": [
+          {
+            pattern: /(^|[^\\])\/\*[\s\S]*?(?:\*\/|$)/,
+            lookbehind: true,
+            greedy: true
+          },
+          {
+            pattern: /(^|[^\\:])\/\/.*/,
+            lookbehind: true,
+            greedy: true
+          }
+        ],
+        "string": {
+          pattern: /(["'])(?:\\(?:\r\n|[\s\S])|(?!\1)[^\\\r\n])*\1/,
+          greedy: true
+        },
+        "class-name": {
+          pattern: /(\b(?:class|extends|implements|instanceof|interface|new|trait)\s+|\bcatch\s+\()[\w.\\]+/i,
+          lookbehind: true,
+          inside: {
+            "punctuation": /[.\\]/
+          }
+        },
+        "keyword": /\b(?:break|catch|continue|do|else|finally|for|function|if|in|instanceof|new|null|return|throw|try|while)\b/,
+        "boolean": /\b(?:false|true)\b/,
+        "function": /\b\w+(?=\()/,
+        "number": /\b0x[\da-f]+\b|(?:\b\d+(?:\.\d*)?|\B\.\d+)(?:e[+-]?\d+)?/i,
+        "operator": /[<>]=?|[!=]=?=?|--?|\+\+?|&&?|\|\|?|[?*/~^%]/,
+        "punctuation": /[{}[\];(),.:]/
+      };
+    }
+  });
+
+  // node_modules/prismjs/components/prism-javascript.js
+  var require_prism_javascript = __commonJS({
+    "node_modules/prismjs/components/prism-javascript.js"() {
+      Prism.languages.javascript = Prism.languages.extend("clike", {
+        "class-name": [
+          Prism.languages.clike["class-name"],
+          {
+            pattern: /(^|[^$\w\xA0-\uFFFF])(?!\s)[_$A-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?=\.(?:constructor|prototype))/,
+            lookbehind: true
+          }
+        ],
+        "keyword": [
+          {
+            pattern: /((?:^|\})\s*)catch\b/,
+            lookbehind: true
+          },
+          {
+            pattern: /(^|[^.]|\.\.\.\s*)\b(?:as|assert(?=\s*\{)|async(?=\s*(?:function\b|\(|[$\w\xA0-\uFFFF]|$))|await|break|case|class|const|continue|debugger|default|delete|do|else|enum|export|extends|finally(?=\s*(?:\{|$))|for|from(?=\s*(?:['"]|$))|function|(?:get|set)(?=\s*(?:[#\[$\w\xA0-\uFFFF]|$))|if|implements|import|in|instanceof|interface|let|new|null|of|package|private|protected|public|return|static|super|switch|this|throw|try|typeof|undefined|var|void|while|with|yield)\b/,
+            lookbehind: true
+          }
+        ],
+        // Allow for all non-ASCII characters (See http://stackoverflow.com/a/2008444)
+        "function": /#?(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?=\s*(?:\.\s*(?:apply|bind|call)\s*)?\()/,
+        "number": {
+          pattern: RegExp(
+            /(^|[^\w$])/.source + "(?:" + // constant
+            (/NaN|Infinity/.source + "|" + // binary integer
+            /0[bB][01]+(?:_[01]+)*n?/.source + "|" + // octal integer
+            /0[oO][0-7]+(?:_[0-7]+)*n?/.source + "|" + // hexadecimal integer
+            /0[xX][\dA-Fa-f]+(?:_[\dA-Fa-f]+)*n?/.source + "|" + // decimal bigint
+            /\d+(?:_\d+)*n/.source + "|" + // decimal number (integer or float) but no bigint
+            /(?:\d+(?:_\d+)*(?:\.(?:\d+(?:_\d+)*)?)?|\.\d+(?:_\d+)*)(?:[Ee][+-]?\d+(?:_\d+)*)?/.source) + ")" + /(?![\w$])/.source
+          ),
+          lookbehind: true
+        },
+        "operator": /--|\+\+|\*\*=?|=>|&&=?|\|\|=?|[!=]==|<<=?|>>>?=?|[-+*/%&|^!=<>]=?|\.{3}|\?\?=?|\?\.?|[~:]/
+      });
+      Prism.languages.javascript["class-name"][0].pattern = /(\b(?:class|extends|implements|instanceof|interface|new)\s+)[\w.\\]+/;
+      Prism.languages.insertBefore("javascript", "keyword", {
+        "regex": {
+          pattern: RegExp(
+            // lookbehind
+            // eslint-disable-next-line regexp/no-dupe-characters-character-class
+            /((?:^|[^$\w\xA0-\uFFFF."'\])\s]|\b(?:return|yield))\s*)/.source + // Regex pattern:
+            // There are 2 regex patterns here. The RegExp set notation proposal added support for nested character
+            // classes if the `v` flag is present. Unfortunately, nested CCs are both context-free and incompatible
+            // with the only syntax, so we have to define 2 different regex patterns.
+            /\//.source + "(?:" + /(?:\[(?:[^\]\\\r\n]|\\.)*\]|\\.|[^/\\\[\r\n])+\/[dgimyus]{0,7}/.source + "|" + // `v` flag syntax. This supports 3 levels of nested character classes.
+            /(?:\[(?:[^[\]\\\r\n]|\\.|\[(?:[^[\]\\\r\n]|\\.|\[(?:[^[\]\\\r\n]|\\.)*\])*\])*\]|\\.|[^/\\\[\r\n])+\/[dgimyus]{0,7}v[dgimyus]{0,7}/.source + ")" + // lookahead
+            /(?=(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/)*(?:$|[\r\n,.;:})\]]|\/\/))/.source
+          ),
+          lookbehind: true,
+          greedy: true,
+          inside: {
+            "regex-source": {
+              pattern: /^(\/)[\s\S]+(?=\/[a-z]*$)/,
+              lookbehind: true,
+              alias: "language-regex",
+              inside: Prism.languages.regex
+            },
+            "regex-delimiter": /^\/|\/$/,
+            "regex-flags": /^[a-z]+$/
+          }
+        },
+        // This must be declared before keyword because we use "function" inside the look-forward
+        "function-variable": {
+          pattern: /#?(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?=\s*[=:]\s*(?:async\s*)?(?:\bfunction\b|(?:\((?:[^()]|\([^()]*\))*\)|(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*)\s*=>))/,
+          alias: "function"
+        },
+        "parameter": [
+          {
+            pattern: /(function(?:\s+(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*)?\s*\(\s*)(?!\s)(?:[^()\s]|\s+(?![\s)])|\([^()]*\))+(?=\s*\))/,
+            lookbehind: true,
+            inside: Prism.languages.javascript
+          },
+          {
+            pattern: /(^|[^$\w\xA0-\uFFFF])(?!\s)[_$a-z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?=\s*=>)/i,
+            lookbehind: true,
+            inside: Prism.languages.javascript
+          },
+          {
+            pattern: /(\(\s*)(?!\s)(?:[^()\s]|\s+(?![\s)])|\([^()]*\))+(?=\s*\)\s*=>)/,
+            lookbehind: true,
+            inside: Prism.languages.javascript
+          },
+          {
+            pattern: /((?:\b|\s|^)(?!(?:as|async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|enum|export|extends|finally|for|from|function|get|if|implements|import|in|instanceof|interface|let|new|null|of|package|private|protected|public|return|set|static|super|switch|this|throw|try|typeof|undefined|var|void|while|with|yield)(?![$\w\xA0-\uFFFF]))(?:(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*\s*)\(\s*|\]\s*\(\s*)(?!\s)(?:[^()\s]|\s+(?![\s)])|\([^()]*\))+(?=\s*\)\s*\{)/,
+            lookbehind: true,
+            inside: Prism.languages.javascript
+          }
+        ],
+        "constant": /\b[A-Z](?:[A-Z_]|\dx?)*\b/
+      });
+      Prism.languages.insertBefore("javascript", "string", {
+        "hashbang": {
+          pattern: /^#!.*/,
+          greedy: true,
+          alias: "comment"
+        },
+        "template-string": {
+          pattern: /`(?:\\[\s\S]|\$\{(?:[^{}]|\{(?:[^{}]|\{[^}]*\})*\})+\}|(?!\$\{)[^\\`])*`/,
+          greedy: true,
+          inside: {
+            "template-punctuation": {
+              pattern: /^`|`$/,
+              alias: "string"
+            },
+            "interpolation": {
+              pattern: /((?:^|[^\\])(?:\\{2})*)\$\{(?:[^{}]|\{(?:[^{}]|\{[^}]*\})*\})+\}/,
+              lookbehind: true,
+              inside: {
+                "interpolation-punctuation": {
+                  pattern: /^\$\{|\}$/,
+                  alias: "punctuation"
+                },
+                rest: Prism.languages.javascript
+              }
+            },
+            "string": /[\s\S]+/
+          }
+        },
+        "string-property": {
+          pattern: /((?:^|[,{])[ \t]*)(["'])(?:\\(?:\r\n|[\s\S])|(?!\2)[^\\\r\n])*\2(?=\s*:)/m,
+          lookbehind: true,
+          greedy: true,
+          alias: "property"
+        }
+      });
+      Prism.languages.insertBefore("javascript", "operator", {
+        "literal-property": {
+          pattern: /((?:^|[,{])[ \t]*)(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?=\s*:)/m,
+          lookbehind: true,
+          alias: "property"
+        }
+      });
+      if (Prism.languages.markup) {
+        Prism.languages.markup.tag.addInlined("script", "javascript");
+        Prism.languages.markup.tag.addAttribute(
+          /on(?:abort|blur|change|click|composition(?:end|start|update)|dblclick|error|focus(?:in|out)?|key(?:down|up)|load|mouse(?:down|enter|leave|move|out|over|up)|reset|resize|scroll|select|slotchange|submit|unload|wheel)/.source,
+          "javascript"
+        );
+      }
+      Prism.languages.js = Prism.languages.javascript;
+    }
+  });
+
+  // node_modules/prismjs/components/prism-rust.js
+  var require_prism_rust = __commonJS({
+    "node_modules/prismjs/components/prism-rust.js"() {
+      (function(Prism2) {
+        var multilineComment = /\/\*(?:[^*/]|\*(?!\/)|\/(?!\*)|<self>)*\*\//.source;
+        for (var i4 = 0; i4 < 2; i4++) {
+          multilineComment = multilineComment.replace(/<self>/g, function() {
+            return multilineComment;
+          });
+        }
+        multilineComment = multilineComment.replace(/<self>/g, function() {
+          return /[^\s\S]/.source;
+        });
+        Prism2.languages.rust = {
+          "comment": [
+            {
+              pattern: RegExp(/(^|[^\\])/.source + multilineComment),
+              lookbehind: true,
+              greedy: true
+            },
+            {
+              pattern: /(^|[^\\:])\/\/.*/,
+              lookbehind: true,
+              greedy: true
+            }
+          ],
+          "string": {
+            pattern: /b?"(?:\\[\s\S]|[^\\"])*"|b?r(#*)"(?:[^"]|"(?!\1))*"\1/,
+            greedy: true
+          },
+          "char": {
+            pattern: /b?'(?:\\(?:x[0-7][\da-fA-F]|u\{(?:[\da-fA-F]_*){1,6}\}|.)|[^\\\r\n\t'])'/,
+            greedy: true
+          },
+          "attribute": {
+            pattern: /#!?\[(?:[^\[\]"]|"(?:\\[\s\S]|[^\\"])*")*\]/,
+            greedy: true,
+            alias: "attr-name",
+            inside: {
+              "string": null
+              // see below
+            }
+          },
+          // Closure params should not be confused with bitwise OR |
+          "closure-params": {
+            pattern: /([=(,:]\s*|\bmove\s*)\|[^|]*\||\|[^|]*\|(?=\s*(?:\{|->))/,
+            lookbehind: true,
+            greedy: true,
+            inside: {
+              "closure-punctuation": {
+                pattern: /^\||\|$/,
+                alias: "punctuation"
+              },
+              rest: null
+              // see below
+            }
+          },
+          "lifetime-annotation": {
+            pattern: /'\w+/,
+            alias: "symbol"
+          },
+          "fragment-specifier": {
+            pattern: /(\$\w+:)[a-z]+/,
+            lookbehind: true,
+            alias: "punctuation"
+          },
+          "variable": /\$\w+/,
+          "function-definition": {
+            pattern: /(\bfn\s+)\w+/,
+            lookbehind: true,
+            alias: "function"
+          },
+          "type-definition": {
+            pattern: /(\b(?:enum|struct|trait|type|union)\s+)\w+/,
+            lookbehind: true,
+            alias: "class-name"
+          },
+          "module-declaration": [
+            {
+              pattern: /(\b(?:crate|mod)\s+)[a-z][a-z_\d]*/,
+              lookbehind: true,
+              alias: "namespace"
+            },
+            {
+              pattern: /(\b(?:crate|self|super)\s*)::\s*[a-z][a-z_\d]*\b(?:\s*::(?:\s*[a-z][a-z_\d]*\s*::)*)?/,
+              lookbehind: true,
+              alias: "namespace",
+              inside: {
+                "punctuation": /::/
+              }
+            }
+          ],
+          "keyword": [
+            // https://github.com/rust-lang/reference/blob/master/src/keywords.md
+            /\b(?:Self|abstract|as|async|await|become|box|break|const|continue|crate|do|dyn|else|enum|extern|final|fn|for|if|impl|in|let|loop|macro|match|mod|move|mut|override|priv|pub|ref|return|self|static|struct|super|trait|try|type|typeof|union|unsafe|unsized|use|virtual|where|while|yield)\b/,
+            // primitives and str
+            // https://doc.rust-lang.org/stable/rust-by-example/primitives.html
+            /\b(?:bool|char|f(?:32|64)|[ui](?:8|16|32|64|128|size)|str)\b/
+          ],
+          // functions can technically start with an upper-case letter, but this will introduce a lot of false positives
+          // and Rust's naming conventions recommend snake_case anyway.
+          // https://doc.rust-lang.org/1.0.0/style/style/naming/README.html
+          "function": /\b[a-z_]\w*(?=\s*(?:::\s*<|\())/,
+          "macro": {
+            pattern: /\b\w+!/,
+            alias: "property"
+          },
+          "constant": /\b[A-Z_][A-Z_\d]+\b/,
+          "class-name": /\b[A-Z]\w*\b/,
+          "namespace": {
+            pattern: /(?:\b[a-z][a-z_\d]*\s*::\s*)*\b[a-z][a-z_\d]*\s*::(?!\s*<)/,
+            inside: {
+              "punctuation": /::/
+            }
+          },
+          // Hex, oct, bin, dec numbers with visual separators and type suffix
+          "number": /\b(?:0x[\dA-Fa-f](?:_?[\dA-Fa-f])*|0o[0-7](?:_?[0-7])*|0b[01](?:_?[01])*|(?:(?:\d(?:_?\d)*)?\.)?\d(?:_?\d)*(?:[Ee][+-]?\d+)?)(?:_?(?:f32|f64|[iu](?:8|16|32|64|size)?))?\b/,
+          "boolean": /\b(?:false|true)\b/,
+          "punctuation": /->|\.\.=|\.{1,3}|::|[{}[\];(),:]/,
+          "operator": /[-+*\/%!^]=?|=[=>]?|&[&=]?|\|[|=]?|<<?=?|>>?=?|[@?]/
+        };
+        Prism2.languages.rust["closure-params"].inside.rest = Prism2.languages.rust;
+        Prism2.languages.rust["attribute"].inside["string"] = Prism2.languages.rust["string"];
+      })(Prism);
+    }
+  });
+
+  // node_modules/prismjs/components/prism-python.js
+  var require_prism_python = __commonJS({
+    "node_modules/prismjs/components/prism-python.js"() {
+      Prism.languages.python = {
+        "comment": {
+          pattern: /(^|[^\\])#.*/,
+          lookbehind: true,
+          greedy: true
+        },
+        "string-interpolation": {
+          pattern: /(?:f|fr|rf)(?:("""|''')[\s\S]*?\1|("|')(?:\\.|(?!\2)[^\\\r\n])*\2)/i,
+          greedy: true,
+          inside: {
+            "interpolation": {
+              // "{" <expression> <optional "!s", "!r", or "!a"> <optional ":" format specifier> "}"
+              pattern: /((?:^|[^{])(?:\{\{)*)\{(?!\{)(?:[^{}]|\{(?!\{)(?:[^{}]|\{(?!\{)(?:[^{}])+\})+\})+\}/,
+              lookbehind: true,
+              inside: {
+                "format-spec": {
+                  pattern: /(:)[^:(){}]+(?=\}$)/,
+                  lookbehind: true
+                },
+                "conversion-option": {
+                  pattern: /![sra](?=[:}]$)/,
+                  alias: "punctuation"
+                },
+                rest: null
+              }
+            },
+            "string": /[\s\S]+/
+          }
+        },
+        "triple-quoted-string": {
+          pattern: /(?:[rub]|br|rb)?("""|''')[\s\S]*?\1/i,
+          greedy: true,
+          alias: "string"
+        },
+        "string": {
+          pattern: /(?:[rub]|br|rb)?("|')(?:\\.|(?!\1)[^\\\r\n])*\1/i,
+          greedy: true
+        },
+        "function": {
+          pattern: /((?:^|\s)def[ \t]+)[a-zA-Z_]\w*(?=\s*\()/g,
+          lookbehind: true
+        },
+        "class-name": {
+          pattern: /(\bclass\s+)\w+/i,
+          lookbehind: true
+        },
+        "decorator": {
+          pattern: /(^[\t ]*)@\w+(?:\.\w+)*/m,
+          lookbehind: true,
+          alias: ["annotation", "punctuation"],
+          inside: {
+            "punctuation": /\./
+          }
+        },
+        "keyword": /\b(?:_(?=\s*:)|and|as|assert|async|await|break|case|class|continue|def|del|elif|else|except|exec|finally|for|from|global|if|import|in|is|lambda|match|nonlocal|not|or|pass|print|raise|return|try|while|with|yield)\b/,
+        "builtin": /\b(?:__import__|abs|all|any|apply|ascii|basestring|bin|bool|buffer|bytearray|bytes|callable|chr|classmethod|cmp|coerce|compile|complex|delattr|dict|dir|divmod|enumerate|eval|execfile|file|filter|float|format|frozenset|getattr|globals|hasattr|hash|help|hex|id|input|int|intern|isinstance|issubclass|iter|len|list|locals|long|map|max|memoryview|min|next|object|oct|open|ord|pow|property|range|raw_input|reduce|reload|repr|reversed|round|set|setattr|slice|sorted|staticmethod|str|sum|super|tuple|type|unichr|unicode|vars|xrange|zip)\b/,
+        "boolean": /\b(?:False|None|True)\b/,
+        "number": /\b0(?:b(?:_?[01])+|o(?:_?[0-7])+|x(?:_?[a-f0-9])+)\b|(?:\b\d+(?:_\d+)*(?:\.(?:\d+(?:_\d+)*)?)?|\B\.\d+(?:_\d+)*)(?:e[+-]?\d+(?:_\d+)*)?j?(?!\w)/i,
+        "operator": /[-+%=]=?|!=|:=|\*\*?=?|\/\/?=?|<[<=>]?|>[=>]?|[&|^~]/,
+        "punctuation": /[{}[\];(),.:]/
+      };
+      Prism.languages.python["string-interpolation"].inside["interpolation"].inside.rest = Prism.languages.python;
+      Prism.languages.py = Prism.languages.python;
+    }
+  });
+
+  // node_modules/prismjs/components/prism-bash.js
+  var require_prism_bash = __commonJS({
+    "node_modules/prismjs/components/prism-bash.js"() {
+      (function(Prism2) {
+        var envVars = "\\b(?:BASH|BASHOPTS|BASH_ALIASES|BASH_ARGC|BASH_ARGV|BASH_CMDS|BASH_COMPLETION_COMPAT_DIR|BASH_LINENO|BASH_REMATCH|BASH_SOURCE|BASH_VERSINFO|BASH_VERSION|COLORTERM|COLUMNS|COMP_WORDBREAKS|DBUS_SESSION_BUS_ADDRESS|DEFAULTS_PATH|DESKTOP_SESSION|DIRSTACK|DISPLAY|EUID|GDMSESSION|GDM_LANG|GNOME_KEYRING_CONTROL|GNOME_KEYRING_PID|GPG_AGENT_INFO|GROUPS|HISTCONTROL|HISTFILE|HISTFILESIZE|HISTSIZE|HOME|HOSTNAME|HOSTTYPE|IFS|INSTANCE|JOB|LANG|LANGUAGE|LC_ADDRESS|LC_ALL|LC_IDENTIFICATION|LC_MEASUREMENT|LC_MONETARY|LC_NAME|LC_NUMERIC|LC_PAPER|LC_TELEPHONE|LC_TIME|LESSCLOSE|LESSOPEN|LINES|LOGNAME|LS_COLORS|MACHTYPE|MAILCHECK|MANDATORY_PATH|NO_AT_BRIDGE|OLDPWD|OPTERR|OPTIND|ORBIT_SOCKETDIR|OSTYPE|PAPERSIZE|PATH|PIPESTATUS|PPID|PS1|PS2|PS3|PS4|PWD|RANDOM|REPLY|SECONDS|SELINUX_INIT|SESSION|SESSIONTYPE|SESSION_MANAGER|SHELL|SHELLOPTS|SHLVL|SSH_AUTH_SOCK|TERM|UID|UPSTART_EVENTS|UPSTART_INSTANCE|UPSTART_JOB|UPSTART_SESSION|USER|WINDOWID|XAUTHORITY|XDG_CONFIG_DIRS|XDG_CURRENT_DESKTOP|XDG_DATA_DIRS|XDG_GREETER_DATA_DIR|XDG_MENU_PREFIX|XDG_RUNTIME_DIR|XDG_SEAT|XDG_SEAT_PATH|XDG_SESSION_DESKTOP|XDG_SESSION_ID|XDG_SESSION_PATH|XDG_SESSION_TYPE|XDG_VTNR|XMODIFIERS)\\b";
+        var commandAfterHeredoc = {
+          pattern: /(^(["']?)\w+\2)[ \t]+\S.*/,
+          lookbehind: true,
+          alias: "punctuation",
+          // this looks reasonably well in all themes
+          inside: null
+          // see below
+        };
+        var insideString = {
+          "bash": commandAfterHeredoc,
+          "environment": {
+            pattern: RegExp("\\$" + envVars),
+            alias: "constant"
+          },
+          "variable": [
+            // [0]: Arithmetic Environment
+            {
+              pattern: /\$?\(\([\s\S]+?\)\)/,
+              greedy: true,
+              inside: {
+                // If there is a $ sign at the beginning highlight $(( and )) as variable
+                "variable": [
+                  {
+                    pattern: /(^\$\(\([\s\S]+)\)\)/,
+                    lookbehind: true
+                  },
+                  /^\$\(\(/
+                ],
+                "number": /\b0x[\dA-Fa-f]+\b|(?:\b\d+(?:\.\d*)?|\B\.\d+)(?:[Ee]-?\d+)?/,
+                // Operators according to https://www.gnu.org/software/bash/manual/bashref.html#Shell-Arithmetic
+                "operator": /--|\+\+|\*\*=?|<<=?|>>=?|&&|\|\||[=!+\-*/%<>^&|]=?|[?~:]/,
+                // If there is no $ sign at the beginning highlight (( and )) as punctuation
+                "punctuation": /\(\(?|\)\)?|,|;/
+              }
+            },
+            // [1]: Command Substitution
+            {
+              pattern: /\$\((?:\([^)]+\)|[^()])+\)|`[^`]+`/,
+              greedy: true,
+              inside: {
+                "variable": /^\$\(|^`|\)$|`$/
+              }
+            },
+            // [2]: Brace expansion
+            {
+              pattern: /\$\{[^}]+\}/,
+              greedy: true,
+              inside: {
+                "operator": /:[-=?+]?|[!\/]|##?|%%?|\^\^?|,,?/,
+                "punctuation": /[\[\]]/,
+                "environment": {
+                  pattern: RegExp("(\\{)" + envVars),
+                  lookbehind: true,
+                  alias: "constant"
+                }
+              }
+            },
+            /\$(?:\w+|[#?*!@$])/
+          ],
+          // Escape sequences from echo and printf's manuals, and escaped quotes.
+          "entity": /\\(?:[abceEfnrtv\\"]|O?[0-7]{1,3}|U[0-9a-fA-F]{8}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{1,2})/
+        };
+        Prism2.languages.bash = {
+          "shebang": {
+            pattern: /^#!\s*\/.*/,
+            alias: "important"
+          },
+          "comment": {
+            pattern: /(^|[^"{\\$])#.*/,
+            lookbehind: true
+          },
+          "function-name": [
+            // a) function foo {
+            // b) foo() {
+            // c) function foo() {
+            // but not “foo {”
+            {
+              // a) and c)
+              pattern: /(\bfunction\s+)[\w-]+(?=(?:\s*\(?:\s*\))?\s*\{)/,
+              lookbehind: true,
+              alias: "function"
+            },
+            {
+              // b)
+              pattern: /\b[\w-]+(?=\s*\(\s*\)\s*\{)/,
+              alias: "function"
+            }
+          ],
+          // Highlight variable names as variables in for and select beginnings.
+          "for-or-select": {
+            pattern: /(\b(?:for|select)\s+)\w+(?=\s+in\s)/,
+            alias: "variable",
+            lookbehind: true
+          },
+          // Highlight variable names as variables in the left-hand part
+          // of assignments (“=” and “+=”).
+          "assign-left": {
+            pattern: /(^|[\s;|&]|[<>]\()\w+(?:\.\w+)*(?=\+?=)/,
+            inside: {
+              "environment": {
+                pattern: RegExp("(^|[\\s;|&]|[<>]\\()" + envVars),
+                lookbehind: true,
+                alias: "constant"
+              }
+            },
+            alias: "variable",
+            lookbehind: true
+          },
+          // Highlight parameter names as variables
+          "parameter": {
+            pattern: /(^|\s)-{1,2}(?:\w+:[+-]?)?\w+(?:\.\w+)*(?=[=\s]|$)/,
+            alias: "variable",
+            lookbehind: true
+          },
+          "string": [
+            // Support for Here-documents https://en.wikipedia.org/wiki/Here_document
+            {
+              pattern: /((?:^|[^<])<<-?\s*)(\w+)\s[\s\S]*?(?:\r?\n|\r)\2/,
+              lookbehind: true,
+              greedy: true,
+              inside: insideString
+            },
+            // Here-document with quotes around the tag
+            // → No expansion (so no “inside”).
+            {
+              pattern: /((?:^|[^<])<<-?\s*)(["'])(\w+)\2\s[\s\S]*?(?:\r?\n|\r)\3/,
+              lookbehind: true,
+              greedy: true,
+              inside: {
+                "bash": commandAfterHeredoc
+              }
+            },
+            // “Normal” string
+            {
+              // https://www.gnu.org/software/bash/manual/html_node/Double-Quotes.html
+              pattern: /(^|[^\\](?:\\\\)*)"(?:\\[\s\S]|\$\([^)]+\)|\$(?!\()|`[^`]+`|[^"\\`$])*"/,
+              lookbehind: true,
+              greedy: true,
+              inside: insideString
+            },
+            {
+              // https://www.gnu.org/software/bash/manual/html_node/Single-Quotes.html
+              pattern: /(^|[^$\\])'[^']*'/,
+              lookbehind: true,
+              greedy: true
+            },
+            {
+              // https://www.gnu.org/software/bash/manual/html_node/ANSI_002dC-Quoting.html
+              pattern: /\$'(?:[^'\\]|\\[\s\S])*'/,
+              greedy: true,
+              inside: {
+                "entity": insideString.entity
+              }
+            }
+          ],
+          "environment": {
+            pattern: RegExp("\\$?" + envVars),
+            alias: "constant"
+          },
+          "variable": insideString.variable,
+          "function": {
+            pattern: /(^|[\s;|&]|[<>]\()(?:add|apropos|apt|apt-cache|apt-get|aptitude|aspell|automysqlbackup|awk|basename|bash|bc|bconsole|bg|bzip2|cal|cargo|cat|cfdisk|chgrp|chkconfig|chmod|chown|chroot|cksum|clear|cmp|column|comm|composer|cp|cron|crontab|csplit|curl|cut|date|dc|dd|ddrescue|debootstrap|df|diff|diff3|dig|dir|dircolors|dirname|dirs|dmesg|docker|docker-compose|du|egrep|eject|env|ethtool|expand|expect|expr|fdformat|fdisk|fg|fgrep|file|find|fmt|fold|format|free|fsck|ftp|fuser|gawk|git|gparted|grep|groupadd|groupdel|groupmod|groups|grub-mkconfig|gzip|halt|head|hg|history|host|hostname|htop|iconv|id|ifconfig|ifdown|ifup|import|install|ip|java|jobs|join|kill|killall|less|link|ln|locate|logname|logrotate|look|lpc|lpr|lprint|lprintd|lprintq|lprm|ls|lsof|lynx|make|man|mc|mdadm|mkconfig|mkdir|mke2fs|mkfifo|mkfs|mkisofs|mknod|mkswap|mmv|more|most|mount|mtools|mtr|mutt|mv|nano|nc|netstat|nice|nl|node|nohup|notify-send|npm|nslookup|op|open|parted|passwd|paste|pathchk|ping|pkill|pnpm|podman|podman-compose|popd|pr|printcap|printenv|ps|pushd|pv|quota|quotacheck|quotactl|ram|rar|rcp|reboot|remsync|rename|renice|rev|rm|rmdir|rpm|rsync|scp|screen|sdiff|sed|sendmail|seq|service|sftp|sh|shellcheck|shuf|shutdown|sleep|slocate|sort|split|ssh|stat|strace|su|sudo|sum|suspend|swapon|sync|sysctl|tac|tail|tar|tee|time|timeout|top|touch|tr|traceroute|tsort|tty|umount|uname|unexpand|uniq|units|unrar|unshar|unzip|update-grub|uptime|useradd|userdel|usermod|users|uudecode|uuencode|v|vcpkg|vdir|vi|vim|virsh|vmstat|wait|watch|wc|wget|whereis|which|who|whoami|write|xargs|xdg-open|yarn|yes|zenity|zip|zsh|zypper)(?=$|[)\s;|&])/,
+            lookbehind: true
+          },
+          "keyword": {
+            pattern: /(^|[\s;|&]|[<>]\()(?:case|do|done|elif|else|esac|fi|for|function|if|in|select|then|until|while)(?=$|[)\s;|&])/,
+            lookbehind: true
+          },
+          // https://www.gnu.org/software/bash/manual/html_node/Shell-Builtin-Commands.html
+          "builtin": {
+            pattern: /(^|[\s;|&]|[<>]\()(?:\.|:|alias|bind|break|builtin|caller|cd|command|continue|declare|echo|enable|eval|exec|exit|export|getopts|hash|help|let|local|logout|mapfile|printf|pwd|read|readarray|readonly|return|set|shift|shopt|source|test|times|trap|type|typeset|ulimit|umask|unalias|unset)(?=$|[)\s;|&])/,
+            lookbehind: true,
+            // Alias added to make those easier to distinguish from strings.
+            alias: "class-name"
+          },
+          "boolean": {
+            pattern: /(^|[\s;|&]|[<>]\()(?:false|true)(?=$|[)\s;|&])/,
+            lookbehind: true
+          },
+          "file-descriptor": {
+            pattern: /\B&\d\b/,
+            alias: "important"
+          },
+          "operator": {
+            // Lots of redirections here, but not just that.
+            pattern: /\d?<>|>\||\+=|=[=~]?|!=?|<<[<-]?|[&\d]?>>|\d[<>]&?|[<>][&=]?|&[>&]?|\|[&|]?/,
+            inside: {
+              "file-descriptor": {
+                pattern: /^\d/,
+                alias: "important"
+              }
+            }
+          },
+          "punctuation": /\$?\(\(?|\)\)?|\.\.|[{}[\];\\]/,
+          "number": {
+            pattern: /(^|\s)(?:[1-9]\d*|0)(?:[.,]\d+)?\b/,
+            lookbehind: true
+          }
+        };
+        commandAfterHeredoc.inside = Prism2.languages.bash;
+        var toBeCopied = [
+          "comment",
+          "function-name",
+          "for-or-select",
+          "assign-left",
+          "parameter",
+          "string",
+          "environment",
+          "function",
+          "keyword",
+          "builtin",
+          "boolean",
+          "file-descriptor",
+          "operator",
+          "punctuation",
+          "number"
+        ];
+        var inside = insideString.variable[1].inside;
+        for (var i4 = 0; i4 < toBeCopied.length; i4++) {
+          inside[toBeCopied[i4]] = Prism2.languages.bash[toBeCopied[i4]];
+        }
+        Prism2.languages.sh = Prism2.languages.bash;
+        Prism2.languages.shell = Prism2.languages.bash;
+      })(Prism);
+    }
+  });
+
+  // node_modules/prismjs/components/prism-json.js
+  var require_prism_json = __commonJS({
+    "node_modules/prismjs/components/prism-json.js"() {
+      Prism.languages.json = {
+        "property": {
+          pattern: /(^|[^\\])"(?:\\.|[^\\"\r\n])*"(?=\s*:)/,
+          lookbehind: true,
+          greedy: true
+        },
+        "string": {
+          pattern: /(^|[^\\])"(?:\\.|[^\\"\r\n])*"(?!\s*:)/,
+          lookbehind: true,
+          greedy: true
+        },
+        "comment": {
+          pattern: /\/\/.*|\/\*[\s\S]*?(?:\*\/|$)/,
+          greedy: true
+        },
+        "number": /-?\b\d+(?:\.\d+)?(?:e[+-]?\d+)?\b/i,
+        "punctuation": /[{}[\],]/,
+        "operator": /:/,
+        "boolean": /\b(?:false|true)\b/,
+        "null": {
+          pattern: /\bnull\b/,
+          alias: "keyword"
+        }
+      };
+      Prism.languages.webmanifest = Prism.languages.json;
+    }
+  });
+
+  // node_modules/prismjs/components/prism-typescript.js
+  var require_prism_typescript = __commonJS({
+    "node_modules/prismjs/components/prism-typescript.js"() {
+      (function(Prism2) {
+        Prism2.languages.typescript = Prism2.languages.extend("javascript", {
+          "class-name": {
+            pattern: /(\b(?:class|extends|implements|instanceof|interface|new|type)\s+)(?!keyof\b)(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*(?:\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?/,
+            lookbehind: true,
+            greedy: true,
+            inside: null
+            // see below
+          },
+          "builtin": /\b(?:Array|Function|Promise|any|boolean|console|never|number|string|symbol|unknown)\b/
+        });
+        Prism2.languages.typescript.keyword.push(
+          /\b(?:abstract|declare|is|keyof|readonly|require)\b/,
+          // keywords that have to be followed by an identifier
+          /\b(?:asserts|infer|interface|module|namespace|type)\b(?=\s*(?:[{_$a-zA-Z\xA0-\uFFFF]|$))/,
+          // This is for `import type *, {}`
+          /\btype\b(?=\s*(?:[\{*]|$))/
+        );
+        delete Prism2.languages.typescript["parameter"];
+        delete Prism2.languages.typescript["literal-property"];
+        var typeInside = Prism2.languages.extend("typescript", {});
+        delete typeInside["class-name"];
+        Prism2.languages.typescript["class-name"].inside = typeInside;
+        Prism2.languages.insertBefore("typescript", "function", {
+          "decorator": {
+            pattern: /@[$\w\xA0-\uFFFF]+/,
+            inside: {
+              "at": {
+                pattern: /^@/,
+                alias: "operator"
+              },
+              "function": /^[\s\S]+/
+            }
+          },
+          "generic-function": {
+            // e.g. foo<T extends "bar" | "baz">( ...
+            pattern: /#?(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>(?=\s*\()/,
+            greedy: true,
+            inside: {
+              "function": /^#?(?!\s)[_$a-zA-Z\xA0-\uFFFF](?:(?!\s)[$\w\xA0-\uFFFF])*/,
+              "generic": {
+                pattern: /<[\s\S]+/,
+                // everything after the first <
+                alias: "class-name",
+                inside: typeInside
+              }
+            }
+          }
+        });
+        Prism2.languages.ts = Prism2.languages.typescript;
+      })(Prism);
+    }
+  });
+
+  // node_modules/prismjs/components/prism-diff.js
+  var require_prism_diff = __commonJS({
+    "node_modules/prismjs/components/prism-diff.js"() {
+      (function(Prism2) {
+        Prism2.languages.diff = {
+          "coord": [
+            // Match all kinds of coord lines (prefixed by "+++", "---" or "***").
+            /^(?:\*{3}|-{3}|\+{3}).*$/m,
+            // Match "@@ ... @@" coord lines in unified diff.
+            /^@@.*@@$/m,
+            // Match coord lines in normal diff (starts with a number).
+            /^\d.*$/m
+          ]
+          // deleted, inserted, unchanged, diff
+        };
+        var PREFIXES = {
+          "deleted-sign": "-",
+          "deleted-arrow": "<",
+          "inserted-sign": "+",
+          "inserted-arrow": ">",
+          "unchanged": " ",
+          "diff": "!"
+        };
+        Object.keys(PREFIXES).forEach(function(name) {
+          var prefix = PREFIXES[name];
+          var alias = [];
+          if (!/^\w+$/.test(name)) {
+            alias.push(/\w+/.exec(name)[0]);
+          }
+          if (name === "diff") {
+            alias.push("bold");
+          }
+          Prism2.languages.diff[name] = {
+            pattern: RegExp("^(?:[" + prefix + "].*(?:\r\n?|\n|(?![\\s\\S])))+", "m"),
+            alias,
+            inside: {
+              "line": {
+                pattern: /(.)(?=[\s\S]).*(?:\r\n?|\n)?/,
+                lookbehind: true
+              },
+              "prefix": {
+                pattern: /[\s\S]/,
+                alias: /\w+/.exec(name)[0]
+              }
+            }
+          };
+        });
+        Object.defineProperty(Prism2.languages.diff, "PREFIXES", {
+          value: PREFIXES
+        });
+      })(Prism);
+    }
+  });
+
+  // node_modules/prismjs/components/prism-sql.js
+  var require_prism_sql = __commonJS({
+    "node_modules/prismjs/components/prism-sql.js"() {
+      Prism.languages.sql = {
+        "comment": {
+          pattern: /(^|[^\\])(?:\/\*[\s\S]*?\*\/|(?:--|\/\/|#).*)/,
+          lookbehind: true
+        },
+        "variable": [
+          {
+            pattern: /@(["'`])(?:\\[\s\S]|(?!\1)[^\\])+\1/,
+            greedy: true
+          },
+          /@[\w.$]+/
+        ],
+        "string": {
+          pattern: /(^|[^@\\])("|')(?:\\[\s\S]|(?!\2)[^\\]|\2\2)*\2/,
+          greedy: true,
+          lookbehind: true
+        },
+        "identifier": {
+          pattern: /(^|[^@\\])`(?:\\[\s\S]|[^`\\]|``)*`/,
+          greedy: true,
+          lookbehind: true,
+          inside: {
+            "punctuation": /^`|`$/
+          }
+        },
+        "function": /\b(?:AVG|COUNT|FIRST|FORMAT|LAST|LCASE|LEN|MAX|MID|MIN|MOD|NOW|ROUND|SUM|UCASE)(?=\s*\()/i,
+        // Should we highlight user defined functions too?
+        "keyword": /\b(?:ACTION|ADD|AFTER|ALGORITHM|ALL|ALTER|ANALYZE|ANY|APPLY|AS|ASC|AUTHORIZATION|AUTO_INCREMENT|BACKUP|BDB|BEGIN|BERKELEYDB|BIGINT|BINARY|BIT|BLOB|BOOL|BOOLEAN|BREAK|BROWSE|BTREE|BULK|BY|CALL|CASCADED?|CASE|CHAIN|CHAR(?:ACTER|SET)?|CHECK(?:POINT)?|CLOSE|CLUSTERED|COALESCE|COLLATE|COLUMNS?|COMMENT|COMMIT(?:TED)?|COMPUTE|CONNECT|CONSISTENT|CONSTRAINT|CONTAINS(?:TABLE)?|CONTINUE|CONVERT|CREATE|CROSS|CURRENT(?:_DATE|_TIME|_TIMESTAMP|_USER)?|CURSOR|CYCLE|DATA(?:BASES?)?|DATE(?:TIME)?|DAY|DBCC|DEALLOCATE|DEC|DECIMAL|DECLARE|DEFAULT|DEFINER|DELAYED|DELETE|DELIMITERS?|DENY|DESC|DESCRIBE|DETERMINISTIC|DISABLE|DISCARD|DISK|DISTINCT|DISTINCTROW|DISTRIBUTED|DO|DOUBLE|DROP|DUMMY|DUMP(?:FILE)?|DUPLICATE|ELSE(?:IF)?|ENABLE|ENCLOSED|END|ENGINE|ENUM|ERRLVL|ERRORS|ESCAPED?|EXCEPT|EXEC(?:UTE)?|EXISTS|EXIT|EXPLAIN|EXTENDED|FETCH|FIELDS|FILE|FILLFACTOR|FIRST|FIXED|FLOAT|FOLLOWING|FOR(?: EACH ROW)?|FORCE|FOREIGN|FREETEXT(?:TABLE)?|FROM|FULL|FUNCTION|GEOMETRY(?:COLLECTION)?|GLOBAL|GOTO|GRANT|GROUP|HANDLER|HASH|HAVING|HOLDLOCK|HOUR|IDENTITY(?:COL|_INSERT)?|IF|IGNORE|IMPORT|INDEX|INFILE|INNER|INNODB|INOUT|INSERT|INT|INTEGER|INTERSECT|INTERVAL|INTO|INVOKER|ISOLATION|ITERATE|JOIN|KEYS?|KILL|LANGUAGE|LAST|LEAVE|LEFT|LEVEL|LIMIT|LINENO|LINES|LINESTRING|LOAD|LOCAL|LOCK|LONG(?:BLOB|TEXT)|LOOP|MATCH(?:ED)?|MEDIUM(?:BLOB|INT|TEXT)|MERGE|MIDDLEINT|MINUTE|MODE|MODIFIES|MODIFY|MONTH|MULTI(?:LINESTRING|POINT|POLYGON)|NATIONAL|NATURAL|NCHAR|NEXT|NO|NONCLUSTERED|NULLIF|NUMERIC|OFF?|OFFSETS?|ON|OPEN(?:DATASOURCE|QUERY|ROWSET)?|OPTIMIZE|OPTION(?:ALLY)?|ORDER|OUT(?:ER|FILE)?|OVER|PARTIAL|PARTITION|PERCENT|PIVOT|PLAN|POINT|POLYGON|PRECEDING|PRECISION|PREPARE|PREV|PRIMARY|PRINT|PRIVILEGES|PROC(?:EDURE)?|PUBLIC|PURGE|QUICK|RAISERROR|READS?|REAL|RECONFIGURE|REFERENCES|RELEASE|RENAME|REPEAT(?:ABLE)?|REPLACE|REPLICATION|REQUIRE|RESIGNAL|RESTORE|RESTRICT|RETURN(?:ING|S)?|REVOKE|RIGHT|ROLLBACK|ROUTINE|ROW(?:COUNT|GUIDCOL|S)?|RTREE|RULE|SAVE(?:POINT)?|SCHEMA|SECOND|SELECT|SERIAL(?:IZABLE)?|SESSION(?:_USER)?|SET(?:USER)?|SHARE|SHOW|SHUTDOWN|SIMPLE|SMALLINT|SNAPSHOT|SOME|SONAME|SQL|START(?:ING)?|STATISTICS|STATUS|STRIPED|SYSTEM_USER|TABLES?|TABLESPACE|TEMP(?:ORARY|TABLE)?|TERMINATED|TEXT(?:SIZE)?|THEN|TIME(?:STAMP)?|TINY(?:BLOB|INT|TEXT)|TOP?|TRAN(?:SACTIONS?)?|TRIGGER|TRUNCATE|TSEQUAL|TYPES?|UNBOUNDED|UNCOMMITTED|UNDEFINED|UNION|UNIQUE|UNLOCK|UNPIVOT|UNSIGNED|UPDATE(?:TEXT)?|USAGE|USE|USER|USING|VALUES?|VAR(?:BINARY|CHAR|CHARACTER|YING)|VIEW|WAITFOR|WARNINGS|WHEN|WHERE|WHILE|WITH(?: ROLLUP|IN)?|WORK|WRITE(?:TEXT)?|YEAR)\b/i,
+        "boolean": /\b(?:FALSE|NULL|TRUE)\b/i,
+        "number": /\b0x[\da-f]+\b|\b\d+(?:\.\d*)?|\B\.\d+\b/i,
+        "operator": /[-+*\/=%^~]|&&?|\|\|?|!=?|<(?:=>?|<|>)?|>[>=]?|\b(?:AND|BETWEEN|DIV|ILIKE|IN|IS|LIKE|NOT|OR|REGEXP|RLIKE|SOUNDS LIKE|XOR)\b/i,
+        "punctuation": /[;[\]()`,.]/
+      };
+    }
+  });
+
+  // node_modules/prismjs/components/prism-yaml.js
+  var require_prism_yaml = __commonJS({
+    "node_modules/prismjs/components/prism-yaml.js"() {
+      (function(Prism2) {
+        var anchorOrAlias = /[*&][^\s[\]{},]+/;
+        var tag = /!(?:<[\w\-%#;/?:@&=+$,.!~*'()[\]]+>|(?:[a-zA-Z\d-]*!)?[\w\-%#;/?:@&=+$.~*'()]+)?/;
+        var properties = "(?:" + tag.source + "(?:[ 	]+" + anchorOrAlias.source + ")?|" + anchorOrAlias.source + "(?:[ 	]+" + tag.source + ")?)";
+        var plainKey = /(?:[^\s\x00-\x08\x0e-\x1f!"#%&'*,\-:>?@[\]`{|}\x7f-\x84\x86-\x9f\ud800-\udfff\ufffe\uffff]|[?:-]<PLAIN>)(?:[ \t]*(?:(?![#:])<PLAIN>|:<PLAIN>))*/.source.replace(/<PLAIN>/g, function() {
+          return /[^\s\x00-\x08\x0e-\x1f,[\]{}\x7f-\x84\x86-\x9f\ud800-\udfff\ufffe\uffff]/.source;
+        });
+        var string = /"(?:[^"\\\r\n]|\\.)*"|'(?:[^'\\\r\n]|\\.)*'/.source;
+        function createValuePattern(value, flags) {
+          flags = (flags || "").replace(/m/g, "") + "m";
+          var pattern = /([:\-,[{]\s*(?:\s<<prop>>[ \t]+)?)(?:<<value>>)(?=[ \t]*(?:$|,|\]|\}|(?:[\r\n]\s*)?#))/.source.replace(/<<prop>>/g, function() {
+            return properties;
+          }).replace(/<<value>>/g, function() {
+            return value;
+          });
+          return RegExp(pattern, flags);
+        }
+        Prism2.languages.yaml = {
+          "scalar": {
+            pattern: RegExp(/([\-:]\s*(?:\s<<prop>>[ \t]+)?[|>])[ \t]*(?:((?:\r?\n|\r)[ \t]+)\S[^\r\n]*(?:\2[^\r\n]+)*)/.source.replace(/<<prop>>/g, function() {
+              return properties;
+            })),
+            lookbehind: true,
+            alias: "string"
+          },
+          "comment": /#.*/,
+          "key": {
+            pattern: RegExp(/((?:^|[:\-,[{\r\n?])[ \t]*(?:<<prop>>[ \t]+)?)<<key>>(?=\s*:\s)/.source.replace(/<<prop>>/g, function() {
+              return properties;
+            }).replace(/<<key>>/g, function() {
+              return "(?:" + plainKey + "|" + string + ")";
+            })),
+            lookbehind: true,
+            greedy: true,
+            alias: "atrule"
+          },
+          "directive": {
+            pattern: /(^[ \t]*)%.+/m,
+            lookbehind: true,
+            alias: "important"
+          },
+          "datetime": {
+            pattern: createValuePattern(/\d{4}-\d\d?-\d\d?(?:[tT]|[ \t]+)\d\d?:\d{2}:\d{2}(?:\.\d*)?(?:[ \t]*(?:Z|[-+]\d\d?(?::\d{2})?))?|\d{4}-\d{2}-\d{2}|\d\d?:\d{2}(?::\d{2}(?:\.\d*)?)?/.source),
+            lookbehind: true,
+            alias: "number"
+          },
+          "boolean": {
+            pattern: createValuePattern(/false|true/.source, "i"),
+            lookbehind: true,
+            alias: "important"
+          },
+          "null": {
+            pattern: createValuePattern(/null|~/.source, "i"),
+            lookbehind: true,
+            alias: "important"
+          },
+          "string": {
+            pattern: createValuePattern(string),
+            lookbehind: true,
+            greedy: true
+          },
+          "number": {
+            pattern: createValuePattern(/[+-]?(?:0x[\da-f]+|0o[0-7]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?|\.inf|\.nan)/.source, "i"),
+            lookbehind: true
+          },
+          "tag": tag,
+          "important": anchorOrAlias,
+          "punctuation": /---|[:[\]{}\-,|>?]|\.\.\./
+        };
+        Prism2.languages.yml = Prism2.languages.yaml;
+      })(Prism);
     }
   });
 
@@ -4251,104 +5202,6 @@ var TaskqTaskWorkspace = (() => {
     }
   });
 
-  // src/relative-time.js
-  var require_relative_time = __commonJS({
-    "src/relative-time.js"(exports, module) {
-      "use strict";
-      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
-      var ui = require_ui_runtime();
-      var { execution } = ui;
-      var mounted = /* @__PURE__ */ new WeakSet();
-      var relative = new Intl.RelativeTimeFormat("en", { numeric: "always", style: "short" });
-      var zone;
-      var exact;
-      var time = execution.module("relative-time", {
-        value: function(raw) {
-          if (typeof raw === "number") return raw > 0 && Number.isFinite(new Date(raw).getTime()) ? raw : null;
-          if (typeof raw !== "string") return null;
-          const m5 = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)(?:\.\d+)?(Z|[+-](\d\d):(\d\d))$/i.exec(raw);
-          if (!m5 || +m5[2] < 1 || +m5[2] > 12 || +m5[3] < 1 || +m5[3] > new Date(Date.UTC(+m5[1], +m5[2], 0)).getUTCDate() || +m5[4] > 23 || +m5[5] > 59 || +m5[6] > 59 || +(m5[8] || 0) > 23 || +(m5[9] || 0) > 59) return null;
-          const ms = Date.parse(raw);
-          return ms > 0 && Number.isFinite(ms) ? ms : null;
-        },
-        seconds: function(raw) {
-          return typeof raw === "number" ? time.value(raw * 1e3) : null;
-        },
-        label: function(ms, now = Date.now()) {
-          const delta = (ms - now) / 1e3, age = Math.abs(delta);
-          if (age < 60) return delta > 0 ? "in a moment" : "just now";
-          const [unit, size] = age < 3600 ? ["minute", 60] : age < 86400 ? ["hour", 3600] : ["day", 86400];
-          return relative.format(Math.sign(delta) * Math.floor(age / size), unit);
-        },
-        detail: function(ms, context) {
-          const current = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (current !== zone) {
-            zone = current;
-            exact = new Intl.DateTimeFormat("en-GB", { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone: zone, timeZoneName: "longOffset" });
-          }
-          return context + " \xB7 " + exact.format(ms) + " \xB7 " + zone;
-        },
-        stamp: function(raw, context = "Time", reason, focus = true) {
-          const ms = time.value(raw), full = ms === null ? context + " \xB7 Time unknown: " + (reason || (raw == null ? "Source timestamp unavailable" : "Source timestamp invalid or missing a time zone")) : time.detail(ms, context);
-          return h5(ms === null ? "span" : "time", { class: "relative-time" + (ms === null ? " time-unknown" : ""), ...ms === null ? {} : { dateTime: new Date(ms).toISOString(), "data-time-ms": ms, "data-time-source": raw, "data-time-context": context }, title: full, "aria-label": full, tabIndex: focus ? 0 : void 0 }, ms === null ? "Time unknown" : time.label(ms));
-        },
-        refresh: function(root, now = Date.now()) {
-          for (const el of root.querySelectorAll("time[data-time-ms]")) {
-            const next = time.label(Number(el.dataset.timeMs), now);
-            if (el.textContent !== next) el.textContent = next;
-          }
-        },
-        mount: function(root) {
-          if (mounted.has(root)) return;
-          mounted.add(root);
-          const document2 = root.ownerDocument, tip = document2.createElement("div");
-          tip.className = "time-tooltip";
-          tip.setAttribute("role", "tooltip");
-          tip.hidden = true;
-          document2.body.append(tip);
-          let target = null;
-          const hide = () => {
-            tip.hidden = true;
-            target = null;
-          }, show = (node) => {
-            target = node?.closest(".relative-time") || node?.closest("button,summary")?.querySelector(".relative-time");
-            if (!target) return hide();
-            if (target.dataset.timeMs) {
-              target.title = time.detail(Number(target.dataset.timeMs), target.dataset.timeContext);
-              target.setAttribute("aria-label", target.title);
-            }
-            tip.textContent = target.title;
-            tip.hidden = false;
-            const r4 = target.getBoundingClientRect();
-            tip.style.left = Math.max(4, Math.min(r4.left, document2.documentElement.clientWidth - tip.offsetWidth - 4)) + "px";
-            tip.style.top = Math.max(4, Math.min(r4.bottom + 4, document2.documentElement.clientHeight - tip.offsetHeight - 4)) + "px";
-          };
-          ui.listen(root, "focusin", (e4) => show(e4.target));
-          ui.listen(root, "focusout", hide);
-          ui.listen(root, "mouseover", (e4) => show(e4.target));
-          ui.listen(root, "mouseout", (e4) => {
-            if (!tip.contains(e4.relatedTarget)) hide();
-          });
-          ui.listen(root, "keydown", (e4) => {
-            if (e4.key === "Escape") hide();
-          });
-          ui.listen(root, "scroll", hide, true);
-          const tick = () => {
-            if (!root.isConnected) {
-              tip.remove();
-              return;
-            }
-            time.refresh(root);
-            if (target && !target.isConnected) hide();
-            ui.defer(tick, 6e4 - Date.now() % 6e4 + 1);
-          };
-          tick();
-        }
-      });
-      module.exports = time;
-    }
-  });
-
   // src/answer-card.js
   var require_answer_card = __commonJS({
     "src/answer-card.js"(exports, module) {
@@ -4361,12 +5214,19 @@ var TaskqTaskWorkspace = (() => {
           return { draft: "", bound: row.revision, op: null, receipt: null };
         },
         textProblem: function(q4, text, files) {
+          if (q4?.resultDate) {
+            const at = /* @__PURE__ */ new Date(text + "T12:00:00Z");
+            return /^\d{4}-\d{2}-\d{2}$/.test(text) && Number.isFinite(+at) && at.toISOString().slice(0, 10) === text && at > Date.now() ? null : "Choose a future revisit date";
+          }
+          if (q4?.resultReason && (text.trim().length === 0 || [...text.trim()].length > 180 || /[\r\n]/.test(text))) return "Give a one-line reason, at most 180 characters";
           return replyFiles.problem(files) || (text.trim() || files?.length ? null : "Type an answer");
         },
         status: function(row, local, cap) {
           const q4 = row.question;
+          if (row.resultDecision && local.bound !== row.revision) return "stale";
+          if (row.resultDecision && row.state === "closed" && q4?.parsed && row.repeatable && local.receipt?.state === "accepted" && cap?.answer) return "actionable";
           if (local.op && local.receipt && (HELD.includes(local.receipt.state) || local.op.revision === row.revision || !q4)) return local.receipt.state;
-          if (!manageable(row, cap) && (!q4 || !q4.parsed || !cap || !cap.answer || !["ask", "review"].includes(row.state))) return "read-only";
+          if (!manageable(row, cap) && (!q4 || !q4.parsed || !cap || !cap.answer || !(row.resultDecision ? row.state === "closed" : ["ask", "review"].includes(row.state)))) return "read-only";
           if (local.bound !== row.revision && (local.draft.trim() || local.files?.length)) return "changed";
           return "actionable";
         },
@@ -4392,11 +5252,16 @@ var TaskqTaskWorkspace = (() => {
               if (!LIVE.includes(st) || l5.files?.length) return { local, send: null };
               const c4 = row.question.choices.find((x5) => x5.id === ev.id);
               if (!c4 || c4.consequential) return { local, send: null };
+              if (row.resultDecision && c4.local) return { local: l5, send: null };
+              if (row.resultDecision && c4.reason) return { local: { ...l5, intent: c4.reason, ...c4.reason === "later" && !l5.draft ? { draft: new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10) } : {} }, send: null };
               return start({ choice: c4.id });
             }
             case "submit":
+              if (row.resultDecision && (!(row.question.resultReason || row.question.resultDate) || !l5.intent)) return { local, send: null };
               if (!cap || !cap.answer || !LIVE.includes(st) || textProblem(draftQuestion(row, cap), l5.draft, l5.files)) return { local, send: null };
               return start(fallback(row, cap) ? { action: "requeue", text: l5.draft.trim() } : { text: l5.draft.trim() }, st === "changed" && !fallback(row, cap) ? l5.bound : row.revision);
+            case "cancel-result":
+              return row.resultDecision && LIVE.includes(st) ? { local: { ...l5, intent: null }, send: null } : { local, send: null };
             case "requeue":
               if (!manageable(row, cap) || !LIVE.includes(st) || textProblem(REQUEUE, l5.draft, l5.files)) return { local, send: null };
               return start({ action: "requeue", text: l5.draft.trim() });
@@ -4411,6 +5276,7 @@ var TaskqTaskWorkspace = (() => {
                 l5.draft = "";
                 l5.files = [];
               }
+              if (ev.state === "accepted" && l5.intent === "later") l5.intent = null;
               return { local: l5, send: null };
             case "retry":
               return RETRY.includes(st) ? { local: { ...l5, receipt: { state: "sending" } }, send: l5.op } : { local, send: null };
@@ -4426,15 +5292,15 @@ var TaskqTaskWorkspace = (() => {
           h5 += '<p class="qac-head" id="' + id + '-t"><span class="qac-mark" aria-hidden="true">?</span> <a href="' + href(row.url) + '" target="_blank" rel="noopener">#' + esc(row.n) + "</a> " + esc(row.title) + "</p>";
           if (own && cap?.files && st !== "read-only") h5 += replyFiles.markup(local.files, !live);
           if (manageable(row, cap)) {
-            h5 += q4.parsed ? lines(q4) + images(q4) : '<pre class="qac-text">' + esc(q4.text || row.card || "No question text supplied") + "</pre>";
+            h5 += cap?.paged ? images(q4) : q4.parsed ? lines(q4) + images(q4) : '<pre class="qac-text">' + esc(q4.text || row.card || "No question text supplied") + "</pre>";
             if (own) h5 += q4.parsed ? '<form class="qac-text-form" data-qac="submit"><textarea data-qac="input" rows="2" aria-label="Your answer" placeholder="What you did"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !textProblem(q4, local.draft, local.files) ? "" : " disabled") + ">Send</button>" + hint(id, live && textProblem(q4, local.draft, local.files)) + "</form>" : '<form class="qac-text-form" data-qac="submit"><textarea data-qac="input" rows="1" aria-label="Requeue reason" placeholder="Reason to requeue"' + (live ? "" : " readonly") + ">" + esc(local.draft) + '</textarea><button type="submit"' + (live && !textProblem(REQUEUE, local.draft, local.files) ? "" : " disabled") + ">Requeue</button>" + hint(id, live && textProblem(REQUEUE, local.draft, local.files)) + "</form>";
             h5 += '<div class="qac-choices">' + (q4.parsed && own ? '<button type="button" data-qac="requeue"' + (live && !textProblem(REQUEUE, local.draft, local.files) ? "" : " disabled") + ">Requeue</button>" : "") + '<button type="button" data-qac="later"' + (live ? "" : " disabled") + '>Later</button><button type="button" data-qac="close"' + (live ? "" : " disabled") + ">Close without publishing</button></div>";
             h5 += receipt(st, local.receipt && local.receipt.reason, row.url, id, local.receipt && local.receipt.next, !!(local.op && local.op.action), what, local.receipt?.note);
             h5 += retry(st, local.receipt && local.receipt.reason);
             return h5 + "</section>";
           }
-          if (!q4.parsed) return h5 + '<pre class="qac-text">' + esc(q4.text) + "</pre>" + receipt(st, st === "read-only" ? "This card has no answer form here" : local.receipt && local.receipt.reason, row.url, id, null, false, what) + retry(st, local.receipt && local.receipt.reason) + "</section>";
-          h5 += lines(q4) + images(q4);
+          if (!q4.parsed) return h5 + (cap?.paged ? "" : '<pre class="qac-text">' + esc(q4.text) + "</pre>") + receipt(st, st === "read-only" ? "This card has no answer form here" : local.receipt && local.receipt.reason, row.url, id, null, false, what) + retry(st, local.receipt && local.receipt.reason) + "</section>";
+          h5 += (cap?.paged ? "" : lines(q4)) + images(q4);
           if (q4.choices.length) h5 += '<div class="qac-choices" role="group" aria-label="Choices">';
           for (const c4 of q4.choices) {
             const off = !live || c4.consequential || !!local.files?.length, why = c4.consequential ? "Answer on the board: this choice closes or publishes the task, or approves its result" : local.files?.length ? "Send files with a text reply, or remove them to choose an option" : "";
@@ -4603,7 +5469,7 @@ var TaskqTaskWorkspace = (() => {
             },
             act(board, n3, type) {
               const k5 = key(board, { n: n3 });
-              if (cards.has(k5) && ["submit", "requeue"].includes(type)) apply(k5, { type });
+              if (cards.has(k5) && ["submit", "requeue", "cancel-result"].includes(type)) apply(k5, { type });
             },
             // rows: [{board, row}] of open questions; a row that left keeps no state
             update(rows) {
@@ -4691,6 +5557,1737 @@ var TaskqTaskWorkspace = (() => {
     }
   });
 
+  // src/pm-composer.js
+  var require_pm_composer = __commonJS({
+    "src/pm-composer.js"(exports, module) {
+      "use strict";
+      var { h: h5, render } = (init_preact(), __toCommonJS(preact_exports));
+      var ui = require_ui_runtime();
+      var { execution } = ui;
+      var measured = /* @__PURE__ */ new WeakMap();
+      var api = execution.module("pm-composer", {
+        request: function(context, text, op, now) {
+          if (!text.trim() || new TextEncoder().encode(text).length > 65536) throw Error("Write 1\u201365536 UTF-8 bytes");
+          const target = Object.fromEntries(["installation_id", "generation", "project_id", "runtime_id"].map((k5) => [k5, context.target?.[k5]]));
+          const request = { schema: "taskq.pm/1", actor_id: context.actor_id, op_id: op, grant_id: context.grant_id, revision: context.revision, target, issued_at: now, expires_at: now + 300, text };
+          for (const id of [request.actor_id, op, request.grant_id, request.revision, context.target?.installation_id, context.target?.project_id, context.target?.runtime_id]) if (!/^[A-Za-z0-9_-]{1,64}$/.test(id || "")) throw Error("PM target or authority unavailable");
+          if (!Number.isSafeInteger(context.target.generation) || context.target.generation < 1 || !Number.isSafeInteger(now) || now < 0) throw Error("PM identity or clock unavailable");
+          return JSON.parse(JSON.stringify(request));
+        },
+        receipt: function(value, request) {
+          if (!value || value.schema !== "taskq.pm/1" || !["accepted", "rejected", "stale", "unknown"].includes(value.outcome) || ["actor_id", "op_id", "revision"].some((k5) => value[k5] !== request[k5])) return { outcome: "unknown", reason: "No matching authoritative receipt" };
+          if (value.outcome === "accepted" && (!/^[a-f0-9]{64}$/.test(value.request_id || "") || !value.native?.host || !value.native?.runtime)) return { outcome: "unknown", reason: "Native request identity unavailable" };
+          return JSON.parse(JSON.stringify(value));
+        },
+        handoff: function(native, local = false) {
+          if (!native) return null;
+          const url = native.url, safe = typeof url === "string" && (/^https:\/\/claude\.ai\/code\/session_[A-Za-z0-9]+$/.test(url) || local && /^codex:\/\/threads\/[A-Za-z0-9-]+$/.test(url));
+          return h5("div", { class: "pm-handoff" }, h5("p", { role: "status" }, (native.kind || native.state || "unknown") + ": " + (native.reason || native.next || (native.state === "launched" && native.session ? "Continue in the native session" : "Native outcome unknown"))), h5("p", { class: "meta" }, (native.runtime || "Runtime unknown") + " \xB7 " + (native.host || "Host unknown") + (native.session ? " \xB7 " + native.session : "")), safe && h5("a", { href: url, "data-url": url, class: "native-session" }, "Open session"));
+        },
+        grow: function(root) {
+          const window2 = root.ownerDocument.defaultView;
+          for (const input of root.querySelectorAll(".conversation-composer textarea")) {
+            const style = window2.getComputedStyle(input), width = input.getBoundingClientRect().width, key = JSON.stringify([input.value, width, style.font, style.lineHeight, style.minHeight]);
+            if (measured.get(input) === key) continue;
+            const mirror = input.cloneNode();
+            mirror.removeAttribute("id");
+            mirror.removeAttribute("data-c-field");
+            mirror.disabled = true;
+            mirror.tabIndex = -1;
+            mirror.setAttribute("aria-hidden", "true");
+            mirror.value = input.value;
+            Object.assign(mirror.style, { position: "absolute", visibility: "hidden", pointerEvents: "none", width: width + "px", height: "0", minHeight: "0", maxHeight: "none" });
+            input.after(mirror);
+            const height = mirror.scrollHeight + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+            mirror.remove();
+            input.style.height = Math.max(parseFloat(style.minHeight) || 0, height) + "px";
+            measured.set(input, key);
+          }
+        },
+        composer: function({ text, disabled = false, id = "pm-draft", field = "text", label = "Request draft", reason = "", placeholder = "Ask AI\u2026", before, files, tools, after, onInput, onPaste, onDrop, onDragOver }) {
+          return h5("div", { class: "conversation-composer", onPaste, onDrop, onDragOver }, before, h5("label", { for: id, class: "sr-only" }, label), h5("textarea", { id, "data-c-field": field, rows: 3, value: text, disabled, "aria-describedby": id === "conversation-draft" ? "conversation-reason" : id + "-reason", placeholder, onInput }), files, tools, h5("p", { id: id === "conversation-draft" ? "conversation-reason" : id + "-reason", class: "meta", title: reason, "data-tooltip": true, tabIndex: reason ? 0 : void 0 }, reason), after);
+        },
+        mount: function(el, adapter) {
+          let draft = adapter.load() || { text: "" }, pending = false, timer, serial = 0, invalid = false;
+          if (draft.request) {
+            try {
+              const r4 = draft.request, expected = api.request(r4, r4.text, r4.op_id, r4.issued_at);
+              if (r4.schema !== expected.schema || r4.expires_at !== expected.expires_at) throw Error("Invalid saved request");
+              draft.request = expected;
+              if (draft.receipt) draft.receipt = api.receipt(draft.receipt, expected);
+            } catch (_5) {
+              invalid = true;
+              draft.receipt = { outcome: "unknown", reason: "Saved request invalid; preserve it for host reconciliation" };
+            }
+          } else if (draft.receipt?.native) draft.receipt = { outcome: "unknown", reason: "No bound request for this receipt" };
+          const local = execution.module("pm-composer.instance", {
+            paint: function() {
+              render(h5("section", { class: "pm-composer", "aria-label": "PM request" }, api.composer({ text: draft.text, disabled: !!draft.request, reason: pending ? "Checking delivery\u2026" : draft.receipt?.reason || adapter.context().reason || "Replies stay in the native session.", onInput: (e4) => {
+                draft.text = e4.currentTarget.value;
+                adapter.save(draft);
+                local.paint();
+              }, tools: h5("div", { class: "conversation-tools" }, h5("button", { disabled: pending || invalid || !!draft.request || !draft.text.trim() || !!adapter.context().reason, onClick: () => local.send(false) }, "Send"), draft.request && h5("button", { disabled: pending || invalid || !adapter.reconcile, onClick: () => local.send(true) }, "Check delivery")) }), draft.receipt && h5("p", { role: "status" }, draft.receipt.outcome), api.handoff(draft.receipt?.native)), el);
+              api.grow(el);
+            },
+            send: function(reconcile) {
+              if (invalid || pending || reconcile && !draft.request || !reconcile && draft.request) return;
+              if (!reconcile) {
+                try {
+                  const next = { ...draft, request: api.request(adapter.context(), draft.text, adapter.id(), adapter.now()) };
+                  adapter.save(next);
+                  draft = next;
+                } catch (_5) {
+                  draft.receipt = { outcome: "unknown", reason: "Request could not be persisted; draft kept" };
+                  local.paint();
+                  return;
+                }
+              }
+              pending = true;
+              const turn = ++serial;
+              local.paint();
+              ui.cancel(timer);
+              timer = ui.defer(() => {
+                if (turn !== serial) return;
+                pending = false;
+                draft.receipt = { outcome: "unknown", reason: "Delivery unknown. Check the same request ID." };
+                adapter.save(draft);
+                local.paint();
+              }, 3e4);
+              ui.effect("pm.dispatch", () => (reconcile ? adapter.reconcile : adapter.send)(JSON.parse(JSON.stringify(draft.request))), (value) => {
+                if (turn !== serial) return;
+                ui.cancel(timer);
+                draft.receipt = api.receipt(value, draft.request);
+                pending = false;
+                adapter.save(draft);
+                local.paint();
+              });
+            }
+          });
+          local.paint();
+          return local;
+        }
+      });
+      module.exports = api;
+    }
+  });
+
+  // src/anchored-popover.js
+  var require_anchored_popover = __commonJS({
+    "src/anchored-popover.js"(exports, module) {
+      "use strict";
+      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
+      var { execution } = require_ui_runtime();
+      module.exports = execution.module("anchoredPopover", {
+        render: function({ id = "taskq-popover", label, children }) {
+          return h5("section", { id, popover: "manual", role: "dialog", "aria-label": label, class: "anchored-popover", tabindex: -1 }, children);
+        },
+        place: function(element, anchor) {
+          if (!element || !anchor) return;
+          if (element.showPopover && !element.matches(":popover-open")) element.showPopover();
+          const gap = 6, pad = 8, w5 = window.innerWidth, h6 = window.innerHeight;
+          element.style.maxWidth = Math.max(0, w5 - 2 * pad) + "px";
+          element.style.maxHeight = Math.max(0, h6 - 2 * pad) + "px";
+          const r4 = element.getBoundingClientRect(), below = h6 - anchor.bottom - gap - pad, above = anchor.top - gap - pad;
+          const top = below >= r4.height || below >= above ? anchor.bottom + gap : anchor.top - gap - r4.height;
+          element.style.left = Math.max(pad, Math.min(anchor.left, w5 - r4.width - pad)) + "px";
+          element.style.top = Math.max(pad, Math.min(top, h6 - r4.height - pad)) + "px";
+        }
+      });
+    }
+  });
+
+  // src/task-dashboard.js
+  var require_task_dashboard = __commonJS({
+    "src/task-dashboard.js"(exports, module) {
+      "use strict";
+      var { h: h5, Fragment } = (init_preact(), __toCommonJS(preact_exports));
+      var ui = require_ui_runtime();
+      var { execution } = ui;
+      var views = require_task_views();
+      var blocks = require_project_blocks();
+      var popover = require_anchored_popover();
+      var { icon, button } = require_ui_icons2();
+      var outcomes = { success: ["circle-check", "", "Completed"], not_planned: ["circle-slash", "", "Not planned"], unknown: ["circle-question-mark", "", "Outcome unknown"] };
+      module.exports = execution.module("taskDashboard", {
+        outcome: function(t4) {
+          return t4.outcome === "success" && typeof t4.merged === "string" && t4.merged ? ["git-merge", "review", "Merged"] : outcomes[t4.outcome] || outcomes.unknown;
+        },
+        // P-W4: `owned` is the View window surface; the menu sends `views-open` when native offers that window, else keeps the overlay.
+        create: function(view, { menu, present, send, app, owned = false, window: window2 = globalThis, document: document2 = window2.document }) {
+          const crypto2 = window2.crypto || globalThis.crypto, CSS2 = window2.CSS || globalThis.CSS;
+          let restore = true, requests = 0, heldOffer = null, heldReview = null;
+          const pinReads = /* @__PURE__ */ new Map();
+          const api = execution.module("taskDashboard.instance", {
+            model: function() {
+              const m5 = view.dashboard || (view.dashboard = views.normalize(null, { taskFilter: view.taskFilter }));
+              if (!owned && m5.selected === "completed") {
+                const c4 = m5.views.find((v4) => v4.id === "completed")?.working;
+                m5.selected = m5.views.find((v4) => v4.id === "running")?.id || "all";
+                send({ a: "workspace", open: { page: "conversations", filter: "finished", criteria: c4 } });
+              }
+              m5.collapsed = m5.collapsed.filter((id) => view.S.projects.some((p5) => views.identity(p5) === id));
+              return m5;
+            },
+            current: function() {
+              const m5 = api.model();
+              return owned && view.completedEditor ? m5.views.find((v4) => v4.id === "completed") || views.current(m5) : views.current(m5);
+            },
+            criteria: function() {
+              return api.current().working;
+            },
+            set: function(patch) {
+              Object.assign(api.criteria(), patch);
+              present();
+            },
+            projects: function() {
+              return views.scope(view.S.projects, api.criteria());
+            },
+            unique: function(ps) {
+              return ps.filter((p5, i4) => ps.findIndex((q4) => views.identity(q4) === views.identity(p5)) === i4);
+            },
+            live: function() {
+              return app.unique(view.S.projects.flatMap(app.tasks)).filter((t4) => t4.state !== "closed");
+            },
+            ref: function(t4) {
+              return t4.boardIdentity + "#" + t4.n;
+            },
+            rows: function() {
+              return app.unique(api.projects().flatMap(app.tasks)).filter((t4) => t4.state !== "closed" && views.matches(t4, api.criteria().query)).sort(views.compare);
+            },
+            heldScope: function() {
+              const c4 = api.criteria(), ps = api.projects(), targets = api.rows().filter((t4) => t4.state === "held").map((t4) => ({ key: t4.key, revision: t4.revision, label: t4.project + " #" + t4.n + " " + t4.title }));
+              const known = ps.length > 0 && ps.every((p5) => p5.alive === true && p5.complete === true && p5.tasks_live !== false && !p5.partial?.length && !view.S.display.all.partial.includes(p5.name)) && c4.projects.every((id) => ps.some((p5) => views.identity(p5) === id)) && targets.every((t4) => Number.isSafeInteger(t4.revision));
+              const scope = ps.map((p5) => p5.name).join(", ") + " \xB7 view " + api.current().name + " \xB7 " + (c4.query ? "search \u201C" + c4.query + "\u201D" : "all searches");
+              return { targets, known, scope, signature: JSON.stringify([api.current().id, c4.projects, c4.query, targets]) };
+            },
+            admissionReview: function() {
+              return heldReview && h5("section", { class: "held-review", role: "region", "aria-label": "Review Held admission" }, h5("strong", null, "Start " + heldReview.targets.length + " held"), h5("p", null, heldReview.scope), h5("p", { class: "meta" }, "Admit only these drafts. Existing focus, search and view stay unchanged."), h5("ul", null, heldReview.targets.map((t4) => h5("li", { key: t4.key }, h5("a", { href: t4.key, "data-url": t4.key }, t4.label), h5("span", { class: "meta" }, " \xB7 revision " + t4.revision)))), heldReview.error && h5("p", { role: "alert" }, heldReview.error), heldReview.sent && h5("p", { role: "status" }, "Start requested once; check each receipt below."), h5("div", { class: "row-actions" }, h5("button", { "data-a": "held-confirm", disabled: !!heldReview.sent }, "Confirm Start " + heldReview.targets.length + " held"), h5("button", { "data-a": "held-cancel" }, heldReview.sent ? "Close Held admission" : "Cancel Held admission")));
+            },
+            anchor: function(target) {
+              const r4 = target.getBoundingClientRect();
+              return { left: r4.left, top: r4.top, bottom: r4.bottom };
+            },
+            // MP13: details open only from click, Enter or Space on the identity (native button activation); `focus` moves focus into them.
+            open: function(kind, target, key = null, focus = true) {
+              view.popup = { kind, key, anchor: api.anchor(target) };
+              if (kind === "task") api.current().open = key;
+              present();
+              if (focus) menu.querySelector("#taskq-question-details,#taskq-popover")?.focus({ preventScroll: true });
+            },
+            close: function(focus = true) {
+              const p5 = view.popup;
+              if (!p5) return;
+              view.popup = null;
+              if (p5.kind === "task") api.current().open = null;
+              present();
+              if (focus) {
+                const target = p5.kind === "task" ? menu.querySelector('[data-a="task-detail"][data-key="' + CSS2.escape(p5.key) + '"]') : menu.querySelector('[data-a="' + (p5.kind === "views" ? "view-list" : "view-editor") + '"]');
+                (target || menu.querySelector("[data-a=view-list]"))?.focus({ preventScroll: true });
+              }
+            },
+            // M2: collapse is presentation only; the name and the two adjacent shortcuts keep independent targets.
+            projectHeader: function(p5, shown, tasks, reason) {
+              const board = p5.board_kind === "gitlab" ? "GitLab" : "GitHub", id = views.identity(p5), open = !api.model().collapsed.includes(id), controls = "project-tasks-" + encodeURIComponent(id), folder = typeof p5.root === "string" && !!p5.root.trim();
+              const questions = tasks.filter((t4) => t4.state === "ask").length, label = reason ? "Matching and total task counts and open questions unknown: " + reason : shown + " tasks shown matching the current filter; " + tasks.length + " open tasks in total; " + questions + " open questions";
+              const statuses = !open && h5("div", { class: "project-statuses" }, reason ? h5("span", { role: "img", title: "Status counts unknown: " + reason, "aria-label": "Status counts unknown: " + reason }, "?") : view.S.display.states.map(({ id: state, name }) => {
+                const n3 = tasks.filter((t4) => t4.state === state).length;
+                if (!n3) return null;
+                const [mark, tone] = blocks.marks[state] || ["circle-question-mark", ""];
+                return h5("span", { class: "project-state " + tone, "data-state": state, role: "img", title: name + ": " + n3, "aria-label": name + ": " + n3, key: state }, icon(mark), n3);
+              }));
+              return h5(
+                "header",
+                { class: "project-group project-shortcuts" },
+                button("arrow-down", (open ? "Collapse " : "Expand ") + p5.name + " tasks", { "data-a": "project-collapse", "data-project": id, "aria-expanded": String(open), "aria-controls": controls, class: "compact-action project-collapse" }),
+                h5("div", { class: "project-heading" }, h5("h2", null, h5("button", { class: "project-overview", "data-route": p5.root, title: "Open " + p5.name + " project overview" }, p5.name)), h5("span", { class: "project-counts", title: label, "aria-label": label }, h5("span", null, (reason ? "?" : shown) + " / " + (reason ? "?" : tasks.length)), (reason || questions > 0) && h5("span", { class: "project-questions" }, " (?" + (reason ? "?" : questions) + ")")), statuses),
+                h5("div", { class: "project-actions" }, h5("a", { class: "project-board compact-action", href: p5.issues, "data-url": p5.issues, title: "Open " + p5.name + " board on " + board, "aria-label": "Open " + p5.name + " board on " + board }, icon(p5.board_kind)), button("folder", folder ? "Open " + p5.name + " project folder on this computer" : "Project folder unavailable: registered root missing", { "data-a": "folder", "data-root": p5.root, disabled: !folder, class: "compact-action project-folder" }))
+              );
+            },
+            bar: function() {
+              const m5 = api.model(), v4 = api.current(), c4 = v4.working, searching = !!c4.query || !!view.searchOpen;
+              return h5(
+                Fragment,
+                null,
+                h5("div", { class: "viewbar" }, h5("div", { class: "view-picks" }, h5("button", { "data-a": "view-list", "aria-haspopup": "dialog", "aria-expanded": String(view.popup?.kind === "views") }, v4.name, views.dirty(v4) ? " *" : ""), m5.views.filter((x5) => x5.pinned && x5.id !== m5.selected).map((x5) => h5("button", { "data-a": "view-select", "data-id": x5.id, key: x5.id }, x5.name))), views.dirty(v4) && button("rotate-ccw", "Reset " + v4.name + " to its saved criteria", { "data-a": "view-reset" }), button("search", "Search tasks", { "data-a": "search-open", "aria-controls": "task-query", "aria-expanded": String(searching) }), button("sliders-horizontal", "Edit view conditions", { "data-a": "view-editor", "aria-haspopup": "dialog", "aria-expanded": String(view.popup?.kind === "editor") })),
+                // #1775: search is one icon until opened; a query keeps the field visible
+                searching && h5("div", { class: "task-search" }, icon("search"), h5("input", { id: "task-query", type: "search", "data-task-query": "", maxLength: 1024, "aria-label": "Search tasks", placeholder: "Search tasks", value: c4.query }), c4.query && button("x", "Clear task search", { "data-a": "search-clear" }))
+              );
+            },
+            // P-W1: global pins once, first, as ordinary rows in the one shared scroll; unavailable references keep a sourced outcome or explicit unknown.
+            // Exact reads use canonical board identity, never a pin URL or the loaded Completed page.
+            pinRead: function(pin, retry = false) {
+              let e4 = pinReads.get(pin.ref);
+              const now = Date.now();
+              if (e4?.loading || e4 && !retry && now - e4.at < 6e4) return e4;
+              const cut = pin.ref.lastIndexOf("#"), n3 = Number(pin.ref.slice(cut + 1)), p5 = view.S.projects.find((p6) => views.identity(p6) === pin.ref.slice(0, cut));
+              if (!p5 || !Number.isSafeInteger(n3) || n3 <= 0) return { reason: "Registered board unavailable" };
+              e4 = { ...e4, ref: pin.ref, root: p5.root, task: n3, kind: p5.board_kind, project: p5.name, id: "pin-" + ++requests, at: now, loading: true, reason: null };
+              pinReads.set(pin.ref, e4);
+              e4.timer = ui.defer(() => api.receive({ root: e4.root, id: e4.id, reason: "No board response within 65 seconds" }), 65e3);
+              send({ a: "completed", root: e4.root, id: e4.id, task: n3 });
+              return e4;
+            },
+            unpin: function(ref) {
+              ui.cancel(pinReads.get(ref)?.expiry);
+              api.model().pins = api.model().pins.filter((p5) => p5.ref !== ref);
+            },
+            pins: function() {
+              const m5 = api.model();
+              if (!m5.pins.length) return null;
+              const live = api.live();
+              const rows = m5.pins.map((pin) => {
+                const t4 = live.find((t5) => api.ref(t5) === pin.ref);
+                if (t4) {
+                  delete pin.closedSeen;
+                  const prior = pinReads.get(pin.ref);
+                  ui.cancel(prior?.timer);
+                  ui.cancel(prior?.expiry);
+                  pinReads.delete(pin.ref);
+                  return app.taskRow(t4, true);
+                }
+                const e4 = api.pinRead(pin), c4 = e4?.value, closed = c4?.state === "closed";
+                if (closed) {
+                  pin.closedSeen = Number.isFinite(c4.closed) && c4.closed > 0 ? c4.closed : pin.closedSeen || view.S.now;
+                  const remaining = pin.closedSeen + 86400 - view.S.now;
+                  if (!e4.expiry && remaining > 0) e4.expiry = ui.defer(() => {
+                    const current = pinReads.get(pin.ref);
+                    if (current) current.expiry = null;
+                    if (current?.value?.state === "closed" && !api.live().some((t5) => api.ref(t5) === pin.ref)) {
+                      api.unpin(pin.ref);
+                      present();
+                    }
+                  }, remaining * 1e3);
+                  if (Number.isFinite(remaining) && remaining <= 0) {
+                    api.unpin(pin.ref);
+                    return null;
+                  }
+                }
+                const [mark, tone, label] = closed ? api.outcome(c4) : ["circle-question-mark", "", c4?.state === "open" ? "Open \xB7 refresh project" : e4?.loading ? "Reading board\u2026" : "Unavailable \xB7 state unknown"];
+                return h5(
+                  "div",
+                  { class: "task-row completed-row", key: pin.ref, "data-pin": pin.ref },
+                  h5("span", { class: tone, title: label, "aria-label": label }, icon(mark)),
+                  h5("a", { class: "detail-title", href: c4?.url || pin.url, "data-url": c4?.url || pin.url, "data-pin-open": pin.ref }, c4?.title || pin.title || pin.ref),
+                  h5("div", { class: "meta" }, e4.project ? e4.project + " #" + e4.task + " \xB7 " : "", label, closed && c4.close ? " \xB7 " + c4.close : "", e4?.reason ? " \xB7 " + e4.reason : "", closed && c4.error ? " \xB7 Details unavailable: " + c4.error : "", e4?.reason && h5("button", { "data-a": "pin-retry", "data-ref": pin.ref }, "Retry board read")),
+                  h5("div", { class: "row-actions" }, closed && h5(Fragment, null, h5("a", { href: c4.url, "data-url": c4.url, "data-pin-open": pin.ref }, "Open issue"), c4.pr && h5("a", { href: c4.pr, "data-url": c4.pr, "data-pin-open": pin.ref }, "Open PR"), h5("button", { "data-a": "pin-transcript", "data-ref": pin.ref }, "Open transcript")), button("pin-off", "Unpin " + (c4?.title || pin.title || pin.ref), { "data-a": "task-unpin", "data-ref": pin.ref }))
+                );
+              });
+              return rows.some(Boolean) && h5("section", { class: "task-pins", "aria-label": "Pinned tasks" }, h5("h2", null, icon("pin"), " Pinned"), rows);
+            },
+            openCompleted: function(task) {
+              const p5 = task && view.S.projects.find((p6) => p6.root === task.root);
+              send({ a: "workspace", open: task ? { page: "conversations", root: task.root, board: p5?.issues, task: task.task, ...task.value?.sha ? { sha: task.value.sha } : {} } : { page: "conversations", filter: "finished", criteria: api.criteria() } });
+            },
+            list: function() {
+              if (api.current().id === "completed") return h5(Fragment, null, api.pins(), api.bar(), h5("button", { "data-a": "completed-open" }, "Open Completed in Conversations"));
+              const ps = api.projects(), c4 = api.criteria(), all = api.rows(), pinned = new Set(api.model().pins.map((p5) => p5.ref)), matching = all.filter((t4) => !c4.states.length || c4.states.includes(t4.state)), rows = matching.filter((t4) => !pinned.has(api.ref(t4))), live = api.live();
+              const loaded = ps.filter((p5) => p5.complete === true && p5.tasks_live !== false && p5.issues), names = loaded.map((p5) => p5.name), partial = [.../* @__PURE__ */ new Set([...loaded.flatMap((p5) => p5.partial || []), ...view.S.display.all.partial.filter((n3) => names.includes(n3))])], missing = c4.projects.filter((id) => !view.S.projects.some((p5) => views.identity(p5) === id));
+              if (missing.length) partial.push("Selected projects unavailable");
+              const counted = all.filter((t4) => loaded.some((p5) => p5.root === t4.root)), known = (loaded.length > 0 || ps.length === 0) && !partial.length;
+              const errors = ps.filter((p5) => !loaded.includes(p5)).map((p5) => p5.name + ": " + (p5.error || "Project snapshot incomplete or stale"));
+              const counts = { counts: view.S.display.states.map(({ id, name }) => ({ state: id, name, n: known ? counted.filter((t4) => t4.state === id).length : null })), open: known ? counted.length : null };
+              const listing = c4.group === "combined" ? rows.map((t4) => app.taskRow(t4, true)) : api.unique(ps).map((p5) => {
+                const id = views.identity(p5), group = rows.filter((t4) => t4.boardIdentity === id), sources = (loaded.some((q4) => views.identity(q4) === id) ? loaded : ps).filter((q4) => views.identity(q4) === id), reason = sources.flatMap((q4) => [...q4.partial || [], ...q4.complete !== true || q4.tasks_live === false ? [q4.error || "Project snapshot incomplete or stale"] : [], ...view.S.display.all.partial.includes(q4.name) ? ["Project task data incomplete"] : []]).join("; ");
+                return group.length ? h5("section", { class: "all-tasks-project", key: id }, api.projectHeader(p5, matching.filter((t4) => t4.boardIdentity === id).length, live.filter((t4) => t4.boardIdentity === id), reason), h5("div", { class: "project-tasks", id: "project-tasks-" + encodeURIComponent(id), hidden: api.model().collapsed.includes(id) }, group.map((t4) => app.taskRow(t4, false)))) : null;
+              });
+              heldOffer = api.heldScope();
+              const heldCount = heldOffer.known ? heldOffer.targets.length : "?";
+              const start = { count: heldCount, label: "Start " + heldCount + " held \xB7 " + heldOffer.scope, disabled: !heldOffer.known || !heldOffer.targets.length || all.some((t4) => t4.state === "held" && app.startPending(t4)) };
+              return h5(Fragment, null, api.pins(), api.bar(), h5("header", { class: "filter-header tqp" }, h5("div", { class: "state-filters", dangerouslySetInnerHTML: { __html: blocks.counters(counts.counts, "", "Selected projects", partial, c4.states, counts.open, start) } })), api.admissionReview(), errors.map((reason) => h5("p", { class: "meta", role: "status", key: reason }, reason)), app.answerNotices(), rows.length ? listing : h5("div", { class: "body meta" }, !known ? "Tasks unknown" : "No matching tasks", " ", h5("button", { "data-a": "filter-reset" }, "Reset")));
+            },
+            receive: function(page) {
+              const pin = [...pinReads.values()].find((e4) => e4.id === page.id && e4.root === page.root);
+              if (!pin?.loading) return;
+              ui.cancel(pin.timer);
+              pin.loading = false;
+              pin.reason = page.reason;
+              pin.value = !page.reason && page.tasks?.[0]?.n === pin.task ? page.tasks[0] : null;
+              if (!pin.value && !pin.reason) pin.reason = "Board response omitted the task";
+              present();
+            },
+            outcome: function(t4) {
+              return module.exports.outcome(t4);
+            },
+            conditions: function() {
+              const c4 = api.criteria(), done = api.current().id === "completed";
+              return h5(
+                Fragment,
+                null,
+                h5("fieldset", null, h5("legend", null, "Projects"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "view-facet", "data-facet": "projects", "data-value": "", "aria-pressed": String(!c4.projects.length) }, "All projects"), api.unique(view.S.projects).map((p5) => h5("div", { class: "project-choice", key: views.identity(p5) }, h5("label", null, h5("input", { type: "checkbox", "data-project": views.identity(p5), "aria-label": "Include " + p5.name, disabled: !views.identity(p5), checked: !c4.projects.length || c4.projects.includes(views.identity(p5)) })), h5("button", { "data-a": "view-facet", "data-facet": "projects", "data-value": views.identity(p5), disabled: !views.identity(p5), "aria-label": "Show only " + p5.name, "aria-pressed": String(c4.projects.length === 1 && c4.projects[0] === views.identity(p5)) }, p5.name))))),
+                done ? h5(
+                  Fragment,
+                  null,
+                  h5("fieldset", null, h5("legend", null, "Period"), h5("div", { class: "options" }, [["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]].map(([value, label]) => h5("button", { "data-a": "view-period", "data-value": value, "aria-pressed": String(c4.period === value) }, label)))),
+                  h5("fieldset", null, h5("legend", null, "Outcome"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "view-facet", "data-facet": "outcomes", "data-value": "", "aria-pressed": String(!c4.outcomes.length) }, "All outcomes"), Object.entries(outcomes).map(([id, [mark, , label]]) => h5("button", { "data-a": "view-facet", "data-facet": "outcomes", "data-value": id, "aria-pressed": String(c4.outcomes.includes(id)) }, icon(mark), label))))
+                ) : (
+                  // #1700 A4: each state choice keeps its token tone (Review purple), as on the task rows.
+                  h5("fieldset", null, h5("legend", null, "States"), h5("div", { class: "facet-list" }, h5("button", { "data-a": "all-tasks", "aria-pressed": String(!c4.states.length) }, "All states"), view.S.display.states.map(({ id: s4, name: n3 }) => h5("button", { "data-a": "view-facet", "data-facet": "states", "data-value": s4, "aria-pressed": String(c4.states.includes(s4)) }, h5("span", { class: blocks.marks[s4][1] || null }, icon(blocks.marks[s4][0])), n3))))
+                )
+              );
+            },
+            actions: function() {
+              const c4 = api.criteria(), v4 = api.current();
+              return h5(
+                Fragment,
+                null,
+                v4.id !== "completed" && h5("fieldset", null, h5("legend", null, "Display"), h5("div", { class: "options" }, [["combined", "All together"], ["project", "By project"]].map(([value, label]) => h5("button", { "data-a": "view-group", "data-value": value, "aria-pressed": String(c4.group === value) }, label)))),
+                owned && v4.id === "completed" && h5("button", { "data-a": "completed-open" }, "Read finished work"),
+                !owned && api.naming(),
+                h5("div", { class: "options" }, h5("button", { "data-a": "view-save", disabled: !views.dirty(v4) }, icon("save"), "Save"), h5("button", { "data-a": "view-save-as", "aria-expanded": String(!!view.naming) }, "Save as\u2026"), h5("button", { "data-a": "view-reset" }, icon("rotate-ccw"), "Reset"), h5("button", { "data-a": "popup-close" }, "Done"))
+              );
+            },
+            naming: function() {
+              const v4 = api.current();
+              return view.naming && h5("div", { class: "view-naming" }, h5("input", { "data-view-name": "", "aria-label": "New view name", value: v4.draft, maxLength: 80, placeholder: "View name" }), h5("button", { "data-a": "view-add", disabled: !v4.draft.trim() || api.model().views.length >= 64 }, "Create"), h5("button", { "data-a": "view-cancel" }, "Cancel"));
+            },
+            cancelNaming: function() {
+              view.naming = false;
+              present();
+              menu.querySelector('[data-a="view-save-as"]')?.focus();
+            },
+            editor: function() {
+              return h5(Fragment, null, h5("div", { class: "popover-heading" }, h5("strong", null, "View"), button("x", "Close view editor", { "data-a": "popup-close" })), api.conditions(), api.actions());
+            },
+            // P-V1: Delete beside each custom view; the shortcut pin stays a separate control; one persisted Undo receipt.
+            presets: function() {
+              const m5 = api.model();
+              return h5(
+                owned ? "fieldset" : Fragment,
+                null,
+                owned ? h5("legend", null, "Saved views") : h5("div", { class: "popover-heading" }, h5("strong", null, "Saved views"), button("x", "Close saved views", { "data-a": "popup-close" })),
+                m5.views.map((v4) => h5("div", { class: "saved-view", key: v4.id }, h5("button", { "data-a": "view-select", "data-id": v4.id, "aria-pressed": String(v4.id === api.current().id) }, v4.name, views.dirty(v4) ? " *" : ""), button(v4.pinned ? "pin" : "pin-off", (v4.pinned ? "Remove shortcut for " : "Add shortcut for ") + v4.name, { "data-a": "view-pin", "data-id": v4.id, "aria-pressed": String(v4.pinned) }), !views.builtin(v4.id) && button("trash-2", "Delete view " + v4.name, { "data-a": "view-delete", "data-id": v4.id }))),
+                m5.undo && h5("div", { class: "view-receipt", role: "status" }, "Deleted ", h5("strong", null, m5.undo.view.name), button("undo-2", "Undo deleting " + m5.undo.view.name, { "data-a": "view-undo" })),
+                owned ? api.naming() : h5(Fragment, null, api.naming(), h5("button", { "data-a": "view-save-as", "aria-expanded": String(!!view.naming) }, "Save as\u2026")),
+                view.viewError && h5("p", { role: "alert" }, view.viewError)
+              );
+            },
+            // #1781: details carry a short question cue; the full question and options read in Conversations (input-scroll 04).
+            question: function(t4) {
+              if (t4.state !== "ask") return t4.card && h5("p", { class: "task-card-text" }, t4.card);
+              const q4 = t4.question, text = (q4?.parsed ? q4.problem : q4?.text) || t4.card || "Open the question to read and answer.";
+              return h5("p", { class: "task-card-text question-cue" }, text.length > 170 ? text.slice(0, 167) + "\u2026" : text);
+            },
+            // § 2 visual evidence: ask images as thumbnails that open full size; the link alone without the service's copy.
+            images: function(q4) {
+              const im = (q4?.evidence || []).filter((e4) => e4.image);
+              return im.length > 0 && h5("p", { class: "task-images" }, im.map((e4) => h5("a", { key: e4.url, href: e4.url, "data-url": e4.url, title: "Open " + e4.label + " full size" }, /^data:image\/(png|jpeg|gif|webp);base64,/.test(e4.src || "") ? h5("img", { class: "task-thumb", src: e4.src, alt: e4.label }) : e4.label + " \u2197")));
+            },
+            // M3/MP13: every open task has one detail surface in the main list scroll.
+            attention: function(t4) {
+              const im = t4.state === "ask" && api.images(t4.question), open = view.popup?.kind === "task" && view.popup.key === t4.key;
+              return h5(Fragment, null, im, open && h5("section", { id: "taskq-question-details", class: "task-inline-details question-task-details " + (blocks.marks[t4.state]?.[1] || ""), tabindex: -1, "aria-label": "Task details for #" + t4.n }, api.detail(t4)));
+            },
+            detail: function(t4) {
+              if (!t4) return null;
+              const p5 = view.S.projects.find((p6) => p6.root === t4.root), pinned = views.pinned(api.model(), api.ref(t4));
+              return h5(
+                Fragment,
+                null,
+                h5("div", { class: "popover-heading" }, app.answerSlot(t4, false), button(pinned ? "pin-off" : "pin", pinned ? "Unpin task" : "Pin task", { "data-a": "task-pin", "aria-pressed": String(pinned) }), button("x", "Close task details", { "data-a": "popup-close" })),
+                t4.wait && h5("p", { role: "status" }, t4.wait),
+                t4.publication?.reason && !t4.wait && h5("p", { role: "status" }, t4.publication.reason),
+                t4.enqueued && !t4.publication?.reason && h5("p", { class: "meta" }, "CI progress unknown in this snapshot."),
+                t4.failed && h5("p", { class: "alert" }, t4.failed),
+                t4.later && !t4.until && h5("p", { role: "status" }, t4.later),
+                api.question(t4),
+                t4.result && h5("p", { class: "task-card-text" }, "Result: " + t4.result),
+                require_task_health().details(t4),
+                h5("div", { class: "task-destinations" }, blocks.destinations(t4).map((d5) => d5.url ? h5("a", { href: d5.url, "data-url": d5.url, "data-destination": d5.kind }, icon(d5.kind === "native" ? "external-link" : "network"), d5.label) : h5("p", { class: "meta", "data-destination": d5.kind }, d5.label + " unavailable: " + d5.reason))),
+                (t4.blocked || []).map((b5) => h5("p", null, h5("a", { href: b5.url, "data-url": b5.url }, b5.ref), " \xB7 " + b5.reason)),
+                h5("div", { class: "row-actions" }, t4.state === "held" && app.startButton([t4]), h5("span", { dangerouslySetInnerHTML: { __html: require_task_controls().render(t4, { key: t4.key, url: t4.url, board: p5.board_kind, except: ["start"] }) } })),
+                h5(
+                  "details",
+                  { class: "task-more", "data-view-key": "more:" + t4.key },
+                  h5("summary", null, icon("info"), "Task info"),
+                  h5(
+                    "dl",
+                    null,
+                    h5("dt", null, "Runtime"),
+                    h5("dd", null, t4.runtime || "unknown"),
+                    h5("dt", null, "Host"),
+                    h5("dd", null, t4.host || "unknown"),
+                    h5("dt", null, "Role"),
+                    h5("dd", null, t4.role || "unknown"),
+                    h5("dt", null, "Session"),
+                    h5("dd", null, t4.session || t4.session_reason || "Session unavailable"),
+                    h5("dt", null, "Attempt"),
+                    h5("dd", null, t4.attempt || "unknown"),
+                    h5("dt", null, "Revision"),
+                    h5("dd", null, t4.revision ?? "unknown"),
+                    h5("dt", null, "Total age"),
+                    h5("dd", null, t4.total_age ?? "unknown"),
+                    h5("dt", null, "Steps"),
+                    h5("dd", null, Array.isArray(t4.steps) ? t4.steps.filter((s4) => s4.complete === true).length + " completed" : "unknown")
+                  ),
+                  Array.isArray(t4.steps) && t4.steps.length ? h5("ol", { class: "task-steps" }, t4.steps.map((s4) => h5("li", null, s4.state, " \xB7 ", s4.age ?? "duration unknown", s4.complete ? "" : " \xB7 current"))) : h5("p", { class: "meta" }, "Ordered stage history unavailable in this snapshot.")
+                ),
+                app.answerNotices(p5.issues)
+              );
+            },
+            // P-W4: the menu takes the View window's model whole; a switched view restores its own scroll and open task.
+            adopt: function(value) {
+              const prior = view.dashboard?.selected;
+              view.dashboard = views.normalize(value);
+              if (prior !== view.dashboard.selected) {
+                view.restoreScroll = api.current().scroll;
+                restore = true;
+              }
+              present();
+            },
+            popup: function() {
+              const p5 = view.popup;
+              if (!p5 || p5.kind === "task") return null;
+              return popover.render({ label: p5.kind === "editor" ? "View editor" : "Saved views", children: p5.kind === "editor" ? api.editor() : api.presets() });
+            },
+            place: function() {
+              if (restore && view.S && view.page === "home") {
+                restore = false;
+                const key = api.current().open, trigger = key && menu.querySelector('[data-a="task-detail"][data-key="' + CSS2.escape(key) + '"]');
+                if (!view.popup && trigger) {
+                  api.open("task", trigger, key, false);
+                  return;
+                }
+              }
+              if (view.popup) {
+                const selector = view.popup.kind === "task" ? '[data-a="task-detail"][data-key="' + CSS2.escape(view.popup.key) + '"]' : '[data-a="' + (view.popup.kind === "views" ? "view-list" : "view-editor") + '"]', trigger = menu.querySelector(selector);
+                if (trigger) view.popup.anchor = api.anchor(trigger);
+              }
+              for (const b5 of menu.querySelectorAll('[data-a="task-detail"]')) {
+                b5.setAttribute("aria-expanded", String(view.popup?.kind === "task" && view.popup.key === b5.dataset.key));
+                b5.setAttribute("aria-controls", "taskq-question-details");
+                b5.removeAttribute("aria-haspopup");
+              }
+              if (view.popup && view.popup.kind !== "task") popover.place(menu.querySelector("#taskq-popover"), view.popup.anchor);
+            },
+            click: function(e4) {
+              const link = e4.target.closest("[data-pin-open]");
+              if (link && pinReads.get(link.dataset.pinOpen)?.value?.state === "closed") {
+                api.unpin(link.dataset.pinOpen);
+                ui.defer(present, 0);
+                return false;
+              }
+              const b5 = e4.target.closest("button");
+              if (!b5 || b5.disabled) return false;
+              const d5 = b5.dataset, m5 = api.model();
+              if (d5.a === "search-open") {
+                view.searchOpen = !!api.criteria().query || !view.searchOpen;
+                present();
+                menu.querySelector(view.searchOpen ? "[data-task-query]" : "[data-a=search-open]")?.focus({ preventScroll: true });
+                return true;
+              }
+              if (d5.a === "search-clear") {
+                api.criteria().query = "";
+                view.searchOpen = false;
+                present();
+                menu.querySelector("[data-a=search-open]")?.focus({ preventScroll: true });
+                return true;
+              }
+              if (d5.a === "held-review") {
+                if (heldOffer?.known && heldOffer.targets.length) {
+                  heldReview = structuredClone(heldOffer);
+                  present();
+                  menu.querySelector("[data-a=held-confirm]")?.focus();
+                }
+                return true;
+              }
+              if (d5.a === "held-cancel") {
+                heldReview = null;
+                present();
+                menu.querySelector("[data-a=held-review]")?.focus();
+                return true;
+              }
+              if (d5.a === "held-confirm") {
+                if (!heldReview || heldReview.sent) return true;
+                const current = api.heldScope();
+                if (!current.known || current.signature !== heldReview.signature || !app.startHeld(heldReview.targets)) heldReview.error = "Held targets or scope changed; cancel and review the current drafts.";
+                else heldReview.sent = true;
+                present();
+                return true;
+              }
+              if (d5.a === "project-collapse") {
+                const closing = !m5.collapsed.includes(d5.project);
+                m5.collapsed = closing ? [...m5.collapsed, d5.project] : m5.collapsed.filter((id) => id !== d5.project);
+                if (closing && view.popup?.kind === "task" && api.live().some((t4) => t4.key === view.popup.key && t4.boardIdentity === d5.project)) api.close(false);
+                else present();
+                return true;
+              }
+              if (d5.a === "task-detail") {
+                if (view.popup?.kind === "task" && view.popup.key === d5.key) api.close();
+                else api.open("task", b5, d5.key, true);
+                return true;
+              }
+              if ((d5.a === "view-editor" || d5.a === "view-list") && view.viewsWindow) {
+                send({ a: "views-open" });
+                return true;
+              }
+              if (d5.a === "view-editor" || d5.a === "view-list") {
+                if (view.popup?.kind === (d5.a === "view-editor" ? "editor" : "views")) api.close();
+                else api.open(d5.a === "view-editor" ? "editor" : "views", b5);
+                return true;
+              }
+              if (d5.a === "popup-close") {
+                if (owned) send({ a: "hide" });
+                else api.close();
+                return true;
+              }
+              if (d5.a === "task-pin") {
+                const t4 = api.live().find((t5) => t5.key === view.popup?.key);
+                if (t4) views.toggle(m5, { ref: api.ref(t4), title: t4.title, url: t4.url });
+                api.close();
+                return true;
+              }
+              if (d5.a === "task-unpin") {
+                api.unpin(d5.ref);
+                present();
+                return true;
+              }
+              if (d5.a === "pin-retry") {
+                api.pinRead({ ref: d5.ref }, true);
+                present();
+                return true;
+              }
+              if (d5.a === "completed-open") {
+                api.openCompleted();
+                return true;
+              }
+              if (d5.a === "pin-transcript") {
+                const entry = pinReads.get(d5.ref);
+                if (entry?.value?.state === "closed") {
+                  api.openCompleted(entry);
+                  api.unpin(d5.ref);
+                  present();
+                }
+                return true;
+              }
+              if (d5.a === "view-select" && d5.id === "completed" && owned) {
+                view.completedEditor = true;
+                present();
+                return true;
+              }
+              if (d5.a === "view-select" && d5.id === "completed") {
+                api.close(false);
+                const completed = api.model().views.find((v4) => v4.id === "completed");
+                send({ a: "workspace", open: { page: "conversations", filter: "finished", criteria: completed?.working || api.criteria() } });
+                return true;
+              }
+              if (d5.a === "view-select") {
+                view.completedEditor = false;
+                if (!owned) api.current().scroll = menu.querySelector(".content")?.scrollTop || 0;
+                m5.selected = d5.id;
+                view.popup = null;
+                if (d5.id === "completed") api.openCompleted();
+                view.restoreScroll = api.current().scroll;
+                restore = true;
+                present();
+                menu.querySelector('[data-a="view-list"]')?.focus();
+                return true;
+              }
+              if (d5.a === "view-pin") {
+                const v4 = m5.views.find((v5) => v5.id === d5.id);
+                if (v4) v4.pinned = !v4.pinned;
+                present();
+                return true;
+              }
+              if (d5.a === "view-delete") {
+                if (views.remove(m5, d5.id)) {
+                  if (m5.selected === "all") view.restoreScroll = api.current().scroll;
+                  present();
+                  menu.querySelector((owned ? "" : "#taskq-popover ") + '[data-a="view-undo"]')?.focus();
+                }
+                return true;
+              }
+              if (d5.a === "view-undo") {
+                views.undo(m5);
+                present();
+                menu.querySelector((owned ? "" : "#taskq-popover ") + '[data-a="view-select"][aria-pressed="true"]')?.focus();
+                return true;
+              }
+              if (d5.a === "view-save-as") {
+                view.naming = true;
+                present();
+                menu.querySelector("[data-view-name]")?.focus();
+                return true;
+              }
+              if (d5.a === "view-cancel") {
+                api.cancelNaming();
+                return true;
+              }
+              if (d5.a === "view-add") {
+                if (views.add(m5, api.current().draft, "view-" + Array.from(crypto2.getRandomValues(new Uint8Array(16)), (b6) => b6.toString(16).padStart(2, "0")).join(""))) {
+                  view.naming = false;
+                  view.popup = null;
+                  present();
+                  menu.querySelector('[data-a="view-select"][aria-pressed="true"], [data-a="view-list"]')?.focus();
+                }
+                return true;
+              }
+              if (d5.a === "view-facet") {
+                const value = d5.value, key = d5.facet, current = api.criteria()[key];
+                if (!["states", "projects", "outcomes"].includes(key)) return true;
+                api.set({ [key]: !value ? [] : key === "projects" ? [value] : current.includes(value) ? current.filter((x5) => x5 !== value) : [...current, value] });
+                return true;
+              }
+              if (d5.a === "view-group") {
+                api.set({ group: d5.value });
+                return true;
+              }
+              if (d5.a === "view-period") {
+                api.set({ period: d5.value });
+                return true;
+              }
+              if (d5.a === "view-save") {
+                views.save(m5);
+                present();
+                return true;
+              }
+              if (d5.a === "view-reset" || d5.a === "filter-reset") {
+                views.reset(m5);
+                present();
+                return true;
+              }
+              if (d5.a === "all-tasks") {
+                api.set({ states: [] });
+                return true;
+              }
+              return false;
+            },
+            mount: function() {
+              ui.listen(menu, "focusin", (e4) => {
+                if (e4.target.hasAttribute("data-task-query")) view.searchOpen = true;
+              });
+              ui.listen(menu, "focusout", (e4) => {
+                if (e4.target.hasAttribute("data-task-query")) ui.defer(() => {
+                  if (!api.criteria().query && view.searchOpen && !document2.activeElement?.closest(".task-search")) {
+                    view.searchOpen = false;
+                    present();
+                  }
+                }, 0);
+              });
+              ui.listen(document2, "keydown", (e4) => {
+                if (e4.key === "Escape" && e4.target.hasAttribute?.("data-task-query")) {
+                  e4.preventDefault();
+                  e4.stopImmediatePropagation();
+                  if (!api.criteria().query) view.searchOpen = false;
+                  present();
+                  menu.querySelector("[data-a=search-open]")?.focus({ preventScroll: true });
+                }
+              }, true);
+              ui.listen(menu, "change", (e4) => {
+                if (!e4.target.hasAttribute("data-project")) return;
+                const value = e4.target.dataset.project, current = api.criteria().projects, selected = current.length ? current : api.unique(view.S.projects).map(views.identity).filter(Boolean);
+                api.set({ projects: e4.target.checked ? [...selected, value] : selected.filter((x5) => x5 !== value) });
+              });
+              ui.listen(document2, "keydown", (e4) => {
+                if (e4.key === "Escape" && view.naming) {
+                  e4.preventDefault();
+                  e4.stopImmediatePropagation();
+                  api.cancelNaming();
+                }
+              }, true);
+              ui.listen(menu, "input", (e4) => {
+                if (e4.target.hasAttribute("data-task-query")) {
+                  api.criteria().query = e4.target.value;
+                  present();
+                }
+                if (e4.target.hasAttribute("data-view-name")) {
+                  api.current().draft = e4.target.value.slice(0, 80);
+                  present();
+                }
+              });
+              ui.listen(document2, "pointerdown", (e4) => {
+                if (view.popup && view.popup.kind !== "task" && !e4.target.closest('#taskq-popover,#taskq-question-details,[data-a="task-detail"],[data-a="view-editor"],[data-a="view-list"]')) api.close(false);
+              });
+              ui.listen(window2, "resize", api.place);
+              ui.listen(menu, "scroll", api.place, true);
+            }
+          });
+          return api;
+        }
+      });
+    }
+  });
+
+  // src/reports.js
+  var require_reports = __commonJS({
+    "src/reports.js"(exports, module) {
+      "use strict";
+      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
+      var ui = require_ui_runtime();
+      var { execution } = ui;
+      if (typeof window !== "undefined") window.Prism = { manual: true, disableWorkerMessageHandler: true };
+      var Prism2 = require_prism_core();
+      require_prism_markup();
+      require_prism_css();
+      require_prism_clike();
+      require_prism_javascript();
+      require_prism_rust();
+      require_prism_python();
+      require_prism_bash();
+      require_prism_json();
+      require_prism_typescript();
+      require_prism_diff();
+      require_prism_sql();
+      require_prism_yaml();
+      var syntaxCache = /* @__PURE__ */ new Map();
+      var card = require_answer_card();
+      var composer = require_pm_composer().composer;
+      var time = require_relative_time();
+      var icons = require_ui_icons2();
+      var dashboard = require_task_dashboard();
+      var { create, body } = execution.module("reports", {
+        create: function({ send = ui.send, draw, defer = ui.defer, onOpen, onMove, navigation = () => ({ index: 0, length: 1 }), reading = () => {
+        }, transcript, id = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b5) => b5.toString(16).padStart(2, "0")).join("") }) {
+          let projects = [], pages = /* @__PURE__ */ new Map(), pending = /* @__PURE__ */ new Map(), selected = null, notice = "", draft = null, successor = null, readFailure = "", readQueue = [], reasonField = null;
+          const textPages = /* @__PURE__ */ new Map(), bodies = /* @__PURE__ */ new Map(), receipts = /* @__PURE__ */ new Map(), outcomes = /* @__PURE__ */ new Map(), key = (root, n3) => root + "#" + n3;
+          const saved = {}, controllers = /* @__PURE__ */ new Map(), displayedReads = /* @__PURE__ */ new Set();
+          const settled = (r4) => ["accepted", "drop", "made", "answered"].includes(r4.decision);
+          const namespace = (r4, kind) => "result:" + (projects.find((p5) => p5.root === r4.root)?.issues || r4.root) + "#" + r4.n + "@" + r4.sha + ":" + kind;
+          const receiptKey = (root, n3, sha) => key(root, n3) + "@" + sha;
+          const active = (op) => selected?.root === op.root && selected.n === op.n && selected.sha === op.sha;
+          function confirmed(op, r4) {
+            return r4.report?.n === op.n && r4.report?.sha === op.sha && (op.action === "read" ? r4.report.read : op.action === "open" ? true : op.action === "accept" ? r4.report.decision === "accepted" : op.action === "later" ? r4.report.decision === "later" && (!op.until || r4.report.later_until === op.until) : op.action === "drop" ? r4.report.decision === "drop" : op.action === "make" ? r4.report.decision === "made" : r4.successor > 0);
+          }
+          function outcome(op, text, next, shown = active(op)) {
+            const k5 = receiptKey(op.root, op.n, op.sha), prior = outcomes.get(k5) || {}, value = { notice: text === void 0 ? prior.notice || "" : text, successor: next === void 0 ? prior.successor || null : next };
+            outcomes.set(k5, value);
+            if (shown) {
+              notice = value.notice;
+              successor = value.successor;
+            }
+          }
+          function targets(ps) {
+            const seen = /* @__PURE__ */ new Set();
+            return ps.filter((p5) => {
+              const board = p5.issues || p5.root;
+              if (seen.has(board)) return false;
+              seen.add(board);
+              return true;
+            });
+          }
+          function request(root, action, extra = {}, resolve) {
+            if ([...pending.values()].some((p5) => p5.id !== extra.id && p5.root === root && p5.n === extra.n && p5.sha === extra.sha && (action === "read" || p5.action !== "read"))) {
+              resolve?.({ state: "unknown", reason: "Another result operation needs readback" });
+              return;
+            }
+            const op = { id: id(), root, action, ...extra };
+            pending.set(op.id, op);
+            send({ a: "reports", ...op });
+            if (resolve) op.resolve = resolve;
+            defer(() => {
+              if (pending.get(op.id) !== op) return;
+              op.unknown = true;
+              if (["read", "open"].includes(op.action)) {
+                pending.delete(op.id);
+                readFailure = "Result read outcome unknown; waiting for service readback.";
+              }
+              op.resolve?.({ state: "unknown", reason: "No bridge receipt received; check the same operation" });
+              op.resolve = null;
+              outcome(op, "Result outcome unknown; waiting for service readback.");
+              api.readNext();
+              draw();
+            }, action === "open" ? 3e4 : 18e4);
+          }
+          function cacheBody(r4) {
+            const k5 = receiptKey(r4.root, r4.n, r4.sha);
+            bodies.delete(k5);
+            bodies.set(k5, { root: r4.root, n: r4.n, sha: r4.sha, body: r4.body, verdict: r4.verdict, tasks: r4.tasks, lazy: false });
+            let bytes = 0;
+            for (const [key2, row] of [...bodies].reverse()) {
+              bytes += new TextEncoder().encode(JSON.stringify(row)).length;
+              if ((bodies.size > 2 || bytes > 2 * 1024 * 1024) && !active(row)) bodies.delete(key2);
+            }
+            for (const [key2, c4] of controllers) if (controllers.size > 16 && !active(c4) && ![...pending.values()].some((op) => op.root === c4.root && op.n === c4.n && op.sha === c4.sha)) controllers.delete(key2);
+          }
+          function readShown(r4) {
+            const k5 = receiptKey(r4.root, r4.n, r4.sha);
+            if (!r4.lazy && (r4.body || r4.kind === "task") && !r4.read && !displayedReads.has(k5)) {
+              displayedReads.add(k5);
+              request(r4.root, "read", { n: r4.n, sha: r4.sha });
+            }
+          }
+          function summary(text, heading) {
+            const lines = (text || "").split("\n"), start = lines.findIndex((l5) => l5.replace(/^#+\s*/, "").trim().toLowerCase() === heading.toLowerCase());
+            if (start < 0) return "";
+            const rest = lines.slice(start + 1), end = rest.findIndex((l5) => /^#{1,6}\s/.test(l5));
+            return rest.slice(0, end < 0 ? void 0 : end).join("\n").trim();
+          }
+          function textPage(r4, source) {
+            const key2 = receiptKey(r4.root, r4.n, r4.sha) + ":" + source;
+            let page = textPages.get(key2);
+            if (!page) {
+              const match = new RegExp("^report:" + source + "-(\\d+):").exec(navigation(r4).position?.key || "");
+              page = { start: match ? Number(match[1]) : 0, open: false };
+            }
+            textPages.delete(key2);
+            textPages.set(key2, page);
+            while (textPages.size > 24) textPages.delete(textPages.keys().next().value);
+            return page;
+          }
+          function textEnd(text, start) {
+            let end = Math.min(text.length, start + 32768), count = 0;
+            for (const match of text.slice(start, end).matchAll(/\n\s*\n/g)) if (++count === 63) {
+              end = start + match.index + match[0].length;
+              break;
+            }
+            if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1])) end++;
+            return end;
+          }
+          function textBody(r4, text, source) {
+            const page = textPage(r4, source), start = page.start, end = textEnd(text, start), key2 = source + (start ? "-" + start : "");
+            const turn = (next) => {
+              page.start = next;
+              reading("report:" + source + (next ? "-" + next : "") + ":0", r4);
+              draw();
+            };
+            return [body(text.slice(start, end), key2), (start > 0 || end < text.length) && h5("div", { class: "conversation-tools" }, h5("span", { class: "meta" }, "Text " + (start + 1) + "\u2013" + end + " / " + text.length), start > 0 && h5("button", { onClick: () => {
+              let before = 0;
+              for (let at = 0; at < start; ) {
+                before = at;
+                at = textEnd(text, at);
+              }
+              turn(before);
+            } }, "Previous text"), end < text.length && h5("button", { onClick: () => turn(end) }, "Next text"))];
+          }
+          function field(text, label) {
+            const lines = (text || "").split("\n"), start = lines.findIndex((l5) => l5.startsWith(label + ":"));
+            if (start < 0) return "Unknown: not recorded in the accepted hand-in.";
+            const rest = lines.slice(start + 1), end = rest.findIndex((l5) => /^(Changed|Checks|Open|Report):/.test(l5) && !l5.startsWith(label + ":"));
+            return [lines[start], ...rest.slice(0, end < 0 ? void 0 : end)].map((l5) => l5.startsWith(label + ":") ? l5.slice(label.length + 1).trim() : l5).join("\n");
+          }
+          function remember(op, report) {
+            const k5 = receiptKey(op.root, op.n, op.sha), won = receipts.get(k5);
+            const collected = pages.get(op.root)?.rows.find((r4) => r4.n === op.n && r4.sha === op.sha);
+            if (Number.isSafeInteger(collected?.comments_through) && (!Number.isSafeInteger(report.comments_through) || collected.comments_through > report.comments_through)) return collected;
+            if (won?.sha === op.sha && won.visible === false) return won;
+            const fields = { sha: report.sha };
+            for (const field2 of ["read", "decision", "visible", "pending_decision", "tasks_made", "comments_through", "later_until"]) if (Object.hasOwn(report, field2)) fields[field2] = report[field2];
+            if (op.action === "read" && won?.sha === op.sha) {
+              if (["later", "accepted"].includes(won.decision)) fields.decision = won.decision;
+              if (won.decision === "later") fields.later_until = won.later_until;
+              if (won.pending_decision === "make") fields.pending_decision = "make";
+            }
+            if (Number.isSafeInteger(won?.comments_through) && Number.isSafeInteger(fields.comments_through)) fields.comments_through = Math.max(won.comments_through, fields.comments_through);
+            const merged = { ...won?.sha === op.sha ? won : {}, ...fields };
+            receipts.set(k5, merged);
+            return merged;
+          }
+          const api = execution.module("reports.view", {
+            sync(ps, spare = 16 * 1024 * 1024) {
+              projects = targets(ps);
+              let retainedBytes = 0, retainedRows = 0;
+              for (const root of pages.keys()) if (!projects.some((p5) => p5.root === root)) pages.delete(root);
+              for (const p5 of projects) {
+                const data = p5.reports;
+                const incoming = [...data?.reports || [], ...data?.history || []], retained = data?.complete === true ? [] : (pages.get(p5.root)?.rows || []).filter((r4) => !incoming.some((v4) => v4.n === r4.n) && (active(r4) || ++retainedRows <= 192 && (retainedBytes += new TextEncoder().encode(JSON.stringify(r4)).length) <= spare / 2));
+                pages.set(p5.root, { rows: [...incoming, ...retained].map((r4) => {
+                  const k5 = receiptKey(p5.root, r4.n, r4.sha), won = receipts.get(k5);
+                  if (Number.isSafeInteger(r4.comments_through) && Number.isSafeInteger(won?.comments_through) && r4.comments_through >= won.comments_through) receipts.delete(k5);
+                  return receipts.has(k5) ? { ...r4, ...won } : r4;
+                }), unknown: data?.complete !== true, reason: data?.reason || (data?.complete === true ? "" : "Reports not collected yet") });
+              }
+              if (selected) {
+                const row = api.rows(true).find((r4) => key(r4.root, r4.n) === key(selected.root, selected.n) && r4.sha === selected.sha);
+                selected = row ? { ...selected, ...row, ...bodies.get(receiptKey(row.root, row.n, row.sha)) } : null;
+              }
+              for (const op of pending.values()) if (op.unknown && !op.checking && !pages.get(op.root)?.unknown) {
+                const row = pages.get(op.root)?.rows.find((r4) => r4.n === op.n && r4.sha === op.sha);
+                if (row && (confirmed(op, { report: row }) || settled(row) && ["accept", "later", "drop", "make"].includes(op.action))) {
+                  op.checking = true;
+                  defer(() => api.receive({ id: op.id, root: op.root, report: row }), 0);
+                }
+              }
+            },
+            bounds() {
+              return { bodySources: bodies.size, bodyBytes: [...bodies.values()].reduce((n3, r4) => n3 + new TextEncoder().encode(JSON.stringify(r4)).length, 0), controllers: controllers.size, textPages: textPages.size };
+            },
+            refresh() {
+              api.sync(projects);
+              draw();
+            },
+            rows(history2 = false) {
+              return projects.flatMap((p5) => (pages.get(p5.root)?.rows || []).filter((r4) => history2 || r4.visible !== false).map((r4) => ({ ...r4, root: p5.root }))).sort((a4, b5) => (b5.closed || 0) - (a4.closed || 0) || b5.n - a4.n);
+            },
+            unread() {
+              return api.rows().filter((r4) => !r4.read);
+            },
+            // R6 Decide: mirrors reports::decide; an undated or past Later returns, the oldest close first.
+            undecided(r4) {
+              const until = Date.parse(r4.later_until || "");
+              return r4.kind !== "task" && r4.visible !== false && !r4.pending_decision && (!r4.decision || r4.decision === "none" || r4.decision === "later" && !(until > Date.now()));
+            },
+            decide(rows = api.rows()) {
+              return rows.filter(api.undecided).sort((a4, b5) => (a4.closed || 0) - (b5.closed || 0) || a4.n - b5.n);
+            },
+            count() {
+              return projects.every((p5) => pages.has(p5.root) && !pages.get(p5.root).unknown) ? api.unread().length : null;
+            },
+            sources() {
+              return projects.map((p5) => ({ root: p5.root, name: p5.name, loaded: api.rows(true).filter((r4) => r4.root === p5.root).length, reason: pages.get(p5.root)?.unknown ? pages.get(p5.root).reason : "" }));
+            },
+            reason() {
+              return projects.flatMap((p5) => pages.get(p5.root)?.reason ? [p5.name + ": " + pages.get(p5.root).reason] : []).join("; ");
+            },
+            current() {
+              return selected;
+            },
+            feedback() {
+              return notice;
+            },
+            readFailure() {
+              return readFailure;
+            },
+            markRead(rows) {
+              readFailure = "";
+              const seen = new Set([...readQueue, ...pending.values()].map((r4) => receiptKey(r4.root, r4.n, r4.sha)));
+              for (const r4 of rows) if (!seen.has(receiptKey(r4.root, r4.n, r4.sha))) {
+                readQueue.push(r4);
+                seen.add(receiptKey(r4.root, r4.n, r4.sha));
+              }
+              api.readNext();
+            },
+            // M14: serialize bulk reads through the existing bounded native command queue.
+            readNext() {
+              if ([...pending.values()].some((p5) => p5.action === "read")) return;
+              const r4 = readQueue.shift();
+              if (r4) request(r4.root, "read", { n: r4.n, sha: r4.sha });
+            },
+            open(root, n3, sha) {
+              return execution.action("reports.card.open", () => {
+                const r4 = api.rows(true).find((r5) => r5.root === root && r5.n === n3 && (!sha || r5.sha === sha));
+                if (!r4) return false;
+                selected = { ...r4, ...bodies.get(receiptKey(root, n3, r4.sha)) };
+                if (r4.lazy && !selected.body) request(root, "open", { n: n3, sha: r4.sha });
+                displayedReads.delete(receiptKey(root, n3, r4.sha));
+                const prior = outcomes.get(receiptKey(root, n3, r4.sha));
+                notice = prior?.notice || "";
+                draft = null;
+                successor = prior?.successor || api.savedSuccessor(r4);
+                onOpen?.(selected);
+                draw();
+                readShown(r4);
+                return true;
+              })();
+            },
+            savedSuccessor(r4) {
+              const n3 = Object.values(saved).find((v4) => v4.request?.root === r4.root && v4.request?.n === r4.n && v4.request?.sha === r4.sha && v4.receipt?.state === "accepted" && v4.successor > 0)?.successor;
+              return n3 ? { n: n3, url: r4.url?.replace(/\d+$/, String(n3)) } : null;
+            },
+            focus(root, n3) {
+              const r4 = api.rows(true).find((r5) => r5.root === root && r5.n === n3);
+              if (!r4 || active(r4)) return;
+              selected = { ...r4, ...bodies.get(receiptKey(root, n3, r4.sha)) };
+              if (r4.lazy && !selected.body) request(root, "open", { n: n3, sha: r4.sha });
+              const prior = outcomes.get(receiptKey(root, n3, r4.sha));
+              notice = prior?.notice || "";
+              successor = prior?.successor || api.savedSuccessor(r4);
+            },
+            move(step) {
+              onMove?.(step);
+            },
+            act(action, text, until) {
+              if (!selected) return;
+              outcome(selected, "", null);
+              request(selected.root, action, { n: selected.n, sha: selected.sha, ...text === void 0 ? {} : { text }, ...until === void 0 ? {} : { until } });
+              draw();
+            },
+            receive(r4) {
+              const op = pending.get(r4.id);
+              if (!op || op.root !== r4.root) return false;
+              const shown = active(op);
+              const reply = { state: r4.reason ? r4.receipt?.outcome === "rejected" ? "rejected" : r4.receipts?.length ? "partial" : "unknown" : "accepted", reason: r4.reason };
+              if (r4.report?.n !== op.n || r4.report?.sha !== op.sha) {
+                reply.state = "unknown";
+                reply.reason = r4.reason || "No matching result receipt";
+              } else if (!r4.reason && !confirmed(op, r4)) {
+                reply.state = "rejected";
+                reply.reason = "The displayed action was not confirmed; review the current result decision.";
+              }
+              if (!["read", "open"].includes(op.action) && ["unknown", "partial"].includes(reply.state)) op.unknown = true;
+              else pending.delete(r4.id);
+              for (const [k5, v4] of Object.entries(saved)) if (v4.op?.id === r4.id && v4.request?.root === r4.root) {
+                saved[k5] = { ...v4, receipt: reply, ...reply.state === "accepted" && v4.op.text ? { draft: "" } : {}, ...reply.state === "accepted" && r4.successor > 0 ? { successor: r4.successor } : {} };
+                send({ a: "answer-local", key: k5, local: saved[k5] });
+              }
+              op.resolve?.(reply);
+              op.resolve = null;
+              for (const c4 of controllers.values()) c4.ui.receiveReceipt(c4.board, r4.id, reply);
+              if (reply.state !== "accepted") {
+                if (op.action === "read") readFailure = reply.reason;
+                if (r4.report?.n === op.n && r4.report.sha === op.sha) remember(op, r4.report);
+                const made = Array.isArray(r4.receipts) ? r4.receipts : [], uncertain = r4.receipt?.task;
+                outcome(op, reply.reason + (made.length ? " \xB7 Created held drafts: " + made.map((n3) => "#" + n3).join(", ") : "") + (uncertain > 0 && !made.includes(uncertain) ? " \xB7 Unverified draft: #" + uncertain : ""), void 0, shown);
+                api.readNext();
+                draw();
+                return true;
+              }
+              if (r4.report?.n === op.n && r4.report.sha === op.sha) {
+                const p5 = pages.get(r4.root), report = remember(op, r4.report);
+                if (op.action === "open" && r4.report.body !== void 0) {
+                  const body2 = { ...r4.report, root: r4.root, lazy: false };
+                  cacheBody(body2);
+                  if (shown) selected = { ...selected, ...body2 };
+                }
+                if (p5) p5.rows = p5.rows.map((row) => row.n !== op.n || row.sha !== op.sha ? row : { ...row, ...report, closed: row.closed });
+                if (selected && selected.sha === op.sha && key(selected.root, selected.n) === key(r4.root, op.n)) selected = { ...selected, ...report, closed: selected.closed };
+                if (op.action !== "read") outcome(op, report.visible === false ? report.decision === "made" ? "Created held drafts: " + (report.tasks_made || []).map((n3) => "#" + n3).join(", ") : "Report dropped." : op.action === "later" ? op.until ? "Later: back in Decide on " + op.until.slice(0, 10) + "." : "Kept in Reports for later." : "", void 0, shown);
+                if (r4.successor > 0) {
+                  outcome(op, "Created held draft. Read it back and start it separately.", { n: r4.successor, url: r4.successor_url || (typeof r4.report.url === "string" ? r4.report.url.replace(/\d+$/, String(r4.successor)) : null) }, shown);
+                  if (shown && draft === op.action) draft = null;
+                }
+                if (op.action === "accept") outcome(op, "Result accepted.", void 0, shown);
+              } else {
+                if (op.action === "read") readFailure = "Result read receipt unknown; waiting for service readback.";
+                outcome(op, "Report receipt unknown; waiting for service readback.", void 0, shown);
+              }
+              api.readNext();
+              draw();
+              if (op.action === "open" && shown) readShown(selected);
+              return true;
+            },
+            click(b5, ps) {
+              const action = b5.dataset.report;
+              if (!action) return false;
+              if (action === "source-retry" && selected) {
+                request(selected.root, "open", { n: selected.n, sha: selected.sha });
+                draw();
+              } else if (action === "open") api.open(b5.dataset.root, Number(b5.dataset.n));
+              else if (action === "reason-send") api.reasonSend();
+              else if (action === "date-send" && selected) {
+                const k5 = namespace(selected, "decision");
+                controllers.get(k5)?.ui.act(k5, selected.n, "submit");
+              } else if (action === "date-cancel" && selected) {
+                const k5 = namespace(selected, "decision");
+                controllers.get(k5)?.ui.act(k5, selected.n, "cancel-result");
+              } else if (action === "reason-cancel" && selected) {
+                const k5 = namespace(selected, "correction");
+                controllers.get(k5)?.ui.act(k5, selected.n, "cancel-result");
+              } else if (action === "unresolved") onOpen?.({ next: true });
+              else if (action === "previous") api.move(-1);
+              else if (action === "next") api.move(1);
+              return true;
+            },
+            threads() {
+              return api.rows(true).map((r4) => ({ id: "task:" + (projects.find((p5) => p5.root === r4.root)?.issues || r4.root) + "/" + r4.n, root: r4.root, board: projects.find((p5) => p5.root === r4.root)?.issues, conversation: r4.conversation, task: r4.n, report: r4.n, title: r4.title, result: r4.result, updated: r4.closed * 1e3, finished: true, needsDecision: api.undecided(r4), status: { accepted: "Accepted", drop: "Dropped", made: "Drafts created", answered: "Decided" }[r4.decision] || (r4.kind === "task" ? "Finished" : "Report"), unread: !r4.read, outcome: r4.outcome, closed: r4.closed, marker: api.undecided(r4) ? "Needs decision" : !r4.read ? "New" : "" }));
+            },
+            hydrate(locals) {
+              for (const [k5, v4] of Object.entries(locals || {})) if (k5.startsWith("result:") && !saved[k5] && typeof v4.draft === "string") {
+                saved[k5] = { ...v4 };
+                if (v4.op && ["sending", "unknown", "partial"].includes(v4.receipt?.state)) {
+                  saved[k5].receipt = { state: "unknown", reason: "Workspace reopened; check the original operation" };
+                  if (v4.request?.id === v4.op.id && typeof v4.request.root === "string" && Number.isSafeInteger(v4.request.n) && typeof v4.request.sha === "string") pending.set(v4.op.id, { ...v4.request, unknown: true });
+                }
+              }
+            },
+            cardRow(r4, kind) {
+              const choices = kind === "decision" ? [["Accept", "+ Acknowledge this result; - no new work.", "accept"], ["Later", r4.kind === "task" ? "+ Keep it for another decision; - revisit it yourself." : "+ Return to Decide on a date; - choose the date before Send.", "later"], ["Drop", "+ Dismiss this decision; - no follow-up work.", "drop"]] : kind === "correction" ? [["Reopen", "+ Request correction; - creates a linked held successor.", "reopen"], ["Follow up", "+ Add related work; - creates a separate held draft.", "followup"]] : [["Make tasks", "+ Create the displayed held drafts; - read back before separate Start.", "make"], ["Keep report", "+ Create nothing; - proposed work stays unfiled.", "keep"]];
+              return { ...r4, state: "closed", revision: r4.sha + ":" + kind, resultDecision: true, repeatable: kind !== "decision" || !settled(r4), question: { parsed: true, done: kind === "correction" ? "The original task stays closed." : "Work is closed; reading does not accept it.", problem: kind === "decision" ? "What should happen to this result?" : kind === "correction" ? "Correction or additional work?" : "Create these held drafts?", resultReason: kind === "correction", resultDate: kind === "decision" && r4.kind !== "task", choices: choices.map(([label, detail, action], i4) => ({ id: i4 + 1, label, text: label, detail, action, ...kind === "correction" || action === "later" && r4.kind !== "task" ? { reason: action } : {}, local: action === "keep", recommended: i4 === (kind === "correction" ? 1 : kind === "decision" && r4.outcome !== "success" ? 1 : 0) })), evidence: [] } };
+            },
+            capability(r4, kind) {
+              const p5 = projects.find((p6) => p6.root === r4.root), ops = [...pending.values(), ...Object.values(saved).filter((v4) => ["sending", "unknown", "partial"].includes(v4.receipt?.state)).map((v4) => v4.request).filter(Boolean)];
+              const blocked = ops.some((op) => op.root === r4.root && op.n === r4.n && op.sha === r4.sha && op.action !== "read" && op.id !== saved[namespace(r4, kind)]?.op?.id);
+              const reason = r4.lazy && !bodies.has(receiptKey(r4.root, r4.n, r4.sha)) ? "Reading the exact result source" : !p5 ? "Registered project unavailable" : p5.alive === false ? "Project observation stale" : p5.complete === false ? "Project observation incomplete" : pages.get(r4.root)?.unknown ? pages.get(r4.root).reason : r4.reason ? "Result unavailable: " + r4.reason : blocked ? "Another result operation needs readback" : kind === "decision" && settled(r4) ? "Report already decided" : kind === "make" && !r4.tasks?.length ? "No follow-up tasks proposed" : kind === "make" && settled(r4) ? "Report already decided" : r4.pending_decision === "make" && kind !== "make" ? "Make tasks needs readback" : "";
+              return { answer: !reason, composer: true, reason };
+            },
+            mount(menu) {
+              if (!selected) return;
+              for (const slot of menu.querySelectorAll("[data-result-card]")) {
+                const { body: body2, verdict, ...r4 } = selected, kind = slot.dataset.resultCard, k5 = namespace(r4, kind), row = api.cardRow(r4, kind);
+                let c4 = controllers.get(k5);
+                if (!c4) {
+                  const el = menu.ownerDocument.createElement("div");
+                  c4 = { root: r4.root, n: r4.n, sha: r4.sha, el, board: k5, ui: card.mount(el, { newId: id, capability: () => api.capability(api.rows(true).find((row2) => row2.root === r4.root && row2.n === r4.n && row2.sha === r4.sha) || r4, kind), load: () => saved[k5], save: (_b, _r, local) => {
+                    const prior = saved[k5], same = prior?.op?.id === local.op?.id;
+                    saved[k5] = { ...local, ...same && prior?.request ? { request: prior.request } : {}, ...same && prior?.successor ? { successor: prior.successor } : {} };
+                    send({ a: "answer-local", key: k5, local: saved[k5] });
+                    if (local.intent !== draft) {
+                      draft = local.intent;
+                      draw();
+                    }
+                  }, send: (_board, op) => {
+                    const action = op.choice ? row.question.choices.find((c5) => c5.id === op.choice)?.action : saved[k5]?.intent;
+                    if (!action) return Promise.resolve({ state: "rejected", reason: "Choose the result action first" });
+                    const current = api.rows(true).find((row2) => row2.root === r4.root && row2.n === r4.n && row2.sha === r4.sha);
+                    if (!current || !api.capability(current, kind).answer) return Promise.resolve({ state: "rejected", reason: "Result or project changed; nothing sent. Review its current state." });
+                    const prior = saved[k5]?.request;
+                    if (prior?.id !== op.id && action === "later" && r4.kind !== "task" && card.textProblem(row.question, op.text || "")) return Promise.resolve({ state: "rejected", reason: "Choose a future revisit date" });
+                    const requestData = prior?.id === op.id ? prior : { id: op.id, root: r4.root, n: r4.n, sha: r4.sha, action, ...op.text !== void 0 ? { text: op.text } : {}, ...action === "later" && r4.kind !== "task" ? { until: op.text + "T12:00:00Z" } : {} };
+                    if (requestData.root !== r4.root || requestData.n !== r4.n || requestData.sha !== r4.sha || requestData.action !== action || requestData.text !== op.text || action === "later" && r4.kind !== "task" && requestData.until !== op.text + "T12:00:00Z") return Promise.resolve({ state: "rejected", reason: "Saved result request differs from the displayed source; nothing sent" });
+                    saved[k5] = { ...saved[k5], request: requestData };
+                    return new Promise((resolve) => request(r4.root, action, { ...requestData, local_key: k5, local: saved[k5] }, resolve));
+                  } }) };
+                  controllers.set(k5, c4);
+                }
+                if (c4.el.parentNode !== slot) slot.append(c4.el);
+                c4.ui.update([{ board: k5, row }]);
+                if (kind === "correction" && menu.ownerDocument.defaultView.innerWidth <= 620) slot.closest("details").open = true;
+              }
+              const field2 = menu.querySelector("[data-c-field=result-reason]");
+              if (field2 && field2 !== reasonField) {
+                reasonField = field2;
+                const caret = saved[namespace(selected, "correction")]?.caret;
+                if (Array.isArray(caret)) field2.setSelectionRange(...caret);
+              }
+              readShown(selected);
+            },
+            reasonInput(text, caret) {
+              if (!selected) return;
+              const k5 = namespace(selected, "correction"), c4 = controllers.get(k5);
+              if (text === null && JSON.stringify(saved[k5]?.caret) === JSON.stringify(caret)) return;
+              if (c4) c4.ui.input(k5, selected.n, text, caret);
+              draw();
+            },
+            reasonSend() {
+              if (selected) {
+                const k5 = namespace(selected, "correction");
+                controllers.get(k5)?.ui.act(k5, selected.n, "submit");
+              }
+            },
+            dateInput(text) {
+              if (selected) {
+                const k5 = namespace(selected, "decision");
+                controllers.get(k5)?.ui.input(k5, selected.n, text);
+                draw();
+              }
+            },
+            section(ps) {
+              api.sync(ps);
+              const r4 = selected;
+              if (!r4) return h5("p", null, api.count() === null ? api.reason() || "Results unknown; waiting for collection." : "No results waiting for review.");
+              if (r4.lazy && !bodies.has(receiptKey(r4.root, r4.n, r4.sha))) return h5("article", { class: "report-card" }, h5("p", { role: "status" }, notice || "Reading the exact result source\u2026"), h5("button", { "data-report": "source-retry", disabled: [...pending.values()].some(active) }, "Retry source read"));
+              const proposals = textPage(r4, "proposals");
+              const ordinary = r4.kind === "task", nav = navigation(r4), k5 = namespace(r4, "correction"), local = saved[k5] || card.fresh(api.cardRow(r4, "correction")), context = api.cardRow(r4, "correction"), cap = api.capability(r4, "correction");
+              const decision = api.cardRow(r4, "decision"), date = saved[namespace(r4, "decision")] || card.fresh(decision), dateCap = api.capability(r4, "decision"), dateLive = ["actionable", "changed"].includes(card.status(decision, date, dateCap));
+              const [mark, tone, outcome2] = dashboard.outcome(r4);
+              const slot = (kind) => h5("div", { "data-result-card": kind, key: namespace(r4, kind) });
+              return h5(
+                "article",
+                { class: "report-card", "aria-label": ordinary ? "Completed result" : "Research report" },
+                h5(
+                  "div",
+                  { class: "conversation-tools" },
+                  h5("span", { class: "meta" }, (ordinary ? "Finished" : "Report") + " \xB7 " + (r4.read ? "Read" : "New") + (!ordinary ? " \xB7 " + ({ accepted: "Accepted", drop: "Dropped", made: "Drafts created", answered: "Decided", later: "Later" }[r4.decision] || "Decision open") : "")),
+                  h5("a", { href: r4.url, "data-url": r4.url }, "#" + r4.n),
+                  h5("button", { "data-report": "previous", disabled: nav.index <= 0 }, "Previous"),
+                  h5("button", { "data-report": "next", disabled: nav.index >= nav.length - 1 }, "Next")
+                ),
+                ordinary && h5("p", { class: "meta" }, h5("span", { class: tone }, icons.icon(mark), outcome2), r4.merged && h5("span", null, " \xB7 " + r4.merged), time.stamp(time.seconds(r4.closed), "Task closed")),
+                r4.reason && h5("p", { role: "status" }, "Result unknown: " + r4.reason),
+                !ordinary && h5("p", { class: "meta" }, "Verdict: " + (r4.experiment_verdict || "unknown"), time.stamp(time.seconds(r4.closed), "Report closed")),
+                ordinary ? [...["Changed", "Checks", "Open"].map((label) => h5("section", { key: label }, h5("h3", null, label), textBody(r4, field(r4.body, label), label.toLowerCase()))), r4.pr && h5("a", { href: r4.pr, "data-url": r4.pr }, "Open PR"), r4.verdict && h5("details", { "data-view-key": namespace(r4, "verdict") }, h5("summary", null, "Review and delivery"), textBody(r4, r4.verdict, "verdict"))] : r4.body ? [h5("h3", null, "Question"), textBody(r4, summary(r4.body, "Question"), "question"), h5("h3", null, "Recommendation"), textBody(r4, summary(r4.body, "Recommendation"), "recommendation")] : h5("p", null, "Report content unknown; waiting for background collection."),
+                (!ordinary || saved[namespace(r4, "decision")]?.op && ["sending", "unknown", "partial"].includes(saved[namespace(r4, "decision")]?.receipt?.state)) && (settled(r4) ? h5("p", { class: "meta" }, "Decision recorded: " + r4.decision + ". Retained in Finished.") : h5("section", null, slot("decision"), date.intent === "later" && h5(
+                  "div",
+                  { class: "result-date" },
+                  h5("label", null, "Revisit on", h5("input", { type: "date", "data-c-field": "result-date", "aria-label": "Revisit date", value: date.draft, min: new Date(Date.now() + 864e5).toISOString().slice(0, 10), disabled: !dateLive })),
+                  h5("p", { class: "meta" }, "The report returns to Decide on this date."),
+                  card.textProblem(decision.question, date.draft) && h5("p", { role: "status" }, card.textProblem(decision.question, date.draft)),
+                  h5("div", { class: "conversation-tools" }, h5("button", { "data-report": "date-send", disabled: !dateLive || !!card.textProblem(decision.question, date.draft) }, "Send"), h5("button", { "data-report": "date-cancel", disabled: !dateLive }, "Cancel"))
+                ))),
+                h5("details", { class: "result-other", open: !!local.intent, "data-view-key": namespace(r4, "other") }, h5("summary", null, "Other actions"), slot("correction")),
+                local.intent && composer({ id: "result-reason", field: "result-reason", label: (local.intent === "reopen" ? "Reopen" : "Follow-up") + " reason", placeholder: "What needs to change?", text: local.draft, disabled: !cap.answer || ["sending", "unknown", "partial"].includes(card.status(context, local, cap)), reason: "Creates a linked held successor. The original stays closed. Read it back before separate Start.", tools: h5("div", { class: "conversation-tools" }, h5("button", { "data-report": "reason-send", disabled: !cap.answer || !!card.textProblem(context.question, local.draft) || !["actionable", "changed"].includes(card.status(context, local, cap)) }, "Send"), h5("button", { "data-report": "reason-cancel", disabled: ["sending", "unknown", "partial"].includes(card.status(context, local, cap)) }, "Cancel")) }),
+                !ordinary && Array.isArray(r4.tasks) && h5("section", null, h5("h3", null, "Proposed tasks"), r4.tasks.length ? [h5("p", { class: "meta", "data-reading-key": "report:proposals-" + proposals.start + ":0" }, "Tasks " + (proposals.start + 1) + "\u2013" + Math.min(r4.tasks.length, proposals.start + 64) + " / " + r4.tasks.length), r4.tasks.slice(proposals.start, proposals.start + 64).map((t4, i4) => {
+                  const index = proposals.start + i4, page = textPage(r4, "proposal" + index);
+                  return h5("details", { key: index, open: page.open, "data-view-key": namespace(r4, "proposal" + index) }, h5("summary", { onClick: (e4) => {
+                    e4.preventDefault();
+                    page.open = !page.open;
+                    draw();
+                  } }, index + 1 + ". " + t4.title), page.open && textBody(r4, [t4.goal, ...(t4.acceptance || []).map((a4) => "- " + a4), ...t4.scope || []].join("\n\n"), "proposal" + index));
+                }), h5("div", { class: "conversation-tools" }, proposals.start > 0 && h5("button", { onClick: () => {
+                  proposals.start = Math.max(0, proposals.start - 64);
+                  reading("report:proposals-" + proposals.start + ":0", r4);
+                  draw();
+                } }, "Previous proposals"), proposals.start + 64 < r4.tasks.length && h5("button", { onClick: () => {
+                  proposals.start += 64;
+                  reading("report:proposals-" + proposals.start + ":0", r4);
+                  draw();
+                } }, "Next proposals"))] : h5("p", null, "No follow-up tasks proposed."), r4.tasks.length > 0 && h5("p", { class: "meta" }, "Make tasks creates held drafts linked to this report. Start them separately."), r4.pending_decision === "make" && h5("p", { role: "status" }, "Make tasks is pending. Retry Make tasks to reconcile the original claims."), (r4.tasks.length > 0 || r4.pending_decision === "make") && !settled(r4) && slot("make")),
+                !ordinary && r4.body && h5("details", { "data-view-key": namespace(r4, "full"), open: textPage(r4, "full").open, onToggle: (e4) => {
+                  const page = textPage(r4, "full");
+                  if (page.open !== e4.currentTarget.open) {
+                    page.open = e4.currentTarget.open;
+                    draw();
+                  }
+                } }, h5("summary", { "data-reading-key": "report:full", onClick: (e4) => {
+                  e4.preventDefault();
+                  const page = textPage(r4, "full");
+                  page.open = !page.open;
+                  e4.currentTarget.parentElement.open = page.open;
+                  draw();
+                } }, "Full report"), textPage(r4, "full").open && textBody(r4, r4.body, "full")),
+                transcript?.(r4),
+                notice && h5("p", { role: "status" }, notice),
+                !!(notice || successor || r4.tasks_made?.length) && ![...pending.values()].some((op) => active(op) && op.action !== "read") && h5(
+                  "div",
+                  { class: "conversation-tools result-next" },
+                  successor && h5("a", { href: successor.url, "data-url": successor.url }, "1. Read held draft #" + successor.n + " \u2605"),
+                  !!r4.tasks_made?.length && h5("details", { "data-view-key": namespace(r4, "drafts") }, h5("summary", null, "1. Read held drafts \u2605"), r4.tasks_made.map((n3) => h5("a", { href: r4.url?.replace(/\d+$/, String(n3)), "data-url": r4.url?.replace(/\d+$/, String(n3)), key: n3 }, "Read held draft #" + n3))),
+                  h5("button", { "data-report": "unresolved" }, successor || r4.tasks_made?.length ? "2. Next unresolved item" : "1. Next unresolved item \u2605"),
+                  h5("button", { "data-report": "stay" }, (successor || r4.tasks_made?.length ? "3" : "2") + ". Stay here")
+                )
+              );
+            }
+          });
+          return api;
+        },
+        // Keep untrusted Markdown as text/vnodes; evidence URLs are the only active content. No raw HTML.
+        body: function(text, source = "body", nativeAt) {
+          if (nativeAt === void 0) text = text.replace(/```taskq-tasks\n[\s\S]*?```/g, "").replace(/(^|\n)#{1,6}[ \t]+Proposed tasks[ \t]*(?=\n|$)/gi, "$1");
+          const lines = text.split("\n"), starts = [];
+          let offset = 0;
+          for (const line of lines) {
+            starts.push(offset);
+            offset += line.length + 1;
+          }
+          const blocks = [], props = (at) => nativeAt === void 0 ? source === null ? {} : { "data-reading-key": "report:" + source + ":" + blocks.length } : { "data-native-part": nativeAt + at, ...source ? { "data-reading-key": "report:" + source + ":part:" + (nativeAt + at) } : {} };
+          const plain = (text2, at) => {
+            const nodes = [];
+            for (let n3 = 0; n3 < text2.length; ) {
+              let end = Math.min(text2.length, n3 + 1024);
+              if (end < text2.length && /[\uD800-\uDBFF]/.test(text2[end - 1])) end++;
+              nodes.push(nativeAt === void 0 ? text2.slice(n3, end) : h5("span", { key: at + n3, ...props(at + n3) }, text2.slice(n3, end)));
+              n3 = end;
+            }
+            return nodes;
+          };
+          const inline = (text2, at) => {
+            const nodes = [];
+            let end = 0;
+            for (const m5 of text2.matchAll(/`(?<code>[^`\n]+)`|\*\*(?<strong>[^*\n]+)\*\*|\*(?<em>[^*\n]+)\*|_(?<italic>[^_\n]+)_|\[(?<label>[^\]\n]+)\]\((?<url>https?:\/\/[^\s)]+)\)|https?:\/\/[^\s<>\]\)]+/g)) {
+              nodes.push(...plain(text2.slice(end, m5.index), at + end));
+              const g5 = m5.groups, value = g5.code ?? g5.strong ?? g5.em ?? g5.italic ?? g5.label ?? m5[0], tag = g5.code !== void 0 ? "code" : g5.strong !== void 0 ? "strong" : g5.em !== void 0 || g5.italic !== void 0 ? "em" : "a";
+              nodes.push(h5(tag, { key: at + m5.index, ...tag === "a" ? { href: g5.url || m5[0], "data-url": g5.url || m5[0] } : {} }, plain(value, at + m5.index + (g5.strong !== void 0 ? 2 : tag === "a" && !g5.label ? 0 : 1))));
+              end = m5.index + m5[0].length;
+            }
+            return [...nodes, ...plain(text2.slice(end), at + end)];
+          };
+          const code = (text2, language, at) => {
+            const name = language.toLowerCase().split(/\s/)[0], grammar = Object.hasOwn(Prism2.languages, name) && Prism2.languages[name];
+            if (!grammar || text2.length > 8192) return plain(text2, at);
+            const key = name + "\n" + text2;
+            let tokens = syntaxCache.get(key);
+            try {
+              if (!tokens) {
+                tokens = Prism2.tokenize(text2, grammar);
+                syntaxCache.set(key, tokens);
+                while (syntaxCache.size > 16) syntaxCache.delete(syntaxCache.keys().next().value);
+              }
+            } catch {
+              return plain(text2, at);
+            }
+            let cursor = at;
+            const render = (token) => {
+              if (typeof token === "string") {
+                const nodes = plain(token, cursor);
+                cursor += token.length;
+                return nodes;
+              }
+              if (Array.isArray(token)) return token.map(render);
+              return h5("span", { class: "syntax-" + token.type }, render(token.content));
+            };
+            return render(tokens);
+          };
+          const list = (line) => /^\s*(?:([-*+])|(\d+)[.)])\s+(.+)$/.exec(line);
+          for (let i4 = 0; i4 < lines.length; ) {
+            if (!lines[i4].trim()) {
+              i4++;
+              continue;
+            }
+            const start = i4, at = starts[i4], fence = /^\s*(`{3,}|~{3,})([^\n]*)$/.exec(lines[i4]);
+            let node;
+            if (lines[i4].trim() === "<oai-mem-citation>" && lines.slice(i4 + 1).some((l5) => l5.trim() === "</oai-mem-citation>")) {
+              i4++;
+              while (i4 < lines.length && lines[i4].trim() !== "</oai-mem-citation>") i4++;
+              i4++;
+              node = h5("details", { "data-view-key": "metadata:" + source + ":" + at }, h5("summary", { class: "source-toggle" }, "Provider citation metadata"), h5("pre", null, plain(lines.slice(start, i4).join("\n"), at)));
+            } else if (fence) {
+              i4++;
+              const begin = i4;
+              while (i4 < lines.length && !lines[i4].trim().startsWith(fence[1])) i4++;
+              node = h5("pre", null, h5("code", { "aria-label": (fence[2].trim() || "Text") + " code" }, code(lines.slice(begin, i4).join("\n"), fence[2].trim(), starts[begin] ?? text.length)));
+              if (i4 < lines.length) i4++;
+            } else if (/^#{1,6}\s/.test(lines[i4])) {
+              const heading = /^#{1,6}\s+/.exec(lines[i4])[0];
+              node = h5("h3", null, inline(lines[i4].slice(heading.length), at + heading.length));
+              i4++;
+            } else if (list(lines[i4])) {
+              const ordered = !!list(lines[i4])[2], items = [];
+              while (i4 < lines.length) {
+                const m5 = list(lines[i4]);
+                if (!m5 || !!m5[2] !== ordered) break;
+                items.push(h5("li", { key: i4, ...ordered ? { value: Number(m5[2]) } : {}, ...props(starts[i4]) }, inline(m5[3], starts[i4] + lines[i4].indexOf(m5[3]))));
+                i4++;
+              }
+              node = h5(ordered ? "ol" : "ul", null, items);
+            } else {
+              i4++;
+              while (i4 < lines.length && lines[i4].trim() && !/^\s*(`{3,}|~{3,})|^#{1,6}\s/.test(lines[i4]) && !list(lines[i4]) && lines[i4].trim() !== "<oai-mem-citation>") i4++;
+              node = h5("p", null, inline(lines.slice(start, i4).join("\n"), at));
+            }
+            Object.assign(node.props, { ...props(at), style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } });
+            node.key = at;
+            blocks.push(node);
+          }
+          return blocks;
+        }
+      });
+      module.exports = { create, body };
+    }
+  });
+
+  // src/notification-panel.js
+  var require_notification_panel = __commonJS({
+    "src/notification-panel.js"(exports, module) {
+      "use strict";
+      var time = require_relative_time();
+      var { h: h5 } = (init_preact(), __toCommonJS(preact_exports));
+      var { icon } = require_ui_icons2();
+      var { execution } = require_ui_runtime();
+      var kinds = { ask: "Question", close: "Finished", failed: "Failed", gone: "Attempt ended", blocked: "Blocked" };
+      var api = execution.module("notificationPanel", {
+        label: function(kind) {
+          return kinds[kind] || "Event";
+        },
+        // M14: result SHA owns result reads; local event markers never become queue/decision state.
+        rows: function(projects = [], results = [], marks = {}) {
+          const seen = /* @__PURE__ */ new Set(), rows = [], ids = /* @__PURE__ */ new Set(), byRoot = /* @__PURE__ */ new Map(), byTask = /* @__PURE__ */ new Map();
+          for (const r4 of results) {
+            if (!byRoot.has(r4.root)) byRoot.set(r4.root, []);
+            byRoot.get(r4.root).push(r4);
+            byTask.set(r4.root + "#" + r4.n, r4);
+          }
+          const closed = new Set(byTask.keys());
+          for (const p5 of projects) {
+            const board = p5.issues || p5.root;
+            if (seen.has(board)) continue;
+            seen.add(board);
+            const tasks = new Map((p5.tasks || []).map((t4) => [t4.n, t4]));
+            const add = (r4) => {
+              r4.id = JSON.stringify([board, r4.source, r4.n, r4.source === "result" ? r4.sha : [r4.at, r4.kind, r4.event]]);
+              r4.read = r4.source === "result" ? !!r4.read : marks[r4.id] === "read" || marks[r4.id] === "cleared";
+              if (marks[r4.id] !== "cleared" && !ids.has(r4.id)) {
+                ids.add(r4.id);
+                rows.push(r4);
+              }
+            };
+            for (const r4 of byRoot.get(p5.root) || []) add({ ...r4, source: "result", resultKind: r4.kind, kind: "close", at: r4.closed, project: p5.name });
+            for (const e4 of p5.events || []) {
+              if (!kinds[e4[1]] || e4[1] === "close" && closed.has(p5.root + "#" + e4[3])) continue;
+              const task = tasks.get(e4[3]), result = byTask.get(p5.root + "#" + e4[3]);
+              add({ source: "event", root: p5.root, project: p5.name, n: e4[3], at: e4[0], kind: e4[1], event: e4[2], title: task?.title || result?.title || "Task #" + e4[3] });
+            }
+          }
+          return rows.sort((a4, b5) => b5.at - a4.at || b5.n - a4.n || a4.id.localeCompare(b5.id));
+        },
+        groups: function(rows) {
+          const groups = [], active = /* @__PURE__ */ new Map();
+          for (const row of rows) {
+            const series = /^(.*?)\b([1-9]\d*)\/([1-9]\d*)\b/.exec(row.title), ordinal = series && Number(series[2]);
+            const key = series && ordinal <= Number(series[3]) ? JSON.stringify([row.root, row.kind, series[1], series[3]]) : null, prior = active.get(key);
+            if (key && prior && prior.rows.at(-1).at - row.at <= 600 && !prior.ordinals.has(ordinal)) {
+              prior.rows.push(row);
+              prior.ordinals.add(ordinal);
+            } else {
+              const group = { title: series?.[1].trim(), rows: [row], ordinals: /* @__PURE__ */ new Set([ordinal]) };
+              groups.push(group);
+              if (key) active.set(key, group);
+            }
+          }
+          return groups;
+        },
+        // #2193: unread events of one task and kind (Question, Attempt ended, Blocked) are one row with a count, wherever they
+        // fall in the list; read events keep merging only with an adjacent event of the same attempt.
+        collapse: function(rows = []) {
+          const groups = [], fresh = /* @__PURE__ */ new Map();
+          for (const r4 of rows) {
+            if (r4.source === "event" && !r4.read) {
+              const key = JSON.stringify([r4.root, r4.n, r4.kind]), g5 = fresh.get(key);
+              if (g5) g5.rows.push(r4);
+              else {
+                const group = { rows: [r4] };
+                fresh.set(key, group);
+                groups.push(group);
+              }
+              continue;
+            }
+            const last = groups.at(-1), same = last && last.rows[0].read && last.rows[0].kind === r4.kind && last.rows[0].n === r4.n && last.rows[0].root === r4.root && last.rows[0].event?.attempt === r4.event?.attempt;
+            if (same) last.rows.push(r4);
+            else groups.push({ rows: [r4] });
+          }
+          return groups;
+        },
+        // M14: intersecting sets of canonical source identities, independent of event/page counts.
+        attention: function(projects = [], results = [], messages = {}, marks = {}, owners = [], sidebar = {}) {
+          const fresh = /* @__PURE__ */ new Set(), needs = /* @__PURE__ */ new Set(), owned = new Set(owners.map((c4) => c4.id)), links = /* @__PURE__ */ new Map();
+          for (const p5 of projects) for (const t4 of p5.tasks || []) if (owned.has(t4.conversation?.id)) links.set((p5.issues || p5.root) + "/" + t4.n, t4.conversation.id);
+          for (const r4 of results) {
+            const p5 = projects.find((p6) => p6.root === r4.root);
+            if (owned.has(r4.conversation)) links.set((p5?.issues || r4.root) + "/" + r4.n, r4.conversation);
+          }
+          const key = (board, n3) => links.has(board + "/" + n3) ? "owner:" + links.get(board + "/" + n3) : "task:" + board + "/" + n3;
+          const archived = new Set(owners.filter((c4) => c4.archived).map((c4) => "owner:" + c4.id));
+          for (const id of Object.keys(sidebar.archived || {})) archived.add(id);
+          for (const r4 of messages.entries || []) if (r4.archived && r4.kind === "question" && !links.has(r4.board + "/" + r4.task)) archived.add(key(r4.board, r4.task));
+          const add = (set, id) => {
+            if (!archived.has(id)) set.add(id);
+          };
+          for (const r4 of api.rows(projects, results, marks)) if (!r4.read) {
+            const p5 = projects.find((p6) => p6.root === r4.root);
+            add(fresh, key(p5?.issues || r4.root, r4.n));
+          }
+          for (const r4 of messages.entries || []) if (!r4.archived && marks[JSON.stringify(["message", r4.key])] !== "cleared") {
+            const id = r4.kind === "question" ? key(r4.board, r4.task) : "owner:" + r4.id;
+            if (!r4.read) add(fresh, id);
+          }
+          for (const p5 of projects) for (const t4 of p5.tasks || []) if (t4.state === "ask") add(needs, key(p5.issues || p5.root, t4.n));
+          for (const r4 of results) if (r4.kind !== "task" && r4.visible !== false && !r4.pending_decision && (!r4.decision || r4.decision === "none" || r4.decision === "later" && !(Date.parse(r4.later_until) > Date.now()))) {
+            const p5 = projects.find((p6) => p6.root === r4.root);
+            add(needs, key(p5?.issues || r4.root, r4.n));
+          }
+          return { fresh, needs, key };
+        },
+        create: function({ view, reports, send, draw, messages }) {
+          let notice = "";
+          const historyViews = /* @__PURE__ */ new Map();
+          const model = execution.module("notificationPanel.view", {
+            rows() {
+              return api.rows(view.S.projects || [], reports.rows(), view.S.notify?.inbox || {});
+            },
+            reasons() {
+              return [.../* @__PURE__ */ new Set([...reports.count() === null ? ["Results incomplete; check result collection."] : [], ...(view.S.projects || []).flatMap((p5) => p5.events_error || p5.alive === false ? [p5.name + ": " + (p5.events_error || "project observation stale")] : [])])];
+            },
+            messages() {
+              return (view.S.messages?.entries || []).filter((r4) => !r4.archived && view.S.notify?.inbox?.[JSON.stringify(["message", r4.key])] !== "cleared");
+            },
+            taskMessages(board, n3) {
+              return model.messages().filter((r4) => r4.kind === "question" && r4.board === board && r4.task === n3);
+            },
+            attention(sidebar = view.S.conversations?.sidebar || {}) {
+              const sets = api.attention(view.S.projects || [], reports.rows(), view.S.messages, view.S.notify?.inbox || {}, view.S.conversations?.items || [], sidebar), reasons = [...model.reasons(), ...view.S.messages?.complete !== true ? ["Message collection incomplete"] : [], ...view.S.conversations?.complete !== true ? ["Conversation collection incomplete"] : []];
+              return { ...sets, reasons };
+            },
+            label(a4 = model.attention()) {
+              return "Conversations \xB7 " + a4.fresh.size + (a4.reasons.length ? " loaded New" : " New") + " \xB7 " + a4.needs.size + (a4.reasons.length ? " loaded Needs me" : " Needs me") + (a4.reasons.length ? " \xB7 Partial: " + a4.reasons.join("; ") : "");
+            },
+            entry() {
+              const a4 = model.attention(), label = model.label(a4), badge = (kind, n3, mark) => h5("span", { class: "communication-count " + kind, title: kind + ": " + n3, "aria-label": kind + ": " + n3 }, icon(mark), h5("span", { "aria-hidden": "true" }, a4.reasons.length ? n3 ? "\u2265" + (n3 > 99 ? "99" : n3) : "?" : n3 > 99 ? "99+" : String(n3)));
+              return h5("button", { class: "conversations-entry", type: "button", "data-a": "workspace", "data-page": "conversations", "data-thread": "centre", title: label, "aria-label": label }, icon("messages-square"), badge("New", a4.fresh.size, "inbox"), badge("Needs me", a4.needs.size, "message-circle-question"), a4.reasons.length > 0 && h5("span", { class: "notification-warning" }, icon("circle-alert")));
+            },
+            bell() {
+              return model.entry();
+            },
+            save(action, rows) {
+              if (rows.length) send({ a: "notification-state", action, ids: rows.map((r4) => r4.id) });
+            },
+            read(rows, entries = []) {
+              if (entries.length) messages?.("read", entries.filter((r4) => !r4.read));
+              model.save("read", rows.filter((r4) => r4.source !== "result" && !r4.read));
+              reports.markRead(rows.filter((r4) => r4.source === "result" && !r4.read));
+            },
+            receive(r4) {
+              notice = r4.reason || "";
+              draw();
+            },
+            click(b5) {
+              const action = b5.dataset.notification;
+              if (!action) return false;
+              const rows = model.rows();
+              if (action === "read") model.read(rows, model.messages());
+              else if (action === "clear") model.save("clear", [...rows.filter((r4) => r4.read), ...model.messages().filter((r4) => r4.read).map((r4) => ({ id: JSON.stringify(["message", r4.key]) }))]);
+              return true;
+            },
+            tools() {
+              const rows = [...model.rows(), ...model.messages()];
+              return h5("div", { class: "news-tools" }, h5("div", { class: "conversation-tools" }, h5("button", { "data-notification": "read", disabled: !!view.messageBusy || !rows.some((r4) => !r4.read) }, "Mark all read"), h5("button", { "data-notification": "clear", disabled: !rows.some((r4) => r4.read) }, "Clear read")), notice && h5("p", { role: "alert" }, notice), reports.readFailure() && h5("p", { role: "status" }, reports.readFailure()), model.reasons().map((reason) => h5("p", { role: "status", class: "meta", key: reason }, reason)));
+            },
+            history(rows = [], extra, key = rows[0]?.root + "#" + rows[0]?.n, entries = []) {
+              if (!rows.length && !extra && !entries.some((r4) => !r4.read)) return null;
+              const state = historyViews.get(key) || { open: false, start: 0 };
+              historyViews.delete(key);
+              historyViews.set(key, state);
+              while (historyViews.size > 24) historyViews.delete(historyViews.keys().next().value);
+              const all = api.collapse(rows), groups = all.slice(state.start, state.start + 64);
+              return h5("details", { class: "thread-events", "data-view-key": "history:" + key, open: state.open, onToggle: (e4) => {
+                if (state.open !== e4.currentTarget.open) {
+                  state.open = e4.currentTarget.open;
+                  draw();
+                }
+              } }, h5("summary", { onClick: (e4) => {
+                e4.preventDefault();
+                state.open = !state.open;
+                e4.currentTarget.parentElement.open = state.open;
+                draw();
+              } }, "Earlier history" + (rows.length ? " \xB7 " + rows.length + " events" : "")), state.open && [
+                (rows.some((r4) => !r4.read) || entries.some((r4) => !r4.read)) && h5("button", { "data-notification": "thread-read", disabled: !!view.messageBusy, onClick: () => model.read(rows, entries) }, "Mark thread read"),
+                groups.map((g5) => {
+                  const r4 = g5.rows[0], text = (r4.read ? "Read" : "New") + " \xB7 " + (r4.source === "result" && r4.resultKind !== "task" ? "Report ready" : kinds[r4.kind]) + " \xB7 " + r4.project + " \xB7 #" + r4.n;
+                  return h5("div", { key: r4.id, "data-event": r4.id, class: "meta" }, h5("p", null, text, g5.rows.length > 1 ? " \xD7" + g5.rows.length : "", time.stamp(time.seconds(r4.at), "Event recorded"), !r4.read && h5("button", { "data-notification": "group-read", disabled: !!view.messageBusy, onClick: () => model.read(g5.rows) }, "Mark read")), g5.rows.length > 1 ? h5("details", null, h5("summary", null, "Source events"), g5.rows.map((r5) => h5("p", { key: r5.id, "data-event": r5.id }, r5.event || r5.kind, time.stamp(time.seconds(r5.at), "Event recorded")))) : null);
+                }),
+                h5("div", { class: "event-tools" }, state.start > 0 && h5("button", { onClick: () => {
+                  state.start = Math.max(0, state.start - 64);
+                  draw();
+                } }, "Newer events"), state.start + 64 < all.length && h5("button", { onClick: () => {
+                  state.start += 64;
+                  draw();
+                } }, "Older events")),
+                typeof extra === "function" ? extra() : extra
+              ]);
+            }
+          });
+          return model;
+        }
+      });
+      module.exports = api;
+    }
+  });
+
+  // src/tray-view-state.js
+  var require_tray_view_state = __commonJS({
+    "src/tray-view-state.js"(exports, module) {
+      "use strict";
+      var { execution } = require_ui_runtime();
+      var { normalize, create } = execution.module("tray.viewState", {
+        normalize: function(saved, snapshot, routes, root = "home") {
+          const roots = new Set((snapshot.projects || []).map((p5) => p5.root)), states = new Set(Object.keys(require_project_blocks().marks));
+          const { entry } = execution.module("tray.viewState.normalize", {
+            entry: function(value) {
+              const v4 = value && typeof value === "object" ? value : {};
+              if (v4.page === "messages" && root === "conversations") return entry({ ...v4, page: root, section: "inbox" });
+              let page = typeof v4.page === "string" ? v4.page : root;
+              const project = roots.has(page) ? page : null;
+              if (!project && !Object.hasOwn(routes, page)) page = v4.project || page.startsWith("/") ? Object.hasOwn(routes, "projects") ? "projects" : root : page.startsWith("settings/") && Object.hasOwn(routes, "settings") ? "settings" : Object.hasOwn(routes, v4.parent) ? v4.parent : root;
+              const valid = page === v4.page, open = {};
+              const work = valid && v4.working && typeof v4.working === "object" && !Array.isArray(v4.working) ? Object.fromEntries(Object.entries(v4.working).filter(([root2, on]) => roots.has(root2) && on === true)) : null;
+              if (valid && v4.open && typeof v4.open === "object") {
+                for (const [k5, b5] of Object.entries(v4.open)) if (typeof b5 === "boolean" && k5.length <= 240) open[k5] = b5;
+              }
+              return {
+                page,
+                operation: root !== "home" && v4.operation && typeof v4.operation.operation === "string" ? { operation: v4.operation.operation, root: typeof v4.operation.root === "string" ? v4.operation.root : null } : null,
+                project: roots.has(page) ? page : null,
+                parent: routes[page]?.parent || root,
+                taskFilter: valid && Array.isArray(v4.taskFilter) ? [...new Set(v4.taskFilter.filter((s4) => states.has(s4)))] : null,
+                working: work && (Object.keys(work).length || !Object.keys(v4.working).length) ? work : null,
+                aiRoot: roots.has(v4.aiRoot) || root !== "home" && typeof v4.aiRoot === "string" ? v4.aiRoot : null,
+                answer: root !== "home" && v4.answer && typeof v4.answer.board === "string" && Number.isSafeInteger(v4.answer.task) && v4.answer.task > 0 ? { board: v4.answer.board, task: v4.answer.task, revision: v4.answer.revision, root: v4.answer.root } : null,
+                ...root !== "home" ? { messageFilter: ["all", "pending", "archived"].includes(v4.messageFilter) ? v4.messageFilter : "all", message: typeof v4.message === "string" && /^[a-f0-9]{64}$/.test(v4.message) ? v4.message : null, section: v4.section === "inbox" ? "inbox" : null } : {},
+                scroll: valid && Number.isFinite(v4.scroll) && v4.scroll >= 0 ? v4.scroll : 0,
+                open,
+                focus: valid && v4.focus && /^(BUTTON|A|SUMMARY|INPUT|SELECT|TEXTAREA|H1|DIV)$/.test(v4.focus.tag) && typeof v4.focus.key === "string" && v4.focus.key.length <= 2048 && Number.isInteger(v4.focus.index) && v4.focus.index >= 0 && v4.focus.index < 4096 ? v4.focus : null,
+                unavailable: !valid && typeof v4.page === "string" ? "Requested destination is no longer available." : typeof v4.unavailable === "string" ? v4.unavailable.slice(0, 160) : null
+              };
+            }
+          });
+          if (saved?.schema !== 1) return { schema: 1, current: entry(null), trail: [], ...root === "home" ? { dashboard: require_task_views().normalize(null) } : {} };
+          const state = { schema: 1, ...root === "home" ? { dashboard: require_task_views().normalize(saved.dashboard, saved.current) } : {}, current: entry(saved.current), trail: (Array.isArray(saved.trail) ? saved.trail : []).slice(-32).filter((v4) => v4 && entry(v4).page === v4.page).map(entry) };
+          if (root === "conversations") while (state.trail.length && new TextEncoder().encode(JSON.stringify(state)).length > 65536) state.trail.shift();
+          return state;
+        },
+        create: function(view, { menu, document: document2, send, defer, cancel, routes, trail, root = "home" }) {
+          let hydrated = false, timer = null, last = "", restoring = false;
+          const api = execution.module("tray.viewState.instance", {
+            groups: function() {
+              return Object.fromEntries([...menu.querySelectorAll("details[data-view-key]:not(.shell-overflow)")].map((d5) => [d5.dataset.viewKey, d5.open]));
+            },
+            capture: function() {
+              const active = document2.activeElement?.closest?.(".shell-overflow")?.querySelector("summary") || document2.activeElement, key = active && JSON.stringify(active.dataset), focus = active && menu.contains?.(active) ? { tag: active.tagName, key, index: [...menu.querySelectorAll(active.tagName)].filter((e4) => JSON.stringify(e4.dataset) === key).indexOf(active) } : null;
+              return { page: view.page, operation: view.operation, project: view.S?.projects?.some((p5) => p5.root === view.page) ? view.page : null, parent: routes[view.page]?.parent || root, taskFilter: view.taskFilter, working: view.working, aiRoot: view.aiRoot, answer: view.answer, messageFilter: view.messageFilter, message: view.message, section: view.section, scroll: (menu.querySelector(".content") || document2.scrollingElement)?.scrollTop || 0, open: root === "conversations" ? { ...view.disclosures, ...api.groups() } : api.groups(), focus, unavailable: view.unavailable };
+            },
+            apply: function(v4) {
+              view.page = v4.page;
+              view.operation = v4.operation;
+              view.answer = v4.answer;
+              view.message = v4.message;
+              view.messageFilter = v4.messageFilter;
+              view.section = v4.section;
+              view.taskFilter = v4.taskFilter;
+              view.working = v4.working;
+              view.aiRoot = v4.aiRoot;
+              view.disclosures = v4.open;
+              view.restoreScroll = v4.scroll;
+              view.restoreFocus = v4.focus;
+              view.unavailable = v4.unavailable;
+            },
+            focus: function(saved) {
+              const target = saved ? [...menu.querySelectorAll(saved.tag)].filter((e4) => JSON.stringify(e4.dataset) === saved.key)[saved.index] : null;
+              (target?.checkVisibility?.() && !target.disabled ? target : menu.querySelector("h1"))?.focus({ preventScroll: true });
+            },
+            hydrate: function(snapshot) {
+              if (snapshot.page !== void 0) {
+                hydrated = true;
+                return;
+              }
+              if (!hydrated) {
+                hydrated = true;
+                const state = normalize(snapshot.navigation, snapshot, routes, root);
+                api.apply(state.current);
+                if (root === "home") {
+                  view.dashboard = state.dashboard;
+                  if (!snapshot.navigation?.dashboard && snapshot.navigation?.current?.taskFilter?.length) {
+                    const p5 = snapshot.projects.find((p6) => p6.root === state.current.page);
+                    if (p5) require_task_views().current(view.dashboard).working.projects = [require_task_views().identity(p5)];
+                  }
+                }
+                trail.push(...state.trail);
+              } else {
+                const current = api.capture(), state = normalize({ schema: 1, current, trail }, snapshot, routes, root);
+                if (state.current.page !== view.page || JSON.stringify(state.current.working) !== JSON.stringify(view.working) || JSON.stringify(state.current.taskFilter) !== JSON.stringify(view.taskFilter)) api.apply(state.current);
+                view.aiRoot = state.current.aiRoot;
+                for (let i4 = trail.length - 1; i4 >= 0; i4--) {
+                  const clean = normalize({ schema: 1, current: trail[i4] }, snapshot, routes, root).current;
+                  if (clean.page !== trail[i4].page) trail.splice(i4, 1);
+                  else Object.assign(trail[i4], clean);
+                }
+              }
+            },
+            restore: function(open) {
+              restoring = true;
+              for (const d5 of menu.querySelectorAll("details[data-view-key]")) if (typeof open?.[d5.dataset.viewKey] === "boolean" && d5.open !== open[d5.dataset.viewKey]) d5.open = open[d5.dataset.viewKey];
+              restoring = false;
+            },
+            flush: function() {
+              cancel(timer);
+              timer = null;
+              if (!hydrated || view.S?.page !== void 0) return;
+              if (root === "home" && view.dashboard && view.page === "home") require_task_views().current(view.dashboard).scroll = (menu.querySelector(".content") || document2.scrollingElement)?.scrollTop || 0;
+              const navigation = normalize({ schema: 1, current: api.capture(), trail, ...root === "home" ? { dashboard: view.dashboard } : {} }, view.S, routes, root), encoder = new TextEncoder();
+              let text = JSON.stringify(navigation);
+              if (root === "conversations" && encoder.encode(text).length > 65536) {
+                const open = navigation.current.open, visible = api.groups();
+                navigation.current.open = Object.fromEntries(Object.entries(open).filter(([key]) => Object.hasOwn(visible, key)));
+                let bytes = encoder.encode(JSON.stringify(navigation)).length, has = Object.keys(navigation.current.open).length > 0;
+                for (const [key, value] of Object.entries(open).reverse()) {
+                  if (Object.hasOwn(visible, key)) continue;
+                  const added = encoder.encode(JSON.stringify(key) + ":" + value).length + (has ? 1 : 0);
+                  if (bytes + added <= 65536) {
+                    navigation.current.open[key] = value;
+                    bytes += added;
+                    has = true;
+                  }
+                }
+                navigation.current.open = Object.fromEntries(Object.entries(open).filter(([key]) => Object.hasOwn(navigation.current.open, key)));
+                text = JSON.stringify(navigation);
+              }
+              if (encoder.encode(text).length > 65536) {
+                view.navigationError = "Workspace view state exceeds 64 KiB; current context kept in this window, previous saved state retained.";
+                return;
+              }
+              if (text !== last) {
+                last = text;
+                send({ a: "set", navigation });
+              }
+            },
+            schedule: function() {
+              if (restoring) return;
+              cancel(timer);
+              timer = defer(api.flush, 100);
+            }
+          });
+          return api;
+        }
+      });
+      module.exports = { normalize, create };
+    }
+  });
+
   // src/workspace-answers.js
   var require_workspace_answers = __commonJS({
     "src/workspace-answers.js"(exports, module) {
@@ -4701,21 +7298,23 @@ var TaskqTaskWorkspace = (() => {
       var replyFiles = require_reply_files();
       var time = require_relative_time();
       var { create } = execution.module("workspace.answers", {
-        create: function(view, { menu, document: document2, send, draw, defer = ui.defer, cancel = ui.cancel, composer = false, changed, steer }) {
+        create: function(view, { menu, document: document2, send, draw, defer = ui.defer, cancel = ui.cancel, composer = false, changed, steer, read = (p5, t4) => t4, historyText }) {
           const answerRequests = /* @__PURE__ */ new Map(), answerCards = /* @__PURE__ */ new Map(), answerFeedback = /* @__PURE__ */ new Map(), saved = {}, steers = {};
           const api = execution.module("workspace.answers.instance", {
             project: function(board, root = view.answer?.board === board ? view.answer.root : null) {
-              return view.S?.projects.find((p5) => p5.issues === board && (!root || p5.root === root));
+              const matches = view.S?.projects.filter((p5) => p5.issues === board && (!root || p5.root === root)) || [];
+              return matches.length === 1 ? matches[0] : null;
             },
-            answerCapability: function(board) {
+            answerCapability: function(board, row) {
               const p5 = api.project(board);
-              return { manage: true, files: true, answer: !!p5 && p5.alive && p5.complete === true, reason: "Project status is unavailable or stale; check the board", composer };
+              return { manage: true, files: true, answer: !!p5 && p5.alive && p5.complete === true, reason: "Project status is unavailable or stale; check the board", composer, paged: composer && (row?.question?.text || row?.card || "").length > 32768 };
             },
             // #1662 A3: the workspace's shared composer reads and drives the mounted card; the card keeps draft, op and receipt
             answerCompose: function(board, row) {
-              return component().compose(row, saved[board + "#" + row.n] || component().fresh(row), answerCapability(board));
+              return component().compose(row, saved[board + "#" + row.n] || component().fresh(row), answerCapability(board, row));
             },
             answerInput: function(board, n3, text, caret) {
+              if (text == null && JSON.stringify(saved[board + "#" + n3]?.caret) === JSON.stringify(caret)) return;
               answerCards.get(board + "/" + n3)?.ui.input(board, n3, text, caret);
             },
             answerAct: function(board, n3, type) {
@@ -4831,14 +7430,20 @@ var TaskqTaskWorkspace = (() => {
             },
             // #1918 A5: the conversation is append-only: every answered question stays as it was asked, read-only, then its
             // answer line, in board order; an open question follows as the live card
-            answerHistory: function(t4) {
+            answerHistory: function(t4, root) {
               return (t4.history || []).map(({ question: q4, answered: a4 }, i4) => {
-                const row = { n: t4.n, title: t4.title, url: t4.url, state: "closed", revision: a4?.revision || 0, question: { choices: [], evidence: [], ...q4 } }, key = a4?.revision ?? i4;
+                const row = { n: t4.n, title: t4.title, url: t4.url, state: "closed", revision: a4?.revision || 0, question: { choices: [], evidence: [], ...q4 } }, key = q4 ? a4?.revision ?? i4 : "note-" + ((t4.history_start || 0) + i4);
+                const files = (a4?.files || []).length > 0 && h5("ul", { class: "conversation-files" }, a4.files.map((f4) => h5("li", { key: f4.url }, h5("a", { href: f4.url, target: "_blank", rel: "noreferrer" }, f4.name || f4.url))));
+                const receipt = a4?.read === true ? h5("span", { class: "note-read", "aria-label": "Read by worker" }, " \xB7 Read") : null;
+                const paged = !!historyText && (q4?.text || "").length > 32768;
                 return [
-                  h5("section", { key: "asked:" + key, class: "thread-card asked", "data-reading-key": "question:" + t4.n + ":" + key, "aria-label": "Question " + (i4 + 1) + " of #" + t4.n }, time.stamp(null, "Recorded question", "Question timestamp unavailable in the history adapter"), h5("div", { dangerouslySetInnerHTML: { __html: component().render("history:" + t4.n + ":" + key, row, component().fresh(row), { answer: false, manage: false, composer: true, reason: "Recorded question" }) } })),
-                  h5("p", { key: "answered:" + key, "data-reading-key": "answer:" + t4.n + ":" + key, class: "body answered", role: "status" }, won({ answered: a4 || {} }), time.stamp(null, "Recorded answer", "Answer timestamp unavailable in the history adapter"))
+                  q4 && h5("section", { key: "asked:" + key, class: "dialogue-item thread-card asked", "data-reading-key": "question:" + t4.n + ":" + key, "aria-label": "Question " + ((t4.history_start || 0) + i4 + 1) + " of #" + t4.n }, h5("p", { class: "meta document-author" }, "Worker", time.stamp(q4?.updated, "Recorded question", "Question timestamp unavailable in the history adapter")), paged && historyText(row, q4.text, "history-" + key, root), h5("div", { ref: (el) => api.readingAnchors(el, row), dangerouslySetInnerHTML: { __html: component().render("history:" + t4.n + ":" + key, row, component().fresh(row), { answer: false, manage: false, composer: true, paged, reason: "Recorded question" }) } })),
+                  h5("section", { key: "answered:" + key, "data-reading-key": "answer:" + t4.n + ":" + key, class: "dialogue-item body answered", role: "status" }, h5("p", { class: "meta document-author" }, a4?.by || "Author unknown", time.stamp(a4?.at != null ? time.seconds(a4.at) : a4?.updated, q4 ? "Recorded answer" : "Owner message", "Answer timestamp unavailable in the history adapter"), receipt), h5("div", { class: "conversation-text" }, a4?.text || (files ? "" : "Answer text unavailable")), files)
                 ];
               });
+            },
+            readingAnchors: function(el, t4) {
+              if (el) for (const [i4, node] of [...el.querySelectorAll(".qac-done,.qac-problem,.qac-detail,.qac-context>summary,.qac-images,.qac-evidence,.qac-text,[data-choice]")].entries()) node.dataset.readingKey = "report:question-" + t4.n + "-" + t4.revision + "-" + i4;
             },
             // ...and while its worker runs, the owner's unsent answer (a late receipt or a kept draft) can steer it instead, in the consumer's composer `steer`
             answerSteerComposer: function(board, t4) {
@@ -4863,7 +7468,7 @@ var TaskqTaskWorkspace = (() => {
                 tools: h5("div", { class: "conversation-tools composer-bottom" }, h5("button", { "data-a": "answer-steer", "data-board": board, "data-task": t4.n, class: "primary-action", disabled: disabled || changed2 || !!problem || !text.trim() && !files.length }, "Send"), unknown && h5("button", { "data-a": "answer-retry", "data-key": receiptKey }, "Check delivery")),
                 onInput: (e4) => {
                   steers[key] = e4.currentTarget.value;
-                  save(board, t4, { ...saved[key] || component().fresh(t4), draft: e4.currentTarget.value, steerAttempt: t4.attempt });
+                  save(board, t4, { ...saved[key] || component().fresh(t4), draft: e4.currentTarget.value, caret: [e4.currentTarget.selectionStart, e4.currentTarget.selectionEnd], steerAttempt: t4.attempt });
                   draw();
                 }
               }));
@@ -4884,9 +7489,15 @@ var TaskqTaskWorkspace = (() => {
               return r4 ? h5("div", { class: "toast", role: "status" }, "#" + r4.op.task + " \xB7 " + (r4.note ? "task note saved" : r4.answered ? "already answered" : { start: "started", stop: "stopped", later: "parked", retry: "requeued", steer: "steer sent" }[r4.op.action] || "answer accepted") + " ", h5("a", { href: r4.board + "/" + r4.op.task, "data-url": r4.board + "/" + r4.op.task }, "Board \u2197"), h5("button", { "data-a": "toast-dismiss", "aria-label": "Dismiss", title: "Dismiss" }, "\xD7")) : null;
             },
             mountAnswers: function() {
+              for (const [key, c4] of answerCards) if (!c4.el.isConnected) {
+                c4.ui.update([]);
+                answerCards.delete(key);
+              }
               for (const slot of menu.querySelectorAll("[data-answer]")) {
-                const t4 = unique(view.S.projects.filter((p6) => !view.answer?.root || p6.root === view.answer.root).flatMap(tasks)).find((t5) => t5.key === slot.dataset.answer);
-                if (!t4) continue;
+                const key = slot.dataset.answer, at = key.lastIndexOf("/"), p5 = api.project(key.slice(0, at)), row = p5?.tasks.find((t5) => t5.n === Number(key.slice(at + 1)));
+                if (!row) continue;
+                const t4 = read(p5, { ...row, key, url: row.url || p5.issues + "/" + row.n });
+                if (t4.body_lazy) continue;
                 let card = answerCards.get(t4.key);
                 if (!card) {
                   const el = document2.createElement("div");
@@ -4894,11 +7505,11 @@ var TaskqTaskWorkspace = (() => {
                   answerCards.set(t4.key, card);
                 }
                 if (card.el.parentNode !== slot) slot.append(card.el);
-                const p5 = api.project(t4.key.slice(0, t4.key.lastIndexOf("/")));
                 card.ui.update([{ board: p5.issues, row: t4 }]);
+                api.readingAnchors(card.el, t4);
                 for (const d5 of slot.querySelectorAll("details")) {
-                  const key = "answer:" + t4.key + ":" + d5.className;
-                  if (d5.dataset.viewKey !== key) d5.dataset.viewKey = key;
+                  const key2 = "answer:" + t4.key + ":" + d5.className;
+                  if (d5.dataset.viewKey !== key2) d5.dataset.viewKey = key2;
                 }
               }
             },
@@ -4921,6 +7532,29 @@ var TaskqTaskWorkspace = (() => {
               send({ a: "answer", root: p5.root, board, op, local: saved[board + "#" + op.task] });
               return promise;
             },
+            recovery: function() {
+              return saved;
+            },
+            restoreRecovery: function(locals) {
+              for (const key of Object.keys(locals || {})) {
+                delete saved[key];
+                delete steers[key];
+                const at = key.lastIndexOf("#"), id = key.slice(0, at) + "/" + key.slice(at + 1), card = answerCards.get(id);
+                if (card) {
+                  card.ui.update([]);
+                  card.el.remove();
+                  answerCards.delete(id);
+                }
+              }
+              api.hydrate(locals);
+            },
+            steerCaret: function(board, n3, caret) {
+              const local = saved[board + "#" + n3];
+              if (local && JSON.stringify(local.caret) !== JSON.stringify(caret)) save(board, { n: n3 }, { ...local, caret });
+            },
+            bounds: function() {
+              return { controllers: answerCards.size, protectedSources: Object.keys(saved).length, protectedBytes: new TextEncoder().encode(JSON.stringify(saved)).length };
+            },
             load: function(board, row) {
               return saved[board + "#" + row.n];
             },
@@ -4934,14 +7568,17 @@ var TaskqTaskWorkspace = (() => {
               for (const [key, local] of Object.entries(locals || {})) if (!Object.hasOwn(saved, key) && local && typeof local.draft === "string") {
                 saved[key] = { ...local, confirmClose: false };
                 if (local.op && ["sending", "unknown"].includes(local.receipt?.state)) saved[key].receipt = { state: "unknown", reason: "Workspace reopened; delivery needs readback", next: "Check delivery with the same operation" };
-                const board = key.slice(0, key.lastIndexOf("#")), p5 = api.project(board, local.projectRoot);
-                if (local.op && p5 && saved[key].receipt) answerFeedback.set(p5.root + "#" + local.op.id, { board, op: local.op, about: local.about, ...saved[key].receipt });
+                const board = key.slice(0, key.lastIndexOf("#")), root = api.project(board, local.projectRoot)?.root || local.projectRoot;
+                if (local.op && root && saved[key].receipt) answerFeedback.set(root + "#" + local.op.id, { board, op: local.op, about: local.about, ...saved[key].receipt });
               }
             },
             retry: function(key) {
               const r4 = answerFeedback.get(key);
               if (r4) ui.effect("workspace.answer.reconcile", () => answerSend(r4.board, r4.op), () => {
               });
+            },
+            startPending: function(board, t4) {
+              return [...answerFeedback.values()].some((r4) => r4.board === board && r4.op.task === t4.n && r4.op.revision === t4.revision && r4.op.action === "start" && !["failed", "stale", "rejected"].includes(r4.state));
             },
             dismiss: function(key) {
               answerFeedback.delete(key);
@@ -4979,12 +7616,15 @@ var TaskqTaskWorkspace = (() => {
       var syncView = require_sync_view();
       var { createState, create } = execution.module("tray", {
         createState: function(snapshot = null) {
-          return { dashboard: null, popup: null, manualSize: null, agentqRuntime: null, agentqError: null, aiRoot: null, addConfirm: false, resourceNotice: null, persistenceError: null, toast: null, receivedAt: 0, S: snapshot, page: "home", taskFilter: null, working: null, workCard: null, ask: null, noted: null, pending: {}, hostCommand: null, recovery: {}, confirming: null, updating: null, draft: null, disclosures: {}, pressedAt: null, stale: false, resizing: null };
+          return { open: null, dashboard: null, popup: null, manualSize: null, agentqRuntime: null, agentqError: null, aiRoot: null, addConfirm: false, resourceNotice: null, persistenceError: null, toast: null, receivedAt: 0, S: snapshot, page: "home", taskFilter: null, working: null, workCard: null, ask: null, noted: null, pending: {}, hostCommand: null, recovery: {}, confirming: null, updating: null, draft: null, disclosures: {}, pressedAt: null, stale: false, resizing: null };
         },
         create: function(view, ports) {
-          const api = execution.module("tray.create", {
+          const api = {
+            ...execution.module("tray.create", { mode: function(p5) {
+              return p5.mode;
+            } }),
             operationLauncher: function(operation, root, label) {
-              return h5("button", { class: "project", "data-a": "workspace", "data-page": "operations", "data-operation": operation, "data-root": root || null }, label);
+              return h5("button", { class: "project", "data-a": "workspace", "data-page": "operations", "data-origin": ports.settings ? view.page : void 0, "data-operation": operation, "data-root": root || null }, label);
             },
             operationTarget: function(d5) {
               return { work: "resources", confirm: "admission", "pause-all": "admission", "resume-all": "admission", pause: "admission", resume: "admission", focus: "admission", pick: "admission", add: "setup", "add-ask": "setup", "add-install": "setup", "add-setup": "setup", "add-cancel": "setup", "stop-review": "stop", stop: "stop", "stop-full": "stop", restart: "service", uninstall: "service", update: "update", "recovery-read": "recovery", "recovery-apply": "recovery", "recovery-reconcile": "recovery", "recovery-pending": "recovery" }[d5.a];
@@ -5030,6 +7670,15 @@ var TaskqTaskWorkspace = (() => {
               return f4(heading, actionNotices(), body);
             },
             operationAction: function(d5) {
+              if (d5.a === "work" || d5.a === "workspace" && d5.page === "operations") {
+                const next = { operation: d5.a === "work" ? "resources" : d5.operation, root: d5.root || null };
+                if (ports.navigate) ports.navigate("operations", next);
+                else if (ports.workspace) {
+                  view.open = { page: "operations", ...next };
+                  present();
+                } else return false;
+                return true;
+              }
               if (d5.a === "agentq-runtime") {
                 view.agentqRuntime = d5.runtime;
                 present();
@@ -5246,7 +7895,7 @@ var TaskqTaskWorkspace = (() => {
               if (!ports.workspace) return api.operationLauncher("stop", null, "Review Stop and hold\u2026");
               const projects2 = view.S.projects || [], root = projects2[0]?.root, held = view.S.stop_hold;
               const pending = !!held && !held.selected_count || view.hostCommand && view.hostCommand.state !== "observed" || ["queued", "applied"].includes(view.S.lifecycle?.state);
-              const names = projects2.map((p5) => p5.name).join(", ") || "no registered projects";
+              const names = projects2.length + " registered projects";
               const host = projects2[0]?.host || "unknown host", command = view.hostCommand || view.S.lifecycle;
               const rows = projects2.map((p5) => h5("div", { class: "body" }, h5("strong", null, p5.name), h5("div", { class: "meta" }, view.S.service?.state !== "running" || p5.alive !== true || p5.service_pid !== view.S.service?.pid || p5.host_instance !== view.S.service?.instance ? "Process state unknown: service observation stale or from another generation." : Array.isArray(p5.stop_progress) && p5.stop_progress.length ? lines(p5.stop_progress.map((k5) => "#" + k5.task + " " + k5.rt + ": " + k5.state + (k5.reason ? " \xB7 " + k5.reason : ""))) : "No stop acknowledgement; running or unknown work may remain.")));
               return f4(
@@ -5260,12 +7909,12 @@ var TaskqTaskWorkspace = (() => {
                 held && h5("div", { class: "body alert", role: "status" }, "Admission held: " + (held.mode || "unknown") + "; ordinary Play cannot clear this hold."),
                 held && h5("button", { class: "project", "data-route": "recovery" }, "Review recovery"),
                 command?.action === "stop" && h5("div", { class: "body meta", role: "status" }, "Stop " + (command.id || "") + ": " + (command.state || "unknown") + (command.reason ? " \xB7 " + command.reason : "")),
-                rows,
+                h5("details", { "data-view-key": "stop-projects" }, api.disclosure("folder", "Project observations"), rows),
                 api.lifecycleWaits()
               );
             },
             recoveryPanel: function() {
-              if (!ports.workspace) return api.operationLauncher("recovery", null, "Review recovery\u2026");
+              if (!ports.workspace) return api.operationLauncher("recovery", null, "Review local task recovery\u2026");
               return f4(h5("div", { class: "body" }, "Selected local tasks only \xB7 Keep held by default. Unknown effects must remain held."), h5("details", { "data-view-key": "recovery-scope" }, h5("summary", null, "Recovery scope and effects"), h5("div", { class: "body meta" }, "Paused projects, other tasks and operators stay held. Inspect native release, work and external effects before confirming. Restart discards the old result and starts from preserved files.")), view.S.projects.map((p5) => {
                 const item = view.recovery[p5.root], review = item?.review;
                 const read = item?.pending ? "Reading\u2026" : review && item.readAt ? "Read at " + when(item.readAt) : item?.notice ? "Outcome unknown" : "Not read";
@@ -5390,6 +8039,10 @@ var TaskqTaskWorkspace = (() => {
             },
             navigate: function(next, filter = null, work = null) {
               view.popup = null;
+              if (next === "notifications") {
+                send({ a: "workspace", open: { page: "conversations", filter: "new" } });
+                return;
+              }
               if (view.settingsWindow && !ports.settings && settingsPages.includes(next)) {
                 viewState.flush();
                 send({ a: "settings-open", page: next === "settings" ? null : next });
@@ -5448,9 +8101,6 @@ var TaskqTaskWorkspace = (() => {
             unique: function(ts) {
               return ts.filter((t4) => !t4.dup).sort((a4, b5) => require_task_views().compare(a4, b5));
             },
-            mode: function(p5) {
-              return p5.mode;
-            },
             counter: function(v4, kind, label) {
               return h5("span", { class: "counter " + (v4 > 0 ? kind + " filled" : "zero"), "aria-label": label + ": " + v4, title: label }, v4);
             },
@@ -5458,9 +8108,9 @@ var TaskqTaskWorkspace = (() => {
               return !view.S.display.all.partial.length;
             },
             // O1: identity anchors details/actions; title remains a full-width issue link.
-            taskRow: function(t4, global) {
+            taskRow: function(t4, global2) {
               const p5 = view.S.projects.find((p6) => p6.root === t4.root);
-              return h5("div", { class: "task-row", "data-card": t4.key, tabindex: -1, key: t4.key }, raw(TaskqProjectBlocks.task(blockProject(p5), t4, global, true)), api.syncLine(t4.sync), dashboard?.attention(t4));
+              return h5("div", { class: "task-row", "data-card": t4.key, tabindex: -1, key: t4.key }, raw(TaskqProjectBlocks.task(blockProject(p5), t4, global2, true)), api.syncLine(t4.sync), dashboard?.attention(t4));
             },
             // #1819: a row's shared pending operation; only a failed one offers Retry, which resends the same operation.
             syncLine: function(o4) {
@@ -5480,7 +8130,17 @@ var TaskqTaskWorkspace = (() => {
               const held = rows.filter((t4) => t4.state === "held");
               if (!held.length) return "";
               const label = held.length === 1 && rows.length === 1 ? "Start #" + held[0].n : "Start " + held.length + " held";
-              return h5("button", { "data-a": "start", "data-keys": held.map((t4) => t4.key).join(" "), title: label, "aria-label": label }, icon("play"), h5("span", null, label));
+              return h5("button", { "data-a": "start", "data-targets": JSON.stringify(held.map(({ key, revision }) => ({ key, revision }))), disabled: held.some(api.startPending), title: label, "aria-label": label }, icon("play"), h5("span", null, label));
+            },
+            startPending: function(t4) {
+              return startOperations.startPending(t4.key.slice(0, t4.key.lastIndexOf("/")), t4);
+            },
+            startHeld: function(targets) {
+              const live = unique(view.S.projects.flatMap(tasks)), rows = targets.map((x5) => live.find((t4) => t4.key === x5.key && t4.revision === x5.revision && t4.state === "held"));
+              if (!rows.length || rows.some((t4) => !t4 || api.startPending(t4) || !Number.isSafeInteger(t4.revision) || !view.S.projects.some((p5) => p5.root === t4.root && p5.alive === true && p5.complete === true && p5.tasks_live !== false))) return false;
+              for (const t4 of rows) ui.effect("task.start", () => answerSend(t4.key.slice(0, t4.key.lastIndexOf("/")), { id: "tray.start." + t4.n + "." + t4.revision, task: t4.n, revision: t4.revision, action: "start" }), () => {
+              });
+              return true;
             },
             globalGroup: function(st, ts) {
               ts = ts.filter((t4) => t4.state === st);
@@ -5492,7 +8152,7 @@ var TaskqTaskWorkspace = (() => {
               return e4 ? h5("button", { class: "project alert", "data-a": "log", "data-root": p5.root, title: e4, disabled: !p5.log }, h5("span", null, icon("circle-alert"), p5.name + ": " + e4), h5("span", { class: "meta" }, p5.log ? "Log" : ""), h5("span")) : "";
             },
             modeText: function(p5) {
-              return { run: "Configured intake: " + p5.focus.join(" "), paused: "Paused: running tasks finish, no new ones", watch: "Observation only: focus off" }[mode(p5)];
+              return { run: "Configured intake: " + (Array.isArray(p5.focus) ? p5.focus.join(" ") || "off" : "unknown"), paused: "Paused: running tasks finish, no new ones", watch: "Observation only: focus off" }[mode(p5)];
             },
             admission: function(p5) {
               if (!ports.workspace) return api.operationLauncher("admission", p5.root, "Review admission in " + p5.name + "\u2026");
@@ -5520,7 +8180,7 @@ var TaskqTaskWorkspace = (() => {
               return h5(
                 "details",
                 { class: "group service", "data-view-key": "service:" + p5.root },
-                api.disclosure("activity", ["Service ", h5("span", { class: "meta" }, p5.name + (host ? "" : " \xB7 " + (p5.age == null ? "status unknown" : p5.age_text + " old")))]),
+                api.disclosure("activity", [host ? "Service " : "Project ", h5("span", { class: "meta" }, p5.name + (host ? "" : " \xB7 " + (p5.age == null ? "status unknown" : p5.age_text + " old")))]),
                 host && api.hostService(),
                 incident(p5),
                 p5.log ? h5("button", { class: "project", "data-a": "log", "data-root": p5.root }, icon("file-text"), "Open log") : h5("div", { class: "body meta" }, "Log path unknown"),
@@ -5624,7 +8284,7 @@ var TaskqTaskWorkspace = (() => {
               return h5("div", { class: "options views" }, [["icon", "Icon"], ["full", "Summary"]].map(([v4, l5]) => h5("button", { "data-set": "view", "data-v": v4, "aria-pressed": String(view.S.view === v4) }, v4 === "full" ? h5("span", { class: "summary-preview" }, raw(view.S.icons?.full)) : view.S.icons?.icon && h5("img", { alt: "", src: view.S.icons.icon }), l5)));
             },
             appearance: function() {
-              const reduced = window2.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+              const reduced = window2.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches, background = view.S.opacity_mode === "background";
               return f4(
                 api.heading("Text size \xB7 " + view.S.font + " px", "type"),
                 h5("div", { class: "body meta" }, "Theme follows system appearance."),
@@ -5633,10 +8293,13 @@ var TaskqTaskWorkspace = (() => {
                 views(),
                 api.heading("Window transparency", "sliders-horizontal"),
                 h5("div", { class: "options" }, [["whole", "Whole window"], ["background", "Background only"]].map(([v4, label]) => h5("button", { "data-set": "opacity_mode", "data-v": v4, "aria-pressed": String((view.S.opacity_mode || "whole") === v4) }, label))),
-                h5("div", { class: "body opacity-setting" }, h5("label", { for: "menu-opacity" }, "Menu opacity \xB7 " + (view.S.opacity ?? 100) + "%"), h5("button", { "data-set": "opacity", "data-v": 100, disabled: view.S.opacity_mode === "background", "aria-pressed": String((view.S.opacity ?? 100) === 100) }, "Off"), h5("input", { id: "menu-opacity", type: "range", min: 60, max: 100, step: 1, value: view.S.opacity ?? 100, disabled: view.S.opacity_mode === "background", "data-opacity": "opacity", "aria-valuetext": (view.S.opacity ?? 100) === 100 ? "Off \xB7 100% opaque" : view.S.opacity + "% opaque" })),
-                h5("div", { class: "body meta" }, view.S.opacity_mode === "background" ? "Select Whole window to adjust menu opacity." : "Whole window: 60\u2013100% opaque, including text and controls."),
-                h5("div", { class: "body opacity-setting" }, h5("label", { for: "background-opacity" }, "Background opacity \xB7 " + (view.S.background_opacity ?? 100) + "%"), h5("input", { id: "background-opacity", type: "range", min: 0, max: 100, step: 1, value: view.S.background_opacity ?? 100, disabled: view.S.opacity_mode !== "background", "data-opacity": "background_opacity", "aria-valuetext": (view.S.background_opacity ?? 100) + "% opaque" })),
-                h5("div", { class: "body meta" }, view.S.opacity_mode === "background" ? "The task filter background stays opaque. Other fills fade; text and controls stay opaque. At 0%, the desktop shows through." : "Select Background only to adjust fills while keeping text and controls opaque."),
+                background ? f4(
+                  h5("div", { class: "body opacity-setting" }, h5("label", { for: "background-opacity" }, "Background opacity \xB7 " + (view.S.background_opacity ?? 100) + "%"), h5("input", { id: "background-opacity", type: "range", min: 0, max: 100, step: 1, value: view.S.background_opacity ?? 100, "data-opacity": "background_opacity", "aria-valuetext": (view.S.background_opacity ?? 100) + "% opaque" })),
+                  h5("div", { class: "body meta" }, "The task filter background stays opaque. Other fills fade; text and controls stay opaque. At 0%, the desktop shows through.")
+                ) : f4(
+                  h5("div", { class: "body opacity-setting" }, h5("label", { for: "menu-opacity" }, "Menu opacity \xB7 " + (view.S.opacity ?? 100) + "%"), h5("button", { "data-set": "opacity", "data-v": 100, "aria-pressed": String((view.S.opacity ?? 100) === 100) }, "Off"), h5("input", { id: "menu-opacity", type: "range", min: 60, max: 100, step: 1, value: view.S.opacity ?? 100, "data-opacity": "opacity", "aria-valuetext": (view.S.opacity ?? 100) === 100 ? "Off \xB7 100% opaque" : view.S.opacity + "% opaque" })),
+                  h5("div", { class: "body meta" }, "Whole window: 60\u2013100% opaque, including text and controls.")
+                ),
                 api.heading("Window", "maximize-2"),
                 api.windowSettings(),
                 reduced && h5("div", { class: "body meta", role: "status" }, "Reduced motion: growth previews show a still outline and arrow.")
@@ -5683,8 +8346,8 @@ var TaskqTaskWorkspace = (() => {
               const rows = A4?.rows.length ? A4.rows.map((r4) => h5(
                 "details",
                 { class: "group agent-signin", "data-view-key": "agent:" + r4.runtime },
-                api.disclosure(r4.runtime === "claude" ? "claude" : "openai", [runtimeName(r4.runtime) + " " + (r4.version || "version unknown") + " \xB7 ", h5("span", { class: !A4.checking && signAlert.includes(r4.state) ? "alert" : "" }, label(r4)), h5("span", { class: "meta" }, " \xB7 " + (r4.account || "account unknown"))]),
-                h5("div", { class: "body meta" }, lines([A4.checking && "Last result: " + prior(r4), r4.method && "Method: " + r4.method, r4.expires ? "Expires " + when(r4.expires) : "Expiry unknown", r4.refreshed && "Last refresh " + r4.refreshed + "; not an expiry", r4.reason && "Reason: " + r4.reason, "Runtime client " + (r4.version || "version unknown") + " \xB7 " + checked].filter(Boolean))),
+                api.disclosure(r4.runtime === "claude" ? "claude" : r4.runtime === "antigravity" ? "bot" : "openai", [runtimeName(r4.runtime) + " " + (r4.version || "version unknown") + " \xB7 ", h5("span", { class: !A4.checking && signAlert.includes(r4.state) ? "alert" : "" }, label(r4)), h5("span", { class: "meta" }, " \xB7 " + (r4.account || "account unknown"))]),
+                h5("div", { class: "body meta" }, lines([A4.checking && "Last result: " + prior(r4), r4.method && "Method: " + r4.method, r4.expires ? "Expires " + when(r4.expires) : "Expiry unknown", r4.refreshed && "Last refresh " + r4.refreshed + "; not an expiry", r4.reason && "Reason: " + r4.reason, checked].filter(Boolean))),
                 r4.next && h5("div", { class: "body" }, "Sign in: " + r4.next + ". A check never signs in.")
               )) : [h5("div", { class: "body meta" }, A4?.checking ? "Checking: no earlier result" : "Unknown: no status.json has agents")];
               return f4(
@@ -5700,7 +8363,7 @@ var TaskqTaskWorkspace = (() => {
                     "details",
                     { class: "group remote-agents", "data-view-key": "agents:" + n3 },
                     api.disclosure("network", n3 + " \xB7 " + (beat?.age_text ? "heartbeat " + beat.age_text + " old" : beat ? "heartbeat age unknown" : "heartbeat unknown: no host row") + " \xB7 clients unknown"),
-                    ["claude", "codex", "codex-app"].map((rt) => h5("div", { class: "body meta" }, runtimeName(rt) + " \xB7 unknown: " + n3 + " heartbeat publishes no client version, sign-in, account or access")),
+                    ["claude", "codex", "antigravity", "codex-app"].map((rt) => h5("div", { class: "body meta" }, runtimeName(rt) + " \xB7 unknown: " + n3 + " heartbeat publishes no client version, sign-in, account or access")),
                     h5("div", { class: "body meta" }, "Source: board heartbeat only; no runtime-client or access probe of " + n3 + " reaches this host.")
                   );
                 }),
@@ -5713,18 +8376,25 @@ var TaskqTaskWorkspace = (() => {
             },
             // R29/R32: per project on this host, effective or refused access per runtime, or the one reason it is unknown
             accessFacts: function() {
-              const local2 = view.S.projects.filter((p5) => p5.host === view.S.host), missing = local2.filter((p5) => !Array.isArray(p5.access)).map((p5) => p5.name);
-              return [
-                local2.filter((p5) => Array.isArray(p5.access)).map((p5) => h5(
-                  "details",
-                  { class: "group access", "data-view-key": "access:" + p5.root },
-                  api.disclosure("shield", ["Access ", h5("span", { class: "meta" }, p5.name + " \xB7 " + (p5.access.map((a4) => runtimeName(a4.runtime) + " " + (view.S.agents?.rows?.find((r4) => r4.runtime === a4.runtime)?.version || "version unknown") + " " + (a4.refused ? "refused" : a4.effective || "unknown")).join(" \xB7 ") || "no runtime"))]),
-                  p5.access.map((a4) => h5("div", { class: "body meta" }, runtimeName(a4.runtime) + ": " + (a4.refused ? "refused: " + a4.refused : "requested " + (a4.requested || "unknown") + " \xB7 saved grant " + (a4.grant || "none") + " \xB7 applied " + (a4.effective || "unknown") + (a4.enforcement ? " \xB7 " + a4.enforcement : "")))),
+              const local2 = view.S.projects.filter((p5) => p5.host === view.S.host), runtimes = [...new Set(local2.flatMap((p5) => (p5.access || []).map((a4) => a4.runtime)))];
+              return f4(
+                local2.map((p5) => h5(
+                  "section",
+                  { class: "access-project", "data-access-project": p5.root },
+                  h5("div", { class: "body" }, p5.name),
+                  Array.isArray(p5.access) && p5.access.length ? h5("div", { class: "access-grid", style: { "--access-columns": Math.max(1, runtimes.length) } }, runtimes.map((rt) => {
+                    const a4 = p5.access.find((a5) => a5.runtime === rt), state = !a4 ? "unknown" : a4.refused ? "refused" : { "workspace-write": "Workspace write", workspace: "Workspace", full: "Full", "read-only": "Read only" }[a4.effective] || a4.effective || "unknown";
+                    return h5(
+                      "details",
+                      { class: "access", "data-view-key": "access:" + p5.root + ":" + rt },
+                      api.disclosure("shield", runtimeName(rt) + " \xB7 " + (p5.alive !== true ? "at capture: " : "") + state),
+                      h5("div", { class: "body meta" }, !a4 ? "Unknown: no runtime access in status.json" : runtimeName(rt) + ": " + (a4.refused ? "refused: " + a4.refused : "requested " + (a4.requested || "unknown") + " \xB7 saved grant " + (a4.grant || "none") + " \xB7 applied " + (a4.effective || "unknown") + (a4.enforcement ? " \xB7 " + a4.enforcement : "")))
+                    );
+                  })) : h5("div", { class: "body meta" }, "Access unknown for " + p5.name + ": no access in status.json"),
                   h5("div", { class: "body meta" }, "Applied at the last service pass \xB7 " + (p5.age == null ? "age unknown" : p5.age_text + " old"))
                 )),
-                missing.length > 0 && h5("div", { class: "body meta" }, "Access unknown for " + missing.join(", ") + ": no access in status.json"),
                 !local2.length && h5("div", { class: "body meta" }, "Access unknown: no project on this host")
-              ];
+              );
             },
             about: function() {
               const S3 = view.S, up = S3.projects.find((p5) => p5.update && p5.update !== p5.version), versions = /* @__PURE__ */ new Map();
@@ -5746,11 +8416,35 @@ var TaskqTaskWorkspace = (() => {
             },
             attention: function() {
               const all = unique(view.S.projects.flatMap(tasks));
-              const parts = [api.agentq(), setup(), ...view.S.projects.flatMap((p5) => [problem(p5), incident(p5, true), incidentNotice(p5)]), globalGroup("ask", all), globalGroup("failed", all), answerNotices()].filter(Boolean);
+              const parts = [api.agentq(), setup(), ...view.S.projects.flatMap((p5) => [problem(p5), incident(p5, true), incidentNotice(p5), api.managerView(p5)]), globalGroup("ask", all), globalGroup("failed", all), answerNotices()].filter(Boolean);
               return parts.length ? f4(parts) : "";
             },
+            // R6/M3.7: the service's manager view (status.json `report`, same text as `taskq status`); anomaly rows lead, the full view folds
+            managerView: function(p5) {
+              const r4 = typeof p5.report === "string" ? p5.report : "";
+              if (!r4) return "";
+              const plain = (l5) => l5.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1"), rows = (r4.split("Anomalies:\n")[1] || "").split("\n\n")[0].split("\n").filter((l5) => l5.startsWith("- "));
+              return h5(
+                "details",
+                { class: "manager-view", "data-view-key": "manager-view:" + p5.root },
+                h5("summary", null, p5.name + ": manager view" + (rows.length ? " \xB7 " + rows.length + (rows.length === 1 ? " anomaly" : " anomalies") : "")),
+                rows.map((l5) => h5("div", { class: "body incident-attention" }, plain(l5.slice(2)))),
+                h5("pre", { class: "manager-report", style: "white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:inherit" }, plain(r4))
+              );
+            },
             projects: function() {
-              return f4(api.heading("Registered projects", "folder"), raw(TaskqProjectBlocks.aggregate(view.S.display.all, [])), view.S.projects.length ? view.S.projects.map((p5) => [raw(TaskqProjectBlocks.summary(blockProject(p5))), h5("div", { class: "body meta" }, modeText(p5)), h5("details", { class: "request", "data-view-key": "request:" + p5.root }, api.disclosure("message-circle-question", "Request"), h5("div", { class: "body meta" }, "You asked: " + (p5.request || "not recorded")))]) : h5("div", { class: "body meta" }, "No projects yet"), addProject());
+              return f4(api.heading("Registered projects", "folder"), view.S.projects.length ? view.S.projects.map((p5) => h5(
+                "section",
+                { class: "settings-project" },
+                h5("div", { class: "project-shortcuts" }, h5("button", { class: "project-overview", "data-route": p5.root, title: "Open " + p5.name + " project overview" }, p5.name), h5(
+                  "div",
+                  { class: "project-actions" },
+                  p5.issues ? h5("a", { class: "compact-action", href: p5.issues, "data-url": p5.issues, title: "Open " + p5.name + " board", "aria-label": "Open " + p5.name + " board" }, icon(p5.board_kind)) : button("link", "Board unavailable: registered board missing", { disabled: true }),
+                  button("folder", p5.root ? "Open " + p5.name + " project folder on this computer" : "Project folder unavailable: registered root missing", { "data-a": "folder", "data-root": p5.root, disabled: !p5.root, class: "compact-action" })
+                )),
+                (p5.alive !== true || p5.error || mode(p5) !== "run") && h5("div", { class: "body meta" }, p5.error || (p5.alive !== true ? "Status unknown: " + (p5.age == null ? "no status.json" : p5.age_text + " old") : modeText(p5) || "Intake unknown")),
+                h5("details", { "data-view-key": "project-settings:" + p5.root }, api.disclosure("focus", "Intake details"), h5("div", { class: "body meta" }, modeText(p5) || "Configured intake unknown"), h5("div", { class: "body meta" }, "You asked: " + (p5.request || "not recorded")), h5("div", { class: "body meta" }, "Readback: " + (p5.age == null ? "status unknown" : p5.age_text + " old")), api.operationLauncher("admission", p5.root, "Review project admission\u2026"))
+              )) : h5("div", { class: "body meta" }, "No projects yet"), addProject());
             },
             controls: function() {
               const run = view.S.projects.filter((p5) => mode(p5) === "run"), held = view.S.projects.filter((p5) => mode(p5) === "paused");
@@ -5759,7 +8453,7 @@ var TaskqTaskWorkspace = (() => {
             runningAgents: function(compact = false) {
               const hosts = /* @__PURE__ */ new Map(), all = view.S.display.all.counts;
               let partial = false;
-              const seen = /* @__PURE__ */ new Map();
+              const sources = /* @__PURE__ */ new Set(), seen = /* @__PURE__ */ new Map();
               const add = (name, why) => {
                 if (!hosts.has(name)) hosts.set(name, { name, age: null, age_text: null, live: false, reasons: /* @__PURE__ */ new Set(), counts: /* @__PURE__ */ new Map() });
                 const host = hosts.get(name);
@@ -5770,8 +8464,10 @@ var TaskqTaskWorkspace = (() => {
                 const elapsed = Number.isFinite(p5.age) && p5.age >= 0 && Number.isFinite(p5.tasks_age_seconds) && p5.tasks_age_seconds >= 0 ? p5.age + p5.tasks_age_seconds : null;
                 const fresh = p5.complete === true && p5.tasks_live === true && Number.isFinite(p5.observed);
                 const read = Array.isArray(p5.tasks) && p5.tasks.every((t4) => t4?.executions == null || Array.isArray(t4.executions));
-                const stale = fresh && read ? null : (!read ? "missing host/task data" : !p5.complete ? "partial board snapshot" : elapsed === null ? "missing task observation" : "stale task observation") + " (" + (p5.name || p5.root) + ")";
+                const stale = fresh && read ? null : (!read ? "missing host/task data" : !p5.complete ? "partial board snapshot" : elapsed === null ? "missing task observation" : "stale task observation") + " (" + (p5.name || p5.root) + ")" + (elapsed === null ? " \xB7 age unknown" : " \xB7 " + Math.round(elapsed) + "s old");
                 partial ||= !fresh || !Array.isArray(p5.hosts) || !Array.isArray(p5.tasks);
+                if (stale) sources.add(stale);
+                if (!Array.isArray(p5.hosts)) sources.add((p5.name || "Project") + ": host observations missing");
                 for (const h6 of Array.isArray(p5.hosts) ? p5.hosts : []) {
                   if (!h6 || typeof h6.name !== "string" || !h6.name) {
                     partial = true;
@@ -5779,6 +8475,7 @@ var TaskqTaskWorkspace = (() => {
                   }
                   const age = Number.isFinite(h6.age) ? h6.age : null, host = add(h6.name, stale);
                   host.beat = true;
+                  host.beatLive ||= h6.live === true;
                   host.live ||= h6.live === true && !stale;
                   if (age !== null && (host.age === null || age < host.age)) Object.assign(host, { age, age_text: h6.age_text });
                 }
@@ -5787,6 +8484,7 @@ var TaskqTaskWorkspace = (() => {
                   for (const x5 of Array.isArray(t4.executions) ? t4.executions : []) {
                     if (!x5 || typeof x5.host !== "string") {
                       partial = true;
+                      sources.add((p5.name || "Project") + ": invalid execution observation; host unknown");
                       continue;
                     }
                     const h6 = add(x5.host || "Unknown host", stale);
@@ -5840,13 +8538,14 @@ var TaskqTaskWorkspace = (() => {
               } else facts.push("Capacity unknown");
               const alerts = (view.S.agents?.rows || []).filter((r4) => signAlert.includes(r4.state) && r4.state !== "check-failed");
               const totals = (host) => {
-                const t4 = /* @__PURE__ */ new Map([["Claude", 0], ["Codex", 0]]);
+                const t4 = /* @__PURE__ */ new Map([["Claude", 0], ["Codex", 0], ["Antigravity", 0]]);
                 for (const [rt, c4] of host.counts) t4.set(family(rt), (t4.get(family(rt)) || 0) + c4.worker + c4.reviewer);
                 return t4;
               };
+              for (const host of hosts.values()) if (!host.live) host.reasons.add(!host.beat ? "host observation missing" : host.beatLive ? "current execution data unavailable" : host.age === null ? "heartbeat freshness unknown" : "stale heartbeat; current runs unknown");
               const known2 = (host) => host.live && !host.reasons.has("conflicting execution observations");
               const sum = (counts) => [...counts.values()].reduce((n3, x5) => n3 + x5, 0);
-              const value = (n3, known3, partial2) => !known3 ? "?" : partial2 ? n3 + "+?" : String(n3);
+              const value = (n3, known3, partial2) => !known3 || partial2 && !n3 ? "?" : partial2 ? "\u2265" + n3 : String(n3);
               const mark = (rt) => rt === "Codex" ? "openai" : rt === "Claude" ? "claude" : "bot";
               const runtime = (rt, n3, known3, partial2) => {
                 const shown = value(n3, known3, partial2), label = rt + ": " + (shown === "?" ? "unknown" : partial2 ? "at least " + n3 + "; additional agents unknown" : n3);
@@ -5867,13 +8566,13 @@ var TaskqTaskWorkspace = (() => {
                     "summary",
                     { class: "host-breakdown", title: "Heartbeat" + age },
                     h5("strong", { class: "host-name" }, host.name),
-                    h5("span", { class: "host-runtime-split" }, ["Codex", "Claude", ...[...t4.keys()].filter((rt) => !["Codex", "Claude"].includes(rt))].map((rt) => runtime(rt, t4.get(rt) || 0, !unknown, partial2))),
+                    h5("span", { class: "host-runtime-split" }, ["Codex", "Claude", "Antigravity", ...[...t4.keys()].filter((rt) => !["Codex", "Claude", "Antigravity"].includes(rt))].map((rt) => runtime(rt, t4.get(rt) || 0, !unknown, partial2))),
                     h5("span", { class: "host-row-total", "aria-label": "Total running agents: " + total }, h5("span", { class: "host-number" }, total)),
-                    (unknown || partial2 || warnings.length > 0) && h5("span", { class: "host-observation" }, unknown ? "Status unknown" + age : partial2 ? "Partial observation" + age : "", warnings.length > 0 && h5("span", { class: "host-warning" }, "Sign-in: " + warnings.join(" \xB7 ")))
+                    (unknown || partial2 || warnings.length > 0) && h5("span", { class: "host-observation" }, unknown ? "Status unknown" + age : partial2 ? "Partial observation" + age : "", why && h5("span", null, why), warnings.length > 0 && h5("span", { class: "host-warning" }, "Sign-in: " + warnings.join(" \xB7 ")))
                   ),
                   h5("div", { class: "body meta" }, "Heartbeat" + age),
                   unknown ? h5("div", { class: "body meta" }, "Unknown: " + (why || "host observation missing or stale")) : why && h5("div", { class: "body meta" }, "Partial: " + why),
-                  !unknown && (runtimes.length ? h5("div", { class: "body" }, runtimes.map(([rt, c4]) => h5("div", null, rt + ": " + c4.worker + " worker" + (c4.worker === 1 ? "" : "s") + " \xB7 " + c4.reviewer + " reviewer" + (c4.reviewer === 1 ? "" : "s")))) : h5("div", { class: "body meta" }, "No running agents")),
+                  !unknown && (runtimes.length ? h5("div", { class: "body" }, runtimes.map(([rt, c4]) => h5("div", null, rt + ": " + c4.worker + " worker" + (c4.worker === 1 ? "" : "s") + " \xB7 " + c4.reviewer + " reviewer" + (c4.reviewer === 1 ? "" : "s")))) : h5("div", { class: "body meta" }, partial2 ? "No confirmed running agents; additional agents unknown" : "No running agents")),
                   here && api.resourceMeters(latest),
                   h5("details", { "data-view-key": "host-facts:" + host.name }, api.disclosure("sliders-horizontal", "Resource details"), (here ? facts : ["CPU and memory: not collected for remote hosts", "Slots and reservations: unknown for remote hosts"]).map((t5) => h5("div", { class: "body meta" }, t5)))
                 ));
@@ -5887,9 +8586,9 @@ var TaskqTaskWorkspace = (() => {
               const warn = (host) => host.name === view.S.host ? alerts.map((r4) => family(r4.runtime) + " " + signState[r4.state].toLowerCase()) : [];
               const text = (host) => {
                 const age = host.age !== null && host.age >= 0 ? host.age_text : "", busy = [...totals(host)].filter(([, n3]) => n3 > 0);
-                return [host.name, ...!known2(host) ? ["runs unknown", ...age ? [age + " old"] : [], ...host.reasons.size ? [[...host.reasons].join("; ")] : []] : [...busy.length ? busy.map(([k5, n3]) => k5 + " " + n3) : ["idle"], ...host.reasons.size ? ["partial: " + [...host.reasons].join("; ")] : []], ...warn(host)].join(" \xB7 ");
+                return [host.name, ...!known2(host) ? ["runs unknown", ...age ? [age + " old"] : [], ...host.reasons.size ? [[...host.reasons].join("; ")] : []] : [...busy.length ? busy.map(([k5, n3]) => k5 + " " + n3) : [host.reasons.size ? "no confirmed running agents" : "idle"], ...host.reasons.size ? ["partial: " + [...host.reasons].join("; ")] : []], ...warn(host)].join(" \xB7 ");
               };
-              const overall = /* @__PURE__ */ new Map([["Codex", 0], ["Claude", 0]]);
+              const overall = /* @__PURE__ */ new Map([["Codex", 0], ["Claude", 0], ["Antigravity", 0]]);
               let anyKnown = false, uncertain = partial || !sorted.length;
               for (const host of sorted) {
                 const t4 = totals(host);
@@ -5910,14 +8609,16 @@ var TaskqTaskWorkspace = (() => {
                   w5.length > 0 && h5("span", { class: "host-warning", title: "Sign-in: " + w5.join(" \xB7 "), "aria-label": "Sign-in: " + w5.join(" \xB7 ") }, icon("circle-alert"))
                 );
               };
-              if (compact) return { label: strip.map(text).join("; ") || "Host unknown", meta: "", strip: h5("span", { class: "host-overview" }, h5("span", { class: "host-strip" }, strip.length ? strip.map(chip) : h5("span", { class: "host-chip unknown" }, "Hosts ?")), h5("span", { class: "host-runtime-totals", "aria-label": "All observed hosts \xB7 running agents" }, [...overall].map(([rt, n3]) => runtime(rt, n3, anyKnown, uncertain)))) };
+              const completeness = anyKnown && [...overall.values()].some((n3) => n3 > 0) ? "Partial" : "Unknown";
+              const explanation = "All observed hosts \xB7 running agents" + (uncertain ? " \xB7 " + completeness + ": confirmed counts are lower bounds; additional agents unknown. " + [...sorted.filter((host) => !known2(host) || host.reasons.size).map((host) => host.name + " \xB7 " + (host.age_text || "age unknown") + " \xB7 " + [...host.reasons].join("; ")), ...sources].join("; ") : " \xB7 complete fresh observations");
+              if (compact) return { label: strip.map(text).join("; ") || "Host unknown", meta: strip.length + " hosts \xB7 " + (uncertain ? "observations incomplete" : "current observations"), strip: h5("span", { class: "host-overview" }, h5("span", { class: "host-strip" }, strip.length ? strip.map(chip) : h5("span", { class: "host-chip unknown" }, "Hosts ?")), h5("span", { class: "host-runtime-totals", title: explanation, "aria-label": explanation }, [...overall].map(([rt, n3]) => runtime(rt, n3, anyKnown, uncertain)), uncertain && h5("span", { class: "host-completeness" }, completeness))) };
               return h5(
                 "section",
                 { class: "group running-agents", style: { "--host-number-width": numberWidth }, "aria-label": "Running agents" },
-                h5("div", { class: "host-grid-head", "aria-label": "Host, Codex, Claude, Total running agents" }, h5("span", null, "Host"), ["Codex", "Claude", "Total"].map((rt) => h5("span", { title: rt, "aria-label": rt, role: "img" }, icon(mark(rt))))),
+                h5("div", { class: "host-grid-head", "aria-label": "Host, Codex, Claude, Antigravity, Total running agents" }, h5("span", null, "Host"), ["Codex", "Claude", "Antigravity", "Total"].map((rt) => h5("span", { title: rt, "aria-label": rt, role: "img" }, icon(mark(rt))))),
                 out,
                 h5("div", { class: "body meta" }, "Registered project boards \xB7 " + (partial || all.some((c4) => c4.n === null) ? "Tasks unknown" : "Tasks: " + all.filter((c4) => ["doing", "review"].includes(c4.state)).map((c4) => c4.name + " " + c4.n).join(" \xB7 "))),
-                h5("details", { "data-view-key": "run-definitions" }, api.disclosure("info", "Count definitions"), h5("div", { class: "body meta" }, "Running processes, occupied slots, reservations and board tasks are counted apart. Reservations include pending or unconfirmed work; occupied slots can include other projects."))
+                h5("details", { "data-view-key": "run-definitions" }, api.disclosure("info", "Count definitions"), h5("div", { class: "body meta" }, "Running processes, occupied slots, reservations and board tasks are counted apart. \u2265 means a confirmed minimum; Partial means additional agents are unknown; ? means no confirmed total. Reservations include pending or unconfirmed work; occupied slots can include other projects."))
               );
             },
             home: function() {
@@ -5941,25 +8642,25 @@ var TaskqTaskWorkspace = (() => {
                 case "hosts":
                   return f4(api.heading("Hosts and resources", "network"), api.runningAgents());
                 case "delivery":
-                  return f4(h5("p", { class: "meta" }, "Delivery is project policy, separate from Access. Exact-candidate approval and publication remain on the board."), view.S.projects.map((p5) => h5("details", { class: "group", "data-view-key": "delivery:" + p5.root }, api.disclosure("git-pull-request", [p5.name + " \xB7 ", h5("span", { class: "meta" }, p5.delivery?.preset || "policy unavailable")]), h5("div", { class: "body meta" }, "Revision " + (p5.delivery?.revision ?? "unknown")), p5.issues && h5("a", { class: "project", href: p5.issues, "data-url": p5.issues }, "Open Board"))));
+                  return f4(h5("p", { class: "meta" }, "Delivery is project policy, separate from Access. Exact-candidate approval and publication remain on the board."), view.S.projects.map((p5) => h5("details", { class: "group", "data-view-key": "delivery:" + p5.root }, api.disclosure("git-pull-request", [p5.name + " \xB7 ", h5("span", { class: "meta" }, p5.delivery?.preset || "policy unavailable")]), h5("div", { class: "body" }, { "auto-merge": "After review and required checks, publish and merge automatically.", "review-pr": "Open a pull request; the owner must approve its exact candidate before publication.", "direct": "Publish to main after review and required checks, using the board\u2019s direct route (a fast-forward MR on GitLab)." }[p5.delivery?.preset] || "Delivery policy unavailable; no publication authority is inferred."), h5("details", { "data-view-key": "delivery-policy:" + p5.root }, api.disclosure("info", "Policy details"), h5("div", { class: "body meta" }, "Revision " + (p5.delivery?.revision ?? "unknown"))), p5.issues && h5("a", { class: "project", href: p5.issues, "data-url": p5.issues }, "Open Board"))));
                 case "appearance":
                   return appearance();
                 case "cadence":
                   return history2();
                 case "notifications":
-                  return notificationPanel.body();
+                  return h5("button", { "data-a": "workspace", "data-page": "conversations", "data-filter": "new" }, "Open New in Conversations");
                 case "notification-settings":
                   return notifications();
                 case "agents":
                   return agents();
                 case "work":
-                  return f4(api.heading("Host admission", "focus"), view.S.projects.some((p5) => p5.resources) ? api.workPage() : api.operationLauncher("admission", null, "Review admission in workspace\u2026"));
+                  return f4(h5("div", { class: "body", role: "status" }, api.admissionText(view.S.projects, true)), api.balancingSections());
                 case "stop":
                   return api.stopPanel();
                 case "recovery":
-                  return f4(api.heading("Recovery", "rotate-ccw"), api.recoveryPanel());
+                  return f4(api.heading("Hold on " + (view.S.host || "unknown host"), "rotate-ccw"), h5("div", { class: "body", role: "status" }, view.S.stop_hold ? "Admission held \xB7 " + (view.S.stop_hold.mode || "mode unknown") + (view.S.stop_hold.selected_count != null ? " \xB7 " + view.S.stop_hold.selected_count + " selected" : "") : "No emergency hold reported"), api.hostService(), h5("div", { class: "body meta" }, "Recovery is for selected local tasks. Ordinary Resume cannot clear an emergency hold; unknown effects stay held."), api.recoveryPanel());
                 case "services":
-                  return f4(api.heading(view.S.host || "This host", "activity"), api.hostService(), api.operationLauncher("service", null, "Host maintenance in workspace\u2026"), view.S.projects.map((p5) => [problem(p5), incidentNotice(p5), service(p5, false)]));
+                  return f4(api.heading(view.S.host || "This host", "activity"), api.hostService(), view.S.projects.map((p5) => problem(p5)), api.operationLauncher("service", null, "Host maintenance in workspace\u2026"), h5("details", { "data-view-key": "service-projects" }, api.disclosure("folder", "Project observations \xB7 " + view.S.projects.length), view.S.projects.map((p5) => [incidentNotice(p5), service(p5, false)])), view.S.agentq && api.heading("AgentQ", "bot"), view.S.agentq && api.agentq(true));
                 case "about":
                   return about();
                 default:
@@ -5979,6 +8680,8 @@ var TaskqTaskWorkspace = (() => {
               cancel(r4.timer);
               resourceRequests.delete(key);
               const receipt = ["saved", "rejected", "unknown"].includes(m5.state) && (m5.state !== "saved" || typeof m5.saved_revision === "string" && /^[a-f0-9]{32}$/.test(m5.saved_revision)) ? { state: m5.state, reason: m5.reason, saved_revision: m5.saved_revision } : { state: "unknown", reason: "Invalid capacity receipt" };
+              if (receipt.state === "rejected" && /host policy changed|revision/i.test(receipt.reason || "")) send({ a: "refresh" });
+              if (menu?.querySelectorAll) mountResources();
               r4.resolve(receipt);
               defer(fit, 0);
             },
@@ -5988,20 +8691,40 @@ var TaskqTaskWorkspace = (() => {
               return h5("details", { class: "group", "data-view-key": "capacity:" + p5.root }, h5("summary", null, icon("sliders-horizontal"), "Capacity ", h5("span", { class: "meta" }, (p5.cap_host || "this host") + " \xB7 " + require_resource_controls().headline(resourceGroup(p5), view.S.now))), h5("div", { "data-resources": p5.root }));
             },
             workEntry: function(root) {
-              return view.S.projects.some((p5) => p5.resources) ? h5("button", { class: "project", "data-a": "work", "data-root": root || null }, icon("focus"), "Work mode\u2026") : "";
+              return view.S.projects.some((p5) => p5.resources) ? h5("button", { class: "project", "data-a": "work", "data-root": root || null }, icon("focus"), "Balancing\u2026") : "";
+            },
+            balancingSections: function(hostControls, projectControls) {
+              const availability = (p5) => p5.capacity?.reasons?.filter((r4) => ["usage-limit", "login", "capability", "access"].includes(r4.code)).map((r4) => r4.text || r4.code).join(" \xB7 ") || (p5.alive === true && Array.isArray(p5.capacity?.reasons) ? "" : "Availability unknown");
+              const exceptions = view.S.projects.filter((p5) => availability(p5));
+              return f4(
+                api.heading("Task routing", "focus"),
+                h5("div", { class: "body meta" }, "run-* pins stay strict. prefer-* and project routing are soft preferences; eligible subscription CLIs provide fallback."),
+                h5("details", { "data-view-key": "balancing-routing" }, api.disclosure("focus", "Project routing \xB7 " + view.S.projects.length + " projects"), view.S.projects.map((p5) => h5("div", { class: "body meta" }, p5.name + " \xB7 " + (Array.isArray(p5.routing) ? p5.routing.length ? p5.routing.map((r4) => r4.labels.join(" + ") + " \u2192 " + r4.prefer).join("; ") : "Host default" : "Routing unknown")))),
+                api.heading("Runtime availability", "bot"),
+                exceptions.length ? exceptions.map((p5) => h5("div", { class: "body meta" }, p5.name + " \xB7 " + availability(p5))) : h5("div", { class: "body meta" }, "No reported availability blockers \xB7 " + view.S.projects.length + " projects"),
+                h5("details", { "data-view-key": "balancing-access" }, api.disclosure("info", "Runtime access details"), api.accessFacts()),
+                api.heading("Host balancing", "focus"),
+                h5("div", { class: "body meta" }, "Host " + (view.S.host || "unknown") + " \xB7 limits and load gate affect all registered projects. Quota holds never change configured limits. Current tasks continue."),
+                hostControls || (view.S.projects.some((p5) => p5.resources) ? api.operationLauncher("resources", null, "Review host limits\u2026") : h5("div", { class: "body meta" }, "Capacity unavailable: no supported host projection.")),
+                api.heading("Project policies", "folder"),
+                projectControls,
+                api.operationLauncher("admission", null, "Review project admission\u2026"),
+                h5("details", { "data-view-key": "settings-admission" }, api.disclosure("focus", "Project admission details"), h5("div", { class: "body meta" }, api.admissionText()), view.S.projects.map((p5) => h5("div", { class: "body meta" }, p5.name + " \xB7 " + (modeText(p5) || "Intake unknown") + " \xB7 " + (p5.capacity?.reasons?.map((r4) => r4.text || r4.code).join(" \xB7 ") || (p5.alive === true && Array.isArray(p5.capacity?.reasons) ? "No reported blockers" : "Admission observation unknown")))))
+              );
             },
             workPage: function(root) {
-              if (!ports.workspace) return api.operationLauncher("resources", Object.keys(view.working || {})[0] || null, "Review host limits in workspace\u2026");
               const ps = view.S.projects.filter((p6) => p6.resources), p5 = ps.find((p6) => p6.root === root || view.working?.[p6.root]) || ps[0], run = view.S.projects.filter((p6) => mode(p6) === "run"), held = view.S.projects.filter((p6) => mode(p6) === "paused");
-              return f4(h5("div", { class: "body", role: "status" }, "Admission \xB7 " + api.admissionText()), bulk(run, held), api.resourceMeters(p5), h5("details", { "data-view-key": "admission-reasons" }, h5("summary", null, "Admission details"), view.S.projects.map((p6) => h5("div", { class: "body meta" }, p6.name + ": " + (p6.capacity?.reasons?.map((r4) => r4.text || r4.code).join(" \xB7 ") || "No reported reasons")))), p5?.resources.targets?.some((t4) => t4.supported?.some((s4) => s4.policy_schema === "taskq.host-capacity/1")) ? h5("div", { "data-resources": p5.root }) : h5("div", { "data-work": "" }), api.accessFacts());
+              const editor = ports.workspace ? f4(api.resourceMeters(p5), p5?.resources.targets?.some((t4) => t4.supported?.some((s4) => s4.policy_schema === "taskq.host-capacity/1")) ? h5("div", { "data-resources": p5.root }) : h5("div", { "data-work": "" })) : api.operationLauncher("resources", Object.keys(view.working || {})[0] || null, "Review host limits in workspace\u2026");
+              return f4(h5("div", { class: "body", role: "status" }, "Admission \xB7 " + api.admissionText()), api.balancingSections(editor, bulk(run, held)));
             },
-            admissionText: function(ps = view.S.projects) {
+            admissionText: function(ps = view.S.projects, compact = false) {
               if (!ps.length) return "No projects";
               const rows = ps.map((p5) => {
                 const c4 = p5.capacity, reasons = Array.isArray(c4?.reasons) ? c4.reasons : null;
                 const unknown = p5.alive !== true || !reasons || !["open", "off", "held"].includes(c4?.gate) || c4.gate === "held" && !reasons.length;
                 return { name: p5.name, state: unknown ? "unknown" : reasons.length ? "blocked" : "clear", text: unknown ? "observation unknown" : reasons.length ? [...new Set(reasons.map((r4) => r4.code || "unknown"))].join(", ") : "no reported blockers" };
               });
+              if (compact) return ps.length + " projects \xB7 " + (rows.every((r4) => r4.state === "clear") ? "no reported blockers" : [["blocked", "blocked"], ["unknown", "unknown"]].map(([state, label]) => [rows.filter((r4) => r4.state === state).length, label]).filter(([n3]) => n3).map(([n3, label]) => n3 + " " + label).join(" \xB7 "));
               const states = new Set(rows.map((r4) => r4.state)), lead = states.has("unknown") ? "Unknown" : states.size > 1 ? "Mixed" : states.has("blocked") ? "Blocked work" : "No reported blockers";
               const intake = [["run", "configured"], ["paused", "paused"], ["watch", "observation"]].map(([m5, l5]) => [l5, ps.filter((p5) => mode(p5) === m5).length]).filter(([, n3]) => n3).map(([l5, n3]) => n3 + " " + l5);
               const missing = ps.filter((p5) => !["run", "paused", "watch"].includes(mode(p5))).length;
@@ -6043,39 +8766,41 @@ var TaskqTaskWorkspace = (() => {
               }
             },
             notifications: function() {
-              const N2 = view.S.notify, st = N2.status, line = { allowed: "Allowed by the OS", blocked: "Blocked by the OS: nothing is posted", "not asked": "Not asked yet: the first banner setting asks the OS", asking: "Asked: answer the OS prompt", "request failed": "OS permission request failed: " + N2.failure, unknown: "OS permission unknown", unsupported: "Not available on this host" }[st] || st;
+              const N2 = view.S.notify, st = N2.status, line = { allowed: "Allowed by the OS", blocked: "Blocked by the OS: nothing is posted", "not asked": "Not asked yet: the first banner setting asks the OS", asking: "Asked: answer the OS prompt", "request failed": "OS permission request failed: " + N2.failure, unknown: "OS permission unknown", unsupported: "Not available on this host" }[st] || "OS permission unknown";
               return f4(
                 api.heading("OS permission", "shield"),
                 h5("div", { class: "body" + (st === "blocked" || st === "request failed" ? " alert" : " meta"), role: "status" }, line),
                 st === "blocked" && h5("button", { class: "project", "data-a": "notify-os" }, "Open OS setting \u2197"),
                 api.heading("Per event on this host", "bell"),
-                view.S.display.notify.map((x5) => [x5.id, x5.name]).map(([k5, l5]) => [api.heading(l5, { ask: "message-circle-question", close: "circle-check", failed: "circle-x", gone: "circle-alert" }[k5] || "bell"), h5("div", { class: "options" }, modes.map(([v4, m5]) => h5("button", { "data-a": "notify", "data-kind": k5, "data-v": v4, "aria-pressed": String(N2.host[k5] === v4) }, m5)), h5("button", { "data-a": "notify-test", "data-kind": k5, disabled: st !== "allowed" }, "Send test"))])
+                h5("p", { class: "meta notification-legend" }, "Off: no OS delivery \xB7 Silent: no OS banner \xB7 Banner: OS banner \xB7 Sound: banner with sound. History is independent; banners and sound need OS permission."),
+                view.S.display.notify.map((x5) => api.notifyRow(x5, null, N2.host[x5.id], st)),
+                api.heading("Project overrides", "folder"),
+                view.S.projects.map((p5) => api.notifyGroup(p5))
               );
             },
+            notifyRow: function(event, root, value, status) {
+              const choices = [...root ? [["inherit", "Inherit"]] : [], ...modes.map(([v4, label]) => [v4, v4 === "sound" ? "Sound" : label])];
+              return h5("div", { class: "notification-row" }, h5("label", null, h5("span", null, event.name), h5(
+                "select",
+                { "data-notify": event.id, "data-root": root || null, value: value || "unknown", "aria-label": event.name + (root ? " for " + (view.S.projects.find((p5) => p5.root === root)?.name || "project") : " on this host") },
+                !choices.some(([v4]) => v4 === value) && h5("option", { value: "unknown", disabled: true }, "Unknown"),
+                choices.map(([v4, label]) => h5("option", { value: v4, selected: v4 === value }, label))
+              )), !root && h5("button", { "data-a": "notify-test", "data-kind": event.id, disabled: status !== "allowed", title: "Send " + event.name + " test notification" }, "Test"));
+            },
             notifyGroup: function(p5) {
-              const N2 = view.S.notify.projects[p5.root];
-              if (!N2) return "";
-              const name = (v4) => modes.find((m5) => m5[0] === v4)[1];
-              return h5("details", { class: "group", "data-view-key": "notifications:" + p5.root }, h5("summary", { class: "line" }, icon("bell"), "Notifications ", h5("span", { class: "meta" }, view.S.display.notify.map((x5) => [x5.id, x5.name]).map(([k5]) => name(N2[k5][1])).join(" \xB7 "))), view.S.display.notify.map((x5) => [x5.id, x5.name]).map(([k5, l5]) => [h5("div", { class: "body" }, l5 + " ", h5("span", { class: "meta" }, "\xB7 " + name(N2[k5][1]))), h5("div", { class: "options" }, [["inherit", "Inherit"], ...modes].map(([v4, m5]) => h5("button", { "data-a": "notify", "data-kind": k5, "data-root": p5.root, "data-v": v4, "aria-pressed": String((N2[k5][0] || "inherit") === v4) }, m5)))]));
+              const N2 = view.S.notify?.projects?.[p5.root];
+              if (!N2) return h5("div", { class: "body meta" }, p5.name + ": notification overrides unknown; no project readback");
+              const name = (v4) => modes.find((m5) => m5[0] === v4)?.[1] || "Unknown";
+              return h5(
+                "details",
+                { class: "group", "data-view-key": "notifications:" + p5.root },
+                api.disclosure("bell", [p5.name, " \xB7 ", h5("span", { class: "meta" }, view.S.display.notify.some((x5) => !N2[x5.id]) ? "Overrides unknown" : view.S.display.notify.every((x5) => !N2[x5.id][0]) ? "Inherit host" : view.S.display.notify.filter((x5) => N2[x5.id][0]).length + " override" + (view.S.display.notify.filter((x5) => N2[x5.id][0]).length === 1 ? "" : "s"))]),
+                view.S.display.notify.map((x5) => f4(api.notifyRow(x5, p5.root, N2[x5.id] ? N2[x5.id][0] || "inherit" : "unknown", view.S.notify.status), h5("div", { class: "meta" }, "Effective: " + name(N2[x5.id]?.[1]))))
+              );
             },
             openCard: function(o4) {
-              const p5 = view.S && view.S.projects.find((p6) => p6.root === o4.root);
-              if (!p5) return;
-              if (view.page !== p5.root || view.working || view.taskFilter) navigate2(p5.root);
-              const key = p5.issues + "/" + o4.n;
-              const find = () => o4.n != null && menu.querySelector('[data-card="' + CSS2.escape(key) + '"]');
-              if (o4.n != null && !find()) {
-                view.noted = { root: p5.root, n: o4.n, key, url: key, title: o4.title || "", state: o4.kind === "close" ? "closed" : o4.kind, state_name: [...view.S.display.states, ...view.S.display.notify].find((x5) => x5.id === o4.kind)?.name };
-                present(true);
-              }
-              const el = find();
-              if (el) {
-                el.scrollIntoView({ block: "center" });
-                (el.querySelector("textarea,button,a") || el).focus({ preventScroll: true });
-              }
-            },
-            notedCard: function(p5) {
-              return view.noted && view.noted.root === p5.root ? h5("div", { class: "group" }, h5("div", { class: "row meta" }, h5("span", null, "Notification")), h5("div", { "data-card": view.noted.key, tabindex: "-1" }, raw(TaskqProjectBlocks.task(blockProject(p5), view.noted)))) : "";
+              const p5 = view.S?.projects.find((p6) => p6.root === o4.root);
+              if (p5) send({ a: "workspace", open: { page: "conversations", root: p5.root, board: p5.issues, task: o4.n, ...o4.sha ? { sha: o4.sha } : {}, ...o4.id ? { event: o4.id } : {} } });
             },
             project: function(p5) {
               const ts = tasks(p5), counters = TaskqProjectBlocks.counters(p5.counts, p5.root, p5.name);
@@ -6089,7 +8814,6 @@ var TaskqTaskWorkspace = (() => {
                 problem(p5),
                 incident(p5, true),
                 incidentNotice(p5),
-                notedCard(p5),
                 groups.length ? groups : h5("div", { class: "body muted" }, "No open tasks"),
                 answerNotices(p5.issues),
                 h5("div", { class: "group" }, admission(p5)),
@@ -6121,9 +8845,9 @@ var TaskqTaskWorkspace = (() => {
               if (row) row.classList.toggle("pinned", content.scrollTop > 0 && row.getBoundingClientRect().top <= content.getBoundingClientRect().top + height + 1);
             },
             settings: function() {
-              const S3 = view.S, ps = S3.projects, A4 = S3.agents, line = api.runningAgents(true), st = S3.notify?.status, svc = S3.service?.state, up = ps.find((p5) => p5.update && p5.update !== p5.version);
+              const S3 = view.S, ps = S3.projects, A4 = S3.agents, st = S3.notify?.status, svc = S3.service?.state, up = ps.find((p5) => p5.update && p5.update !== p5.version);
               const growth = { auto: "Auto", top: "Down", bottom: "Up", fixed: "Fixed" }[S3.size_anchor || "auto"] || "Auto";
-              const widget = (target, mark, label, meta) => h5("button", { class: "project settings-widget" + (["notification-settings", "cadence", "projects", "delivery", "recovery"].includes(target["data-route"]) || target["data-operation"] === "stop" ? " short-value" : ""), ...target }, mark, h5("span", null, label), h5("span", { class: "meta" }, meta));
+              const widget = (target, mark, label, meta) => h5("button", { class: "project settings-widget", ...target }, mark, h5("span", null, label), h5("span", { class: "meta" }, meta));
               const sections = [
                 ["Display", [
                   widget({ "data-route": "appearance" }, icon("type"), "Appearance", S3.font + " px \xB7 " + (S3.view === "full" ? "Summary" : "Icon") + " \xB7 growth " + growth),
@@ -6131,14 +8855,14 @@ var TaskqTaskWorkspace = (() => {
                   widget({ "data-route": "cadence" }, icon("chart-no-axes-column"), "Activity history", S3.display?.periods?.find((x5) => x5.id === S3.period)?.name || "period unknown")
                 ]],
                 ["Host and projects", [
-                  widget({ "data-route": "hosts" }, icon("network"), "Hosts and resources", line.label),
-                  widget({ "data-route": "work" }, icon("focus"), "Work mode", api.admissionText() + (ps.some((p5) => p5.resources) ? "" : " \xB7 capacity unavailable")),
+                  widget({ "data-route": "hosts" }, icon("network"), "Hosts and resources", api.runningAgents(true).meta),
+                  widget({ "data-route": "work" }, icon("focus"), "Balancing", api.admissionText(ps, true) + (ps.some((p5) => p5.resources) ? "" : " \xB7 capacity unavailable")),
                   widget({ "data-route": "agents" }, icon("bot"), "Agents and access", A4?.checking ? "checking sign-in" : A4 ? A4.rows.map((r4) => runtimeName(r4.runtime) + " " + (r4.state === "signed-in" && !A4.fresh ? "signed in at capture" : (signState[r4.state] || "Unknown").toLowerCase())).join(" \xB7 ") || "no runtime" : "sign-in unknown"),
                   widget({ "data-route": "projects" }, icon("folder"), "Projects", ps.length + " registered"),
-                  widget({ "data-route": "delivery" }, icon("git-pull-request"), "Delivery", grouped(ps.map((p5) => p5.delivery?.preset || "unavailable")) || "no projects"),
-                  widget({ "data-route": "services" }, icon("activity"), "Services and support", "host service " + (svc === "running" ? "running" : svc === "exited" ? "exited" : "unknown")),
+                  widget({ "data-route": "delivery" }, icon("git-pull-request"), "Delivery", ps.length + " projects \xB7 " + new Set(ps.map((p5) => p5.delivery?.preset || "unavailable")).size + " " + (new Set(ps.map((p5) => p5.delivery?.preset || "unavailable")).size === 1 ? "policy" : "policies")),
+                  widget({ "data-route": "services" }, icon("activity"), "Services and support", "host service " + (svc === "running" ? S3.service.fresh ? "running" : "stale observation" : svc === "exited" ? "exited" : "unknown")),
                   S3.stop_modes && widget({ "data-a": "workspace", "data-page": "operations", "data-operation": "stop" }, icon("octagon-x"), "Emergency stop", "Drain or Full stop"),
-                  S3.stop_modes && widget({ "data-route": "recovery" }, icon("rotate-ccw"), "Recovery", S3.stop_hold ? "admission held" : "no hold"),
+                  S3.stop_modes && widget({ "data-route": "recovery" }, icon("rotate-ccw"), "Recovery", S3.stop_hold ? "admission held" : "no hold reported"),
                   widget({ "data-route": "about" }, icon("info"), "About and updates", (S3.version ? "v" + S3.version : "version unknown") + (up ? " \xB7 update " + up.update : ""))
                 ]]
               ];
@@ -6149,16 +8873,14 @@ var TaskqTaskWorkspace = (() => {
               return f4(h5("p", { class: "meta" }, "Auto follows the actual tray opening direction. Dragging pins the window; explicit growth choices stay selected."), h5("fieldset", null, h5("legend", null, "Window growth"), h5("div", { class: "growth-options" }, [["auto", "Auto"], ["top", "Down"], ["bottom", "Up"], ["fixed", "Fixed"]].map(([value, label]) => h5("button", { "data-a": "size-anchor", "data-value": value, "aria-pressed": String(mode2 === value) }, h5("span", { class: "growth-miniature", "data-growth": value, "data-opening": view.S.auto_anchor === "bottom" ? "up" : "down", "aria-hidden": "true" }, h5("i")), h5("span", null, label))))), h5("div", { class: "options" }, button(view.S.pinned ? "pin-off" : "pin", "Keep menu open", { "data-a": "pin", "aria-pressed": String(!!view.S.pinned) }), button("always-on-top", "Menu always on top", { "data-a": "top", "aria-pressed": String(!!view.S.top) })));
             },
             head: function() {
-              const p5 = view.S.projects?.find((p6) => p6.root === view.page), title = view.working ? "Work mode" : p5 ? p5.name : routes[view.page] || "Unavailable";
+              const p5 = view.S.projects?.find((p6) => p6.root === view.page), title = view.working ? "Balancing" : p5 ? p5.name : routes[view.page] || "Unavailable";
               const crumbs = p5 ? h5("a", { href: "#", "data-route": "projects" }, "Projects") : settingsPages.includes(view.page) && view.page !== "settings" ? h5("a", { href: "#", "data-route": "settings" }, "Settings") : "";
               if (ports.settings) {
                 const W = view.settingsChrome || {};
                 return shell.bar({ title, crumbs, home: "Settings home", back: view.page !== "settings" || renderer.entries().length > 0, actions: [], windows: [button("always-on-top", "Always on top", { "data-a": "settings-top", "aria-pressed": String(!!W.top) }), button(W.maximized ? "minimize-2" : "maximize-2", W.maximized ? "Restore window" : "Enlarge window", { "data-a": "settings-enlarge", "aria-pressed": String(!!W.maximized) }), button("x", "Close settings", { "data-a": "hide" })] });
               }
               if (ports.views) return shell.bar({ title: "View \xB7 " + dashboard.current().name, actions: [], windows: [button("x", "Close view window", { "data-a": "hide" })] });
-              const m5 = view.S.messages, count = m5?.complete === true && Number.isSafeInteger(m5.count) ? m5.count : null;
-              const conversations = h5("button", { type: "button", class: "conversations-entry", "data-a": "workspace", "data-page": "conversations", "data-thread": count ? "unread" : "", title: "Conversations \xB7 " + (count === null ? "unknown" : count + " new"), "aria-label": "Conversations \xB7 " + (count === null ? "unknown" : count + " new") }, icon("messages-square"), count ? h5("span", { class: "badge", "aria-hidden": "true" }, count > 99 ? "99+" : String(count)) : "");
-              const actions = [p5?.issues && h5("a", { href: p5.issues, "data-url": p5.issues, title: "Open Board", "aria-label": "Open " + p5.name + " Board" }, icon(p5.board_kind)), view.S.stop_modes && button("octagon-x", "Emergency stop", { "data-a": "stop-review" }), notificationPanel.bell(), conversations, button("settings", "Settings", { "data-route": "settings" })];
+              const actions = [p5?.issues && h5("a", { href: p5.issues, "data-url": p5.issues, title: "Open Board", "aria-label": "Open " + p5.name + " Board" }, icon(p5.board_kind)), view.S.stop_modes && button("octagon-x", "Emergency stop", { "data-a": "stop-review" }), notificationPanel.entry(), button("settings", "Settings", { "data-route": "settings" })];
               const windows = [button(view.S.pinned ? "pin-off" : "pin", "Keep menu open", { "data-a": "pin", "aria-pressed": String(!!view.S.pinned) }), button("always-on-top", "Always on top", { "data-a": "top", "aria-pressed": String(!!view.S.top) }), button("x", "Close menu", { "data-a": "hide" })];
               return shell.bar({ title: view.page === "home" ? "Tasks" : title, crumbs, home: "Home", back: view.page !== "home" || renderer.entries().length > 0 || !!view.working, actions, windows });
             },
@@ -6189,7 +8911,7 @@ var TaskqTaskWorkspace = (() => {
               const edge = view.S.attached_edge || "top";
               if (menu.dataset.edge !== edge) menu.dataset.edge = edge;
               const settingsError = view.persistenceError || view.S.opacity_error || view.S.settings_error;
-              const title = view.working ? "Work mode" : view.taskFilter ? "Tasks" : p5 ? p5.name : routes[view.page];
+              const title = view.working ? "Balancing" : view.taskFilter ? "Tasks" : p5 ? p5.name : routes[view.page];
               const tree = ports.views ? [head(), h5("div", { class: "content" }, h5("div", { class: "content-body view-window" }, dashboard.presets(), dashboard.conditions())), h5("footer", { class: "view-window view-window-footer" }, dashboard.actions())] : [head(), h5("div", { class: "content" }, h5("div", { class: "content-body" + (settingsPages.includes(view.page) || view.page === "projects" ? " settings-content" : "") }, view.unavailable && h5("div", { class: "body", role: "status" }, view.unavailable + " The surviving destination is " + title + "."), actionNotices(), settingsError && h5("div", { class: "body alert", role: "alert" }, "Settings unknown: " + settingsError + (view.persistenceError || view.S.opacity_error ? "" : "; defaults shown")), view.working ? workPage() : view.taskFilter ? filteredTasks(p5) : p5 ? project(p5) : routeBody())), h5("footer", { class: "status-footer" }, h5("span", null, "TaskQ ", view.S.version ? "v" + view.S.version : "version unknown"), h5("div", { class: "grip", "data-resize": "", role: "button", "aria-label": "Resize window with arrow keys", title: "Drag to resize \xB7 arrow keys", tabindex: "0" })), dashboard.popup(), answerToast()];
               renderer.render(tree, p5 ? "/projects/" + encodeURIComponent(p5.issues) + (view.taskFilter ? "/tasks" : "") : view.working ? "/work" : "/" + view.page);
               view.drawn = true;
@@ -6270,7 +8992,30 @@ var TaskqTaskWorkspace = (() => {
                 defer(present);
               }
             },
+            batch: function(updates) {
+              batching++;
+              let complete = false;
+              try {
+                const snapshot = updates.filter((update2) => Array.isArray(update2?.projects)).pop();
+                if (snapshot) receive(snapshot);
+                for (const update2 of updates) if (!Array.isArray(update2?.projects)) receive(update2);
+                complete = true;
+              } finally {
+                if (!--batching && staged) {
+                  const args = staged;
+                  staged = null;
+                  if (complete) {
+                    if (view.pressedAt !== null && performance2.now() - view.pressedAt < 5e3) view.stale = true;
+                    else present(...args);
+                  }
+                }
+              }
+            },
             receive: function(s4) {
+              if (Array.isArray(s4.updates)) {
+                api.batch(s4.updates);
+                return;
+              }
               if (s4.notificationReceipt) {
                 notificationPanel.receive(s4.notificationReceipt);
                 return;
@@ -6391,7 +9136,11 @@ var TaskqTaskWorkspace = (() => {
                 present(true);
                 return;
               }
-              if (document2.activeElement && (document2.activeElement.dataset.draft || document2.activeElement.dataset.rscField || document2.activeElement.dataset.recoveryEvidence || document2.activeElement.id === "ai")) return;
+              if (document2.activeElement?.dataset.rscField) {
+                mountResources();
+                return;
+              }
+              if (document2.activeElement && (document2.activeElement.dataset.draft || document2.activeElement.dataset.recoveryEvidence || document2.activeElement.id === "ai")) return;
               refresh(performance2.now());
             },
             measure: function(name) {
@@ -6466,7 +9215,7 @@ var TaskqTaskWorkspace = (() => {
                   return;
                 }
                 if (!ports.workspace && api.operationTarget(d5)) {
-                  send({ a: "workspace", open: { page: "operations", operation: api.operationTarget(d5), root: d5.root || null } });
+                  send({ a: "workspace", open: { page: "operations", operation: api.operationTarget(d5), root: d5.root || null, ...ports.settings ? { origin: { surface: "settings", page: view.page } } : {} } });
                   return;
                 }
                 if (d5.a === "filter-reset") {
@@ -6488,8 +9237,9 @@ var TaskqTaskWorkspace = (() => {
                   return;
                 }
                 if (d5.a === "workspace") {
+                  if (ports.workspace && api.operationAction(d5)) return;
                   viewState.flush();
-                  send({ a: "workspace", open: { page: d5.page || "conversations", ...d5.thread !== void 0 ? { thread: d5.thread } : {}, operation: d5.operation || null, root: d5.root || null, board: d5.board || null, task: Number(d5.task) || null, revision: Number(d5.revision) || null, ...d5.fresh === "true" ? { fresh: true } : {} } });
+                  send({ a: "workspace", open: { page: d5.page || "conversations", ...d5.thread !== void 0 ? { thread: d5.thread } : {}, ...d5.filter ? { filter: d5.filter } : {}, operation: d5.operation || null, ...ports.settings ? { origin: { surface: "settings", page: view.page } } : {}, root: d5.root || null, board: d5.board || null, task: Number(d5.task) || null, revision: Number(d5.revision) || null, ...d5.fresh === "true" ? { fresh: true } : {} } });
                   return;
                 }
                 if (d5.route) {
@@ -6513,11 +9263,7 @@ var TaskqTaskWorkspace = (() => {
                   return;
                 }
                 if (d5.a === "start") {
-                  for (const key of d5.keys.split(" ")) {
-                    const t4 = unique(view.S.projects.flatMap(tasks)).find((t5) => t5.key === key);
-                    if (t4 && t4.state === "held") ui.effect("task.start", () => answerSend(t4.key.slice(0, -String(t4.n).length - 1), { id: "tray.start." + t4.n + "." + t4.revision, task: t4.n, revision: t4.revision, action: "start" }), () => {
-                    });
-                  }
+                  api.startHeld(JSON.parse(d5.targets));
                   present();
                   return;
                 }
@@ -6535,6 +9281,7 @@ var TaskqTaskWorkspace = (() => {
                   return;
                 }
                 if (d5.a === "work") {
+                  if (ports.workspace && api.operationAction(d5)) return;
                   navigate2(view.page, null, d5.root ? { [d5.root]: true } : {});
                   return;
                 }
@@ -6574,6 +9321,9 @@ var TaskqTaskWorkspace = (() => {
                   send({ a: d5.a, root: d5.root, label: d5.label, value: d5.value });
                 }
                 present();
+              });
+              ui.listen(menu, "change", (e4) => {
+                if (e4.target.matches("[data-notify]")) send({ a: "notify", kind: e4.target.dataset.notify, value: e4.target.value, root: e4.target.dataset.root });
               });
               ui.listen(menu, "input", (e4) => {
                 if (e4.target.matches("[data-opacity]")) {
@@ -6661,8 +9411,8 @@ var TaskqTaskWorkspace = (() => {
               });
               send({ a: "ready" });
             }
-          });
-          const { natural, gutter, fit, actionReceipt, actionNotices, focusStart, focusReceipt, focusReadback, remember, navigate: navigate2, back, routeButton, answerSlot, answerNotices, answerToast, tasks, blockProject, unique, mode, counter, known, taskRow, taskOrder, startButton, globalGroup, problem, modeText, admission, incident, incidentNotice, service, when, local, custom, history: history2, update, ai, addProject, bulk, views, appearance, agents, about, setup, attention, projects, controls, home, routeBody, resourceGroup, resourceCapability, resourceReceipt, capacity, workEntry, workPage, mountResources, notifications, notifyGroup, openCard, notedCard, project, filteredTasks, head, draw, wholeLines, settle, refresh, release, receive, measure, mount } = api;
+          };
+          const { natural, gutter, fit, actionReceipt, actionNotices, focusStart, focusReceipt, focusReadback, remember, navigate: navigate2, back, routeButton, answerSlot, answerNotices, answerToast, tasks, blockProject, unique, mode, counter, known, taskRow, taskOrder, startButton, globalGroup, problem, modeText, admission, incident, incidentNotice, service, when, local, custom, history: history2, update, ai, addProject, bulk, views, appearance, agents, about, setup, attention, projects, controls, home, routeBody, resourceGroup, resourceCapability, resourceReceipt, capacity, workEntry, workPage, mountResources, notifications, notifyGroup, openCard, project, filteredTasks, head, draw, wholeLines, settle, refresh, release, receive, measure, mount } = api;
           function resourceSend(g5, op) {
             const capability = resourceCapability(g5);
             if (!capability.edit) return Promise.resolve({ state: "rejected", reason: capability.reason });
@@ -6684,23 +9434,31 @@ var TaskqTaskWorkspace = (() => {
           const TaskqProjectBlocks = require_project_blocks(), TaskqTaskControls = require_task_controls();
           const send = ports.send || ui.send;
           const performance2 = window2.performance || globalThis.performance, crypto2 = window2.crypto || globalThis.crypto, CSS2 = window2.CSS || globalThis.CSS;
-          const present = execution.action("ui.render", (...args) => (ports.render || draw)(...args));
+          let batching = 0, staged = null;
+          const paint = (...args) => {
+            if (batching) {
+              staged = [!!(staged?.[0] || args[0])];
+              return;
+            }
+            (ports.render || draw)(...args);
+          };
+          const present = execution.action("ui.render", paint);
           const reports = require_reports().create({ send, draw: () => present(), defer });
-          const notificationPanel = require_notification_panel().create({ view, reports, send, draw: () => present(), openCard });
-          const { tick } = execution.module("ui.render", { tick: (...args) => (ports.render || draw)(...args) });
+          const notificationPanel = require_notification_panel().create({ view, reports, send, draw: () => present() });
+          const { tick } = execution.module("ui.render", { tick: paint });
           const renderer = shell.create(menu);
           const color = (st) => ({ doing: "work", review: "review", ask: "ask", failed: "failed", ready: "ready" })[st] || "muted";
           const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
           const f4 = (...children) => h5(Fragment, null, ...children), raw = (html) => html ? h5("div", { style: "display:contents", dangerouslySetInnerHTML: { __html: html } }) : "", lines = (items) => items.flatMap((x5, i4) => i4 ? [h5("br"), x5] : [x5]);
-          const runtimeName = (rt) => ({ "claude": "Claude", "codex": "Codex", "codex-app": "Codex app" })[rt] || rt || "Unknown runtime";
-          const family = (rt) => /^codex/.test(rt || "") ? "Codex" : rt === "claude" ? "Claude" : rt || "Unknown runtime", grouped = (list) => {
+          const runtimeName = (rt) => ({ "claude": "Claude", "codex": "Codex", "codex-app": "Codex app", "antigravity": "Antigravity" })[rt] || rt || "Unknown runtime";
+          const family = (rt) => /^codex/.test(rt || "") ? "Codex" : rt === "claude" ? "Claude" : runtimeName(rt), grouped = (list) => {
             const m5 = /* @__PURE__ */ new Map();
             for (const x5 of list) m5.set(x5, (m5.get(x5) || 0) + 1);
             return [...m5].map(([k5, n3]) => n3 > 1 ? k5 + " (" + n3 + ")" : k5).join(" \xB7 ");
           };
           const signState = { "signed-in": "Signed in", expired: "Expired", rejected: "Rejected", "sign-in-required": "Sign in required", "not-installed": "Not installed", "check-failed": "Check failed", unknown: "Unknown" }, signAlert = ["expired", "rejected", "sign-in-required", "check-failed"];
           const actionErrors = /* @__PURE__ */ new Map();
-          const routes = { hosts: "Hosts and resources", delivery: "Delivery", "agentq-shown": "Agentq shown", "agentq-setting-up": "Agentq setting up", "agentq-running": "Agentq running", "agentq-unknown": "Agentq unknown", work: "Work mode", recovery: "Recovery", stop: "Stop and hold", home: "Home", projects: "Projects", attention: "Attention", settings: "Settings", appearance: "Appearance", cadence: "Activity history", notifications: "Notifications", "notification-settings": "Notification delivery", agents: "Agents and access", services: "Services and support", about: "About and updates" };
+          const routes = { hosts: "Hosts and resources", delivery: "Delivery", "agentq-shown": "Agentq shown", "agentq-setting-up": "Agentq setting up", "agentq-running": "Agentq running", "agentq-unknown": "Agentq unknown", work: "Balancing", recovery: "Recovery", stop: "Stop and hold", home: "Home", projects: "Projects", attention: "Attention", settings: "Settings", appearance: "Appearance", cadence: "Activity history", notifications: "Notifications", "notification-settings": "Notifications", agents: "Agents and access", services: "Services and support", about: "About and updates" };
           const settingsPages = ["settings", "appearance", "hosts", "delivery", "cadence", "notification-settings", "work", "recovery", "agents", "services", "about"];
           if (ports.settings) view.page = "settings";
           const viewState = require_tray_view_state().create(view, { menu, document: document2, send, defer, cancel, trail: renderer.entries(), routes: Object.fromEntries(Object.keys(routes).map((page) => [page, { parent: settingsPages.includes(page) && page !== "settings" ? "settings" : "home" }])) });
@@ -6735,3 +9493,38 @@ var TaskqTaskWorkspace = (() => {
   });
   return require_task_workspace();
 })();
+/*! PrismJS 1.30.0
+MIT LICENSE
+
+Copyright (c) 2012 Lea Verou
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+/*! Bundled license information:
+
+prismjs/components/prism-core.js:
+  (**
+   * Prism: Lightweight, robust, elegant syntax highlighting
+   *
+   * @license MIT <https://opensource.org/licenses/MIT>
+   * @author Lea Verou <https://lea.verou.me>
+   * @namespace
+   * @public
+   *)
+*/

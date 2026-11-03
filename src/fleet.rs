@@ -9,7 +9,7 @@ pub fn cli_lines(body: &str) -> Value {
     let mut out = json!({});
     for line in body.lines().filter_map(|l| l.strip_prefix("cli ")) {
         let mut parts = line.split_whitespace();
-        if let (Some(cli @ ("claude" | "codex")), Some(v), None) = (parts.next(), parts.next(), parts.next()) {
+        if let (Some(cli), Some(v), None) = (parts.next(), parts.next(), parts.next()) && crate::runtimes::clis().any(|(k, _)| k == cli) {
             out[cli] = crate::data::semver(&json!(v));
         }
     }
@@ -37,6 +37,11 @@ pub fn keep_newest(lines: impl IntoIterator<Item = Value>, cap: usize) -> Value 
 
 fn unknown(why: &str) -> Value {
     json!({"state": "unknown", "at": null, "age_s": null, "reason": why, "incomplete": false})
+}
+
+/// One version row per host CLI of the runtime table.
+fn clis(host: &Value, inp: &Value, now: u64) -> Value {
+    Value::Array(crate::runtimes::clis().map(|(cli, _)| version(host, cli, inp, now)).collect())
 }
 
 fn version(host: &Value, cli: &str, inp: &Value, now: u64) -> Value {
@@ -170,7 +175,7 @@ fn window(stream: &Value, now: u64, seconds: u64) -> Value {
 pub fn build(inp: &Value, hosts: &Value) -> Value {
     let now = inp["now"].as_u64().unwrap_or(0);
     let filter = inp["filters"]["host"].as_str();
-    let mut rows: Vec<Value> = hosts.as_array().into_iter().flatten().map(|h| json!({"host": h["id"], "clis": [version(h,"claude",inp,now),version(h,"codex",inp,now)], "streams": []})).collect();
+    let mut rows: Vec<Value> = hosts.as_array().into_iter().flatten().map(|h| json!({"host": h["id"], "clis": clis(h,inp,now), "streams": []})).collect();
     for stream in inp["fleet_records"].as_array().into_iter().flatten() {
         // Worker/transition host codes are the producer's execution host, which can differ from the board host.
         let mut by_host: BTreeMap<String, Vec<Value>> = BTreeMap::new();
@@ -187,7 +192,7 @@ pub fn build(inp: &Value, hosts: &Value) -> Value {
             let index = if candidates.len()==1 { candidates[0] } else {
                 // A5/R2: no heartbeat joins this host, so both CLI versions stay visible as unknown.
                 let none=json!({});
-                rows.push(json!({"host":label,"clis":[version(&none,"claude",inp,now),version(&none,"codex",inp,now)],"streams":[]})); rows.len()-1
+                rows.push(json!({"host":label,"clis":clis(&none,inp,now),"streams":[]})); rows.len()-1
             };
             for seconds in [86400,7*86400] {
                 let mut win=window(&scoped,now,seconds);

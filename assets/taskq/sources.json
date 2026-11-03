@@ -1,21 +1,21 @@
 {
   "repository": "https://github.com/taskqorg/taskq",
-  "revision": "73df356b19e841e3900c06878206bfdd73b7c41e",
+  "revision": "0275b366a92678a426f0e2b09e05e1ed5f8e29d3",
   "files": {
     "assets/taskq/resource-controls.js": {
-      "source": "taskq-4.6.52-resource-controls.js",
-      "sha256": "e2c5878ff93893b95a1f3d9be858bb8ff132a100c96bbce8591b9f8c0b19a6ec"
+      "source": "taskq-4.6.66-resource-controls.js",
+      "sha256": "26658d7820090029a88559941dcb51c990d1e543e724b687210663e45783f9a9"
     },
     "assets/taskq/resource-controls.css": {
-      "source": "taskq-4.6.52-resource-controls.css",
+      "source": "taskq-4.6.66-resource-controls.css",
       "sha256": "9f81ec867aaf0cf95c4abbd5c37889632e1a6034b0e33331b52c41f92b836907"
     },
     "fixture/taskq/resource-controls.json": {
-      "source": "taskq-4.6.52-resource-controls-fixtures.json",
+      "source": "taskq-4.6.66-resource-controls-fixtures.json",
       "sha256": "a1637498fa9fcc346c7280186386b7a3d9d96aa09c38f8c27bd9a81e8d6fcbe9"
     },
     "fixture/taskq-resources/resource-policy-v1.json": {
-      "source": "taskq-4.6.52-resource-policy-fixtures.json",
+      "source": "taskq-4.6.66-resource-policy-fixtures.json",
       "sha256": "edfccf01d3aa7d05f13edaed3e685892e5cba0803a09c3e9a3bbcd068cd4b2e4"
     },
     "assets/taskq/LICENSE": {
@@ -23,5 +23,5 @@
       "sha256": "e89ac6292aef7d60a7a82136108b4b954a124264617b773ae32bdbd023b88225"
     }
   },
-  "release": "v4.6.52"
+  "release": "v4.6.66"
 }

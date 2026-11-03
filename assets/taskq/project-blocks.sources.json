@@ -5,6 +5,7 @@
     "clock": "b48d439afc267b7c3b0642bea04dcd1ab330cc24429f263a5cd3106d9fb3bb48",
     "folder": "9761f73542a636c2f4a1a6b3fcf8b2fa6ce9ff51b4f2344e744d73d0b5eb0ce9",
     "circle-pause": "f8f9eaa4033692ef333b9e2c54b4aa1b847572754bd718394931451a8cb09d4c",
+    "circle-dashed": "325677d816d2c70b4142e027497c1f8109f81c382e02608df0f7037cfc0f9fb2",
     "gitlab": "c7c39058bd1b6f9f40334383bd5136bb8c5ba5e6a24200f2d1f18365e2526e28",
     "git-pull-request": "4ecdd57d17ee5218cc651e554d17becb7626ab3bec823d951fb627a3e36c091b",
     "openai": "2b4a04ddc2395b20d168694d3850ce2050a702c4a0cdeb4d8b31b9a970481a8c",
@@ -24,11 +25,11 @@
   "designRevision": "75757d5d843159726a2ea44ca1615f9cf7fd18fd",
   "files": {
     "tests/fixtures/project-blocks.json": "0b049c5f09b368de869672b2b4bbe1b387c1b210e14afabb371ad7c0342794b8",
-    "docs/design/visual-style.md": "aad0eef98d027fb9d878b97a979d10e5d50194dc7b91639b7790b16e37317617",
-    "src/project-blocks.js": "cfe8ba919932130932e4b61de008290e92aa6432626457b75fcde5aa7c45349f",
-    "docs/design/menu-next-variants.html": "0cb616825c0f84703dbd19da67149aa9dceaaf4431f5fd193c2df7bae4e0f86c",
+    "docs/design/visual-style.md": "e13bbd5eb06a13e4504e086b625ff432a5d7d1a3ef17f193592fdb06d606f8e6",
+    "src/project-blocks.js": "8ff91c92b221aed0f4fd65cf51952262f44a1aa304be618e204fdc5d36f279ff",
+    "docs/design/menu-next-variants.html": "f0b6f664f3a626789e14c5031c6a69b3510629d346d15fa5d16e91b39f15ad0c",
     "src/project-blocks.LICENSE": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
-    "src/project-blocks.css": "c1c564cbc48d6e674c2209e1f798d2f54ed46447b7f4426c50152c8dc5bb4ce0"
+    "src/project-blocks.css": "35ffc029fce0ff07c86b03d1c0618a268d07dee7e615eab7d8204334fddc208c"
   },
   "hashEncoding": "UTF-8, LF; the build derives the hashes (scripts/design-sources.cjs); the tag workflow assigns the release version"
 }

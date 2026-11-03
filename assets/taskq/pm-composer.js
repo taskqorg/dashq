@@ -634,7 +634,7 @@ var TaskqPmComposer = (() => {
           }
         },
         composer: function({ text, disabled = false, id = "pm-draft", field = "text", label = "Request draft", reason = "", placeholder = "Ask AI\u2026", before, files, tools, after, onInput, onPaste, onDrop, onDragOver }) {
-          return h2("div", { class: "conversation-composer", onPaste, onDrop, onDragOver }, before, h2("label", { for: id, class: "sr-only" }, label), h2("textarea", { id, "data-c-field": field, rows: 3, value: text, disabled, "aria-describedby": id === "conversation-draft" ? "conversation-reason" : id + "-reason", placeholder, onInput }), files, tools, h2("p", { id: id === "conversation-draft" ? "conversation-reason" : id + "-reason", class: "meta" }, reason), after);
+          return h2("div", { class: "conversation-composer", onPaste, onDrop, onDragOver }, before, h2("label", { for: id, class: "sr-only" }, label), h2("textarea", { id, "data-c-field": field, rows: 3, value: text, disabled, "aria-describedby": id === "conversation-draft" ? "conversation-reason" : id + "-reason", placeholder, onInput }), files, tools, h2("p", { id: id === "conversation-draft" ? "conversation-reason" : id + "-reason", class: "meta", title: reason, "data-tooltip": true, tabIndex: reason ? 0 : void 0 }, reason), after);
         },
         mount: function(el, adapter) {
           let draft = adapter.load() || { text: "" }, pending = false, timer, serial = 0, invalid = false;

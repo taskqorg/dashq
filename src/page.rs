@@ -1,6 +1,7 @@
 //! The page (dashq.md D8): one server-side renderer of the `/data` document.
 
-use crate::data::{AGENTS, PERIODS, dur};
+use crate::data::{PERIODS, dur};
+use crate::runtimes;
 use crate::source::{clock, enc};
 use serde_json::{Value, json};
 use std::fmt::Write;
@@ -203,7 +204,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     if configured("langfuse") {
         let ag = &doc["agents"];
         let src = &ag["source"];
-        let name = |a: &Value| AGENTS.iter().find(|(k, _)| a == *k).map_or(text(a), |(_, n)| n.to_string());
+        let name = |a: &Value| a.as_str().and_then(runtimes::client_key).map_or(text(a), |c| c.label.to_string());
         let _ = writeln!(w, "<section id=\"agents\">\n<h2>Agents</h2>\n{}", unknown_line(src));
         let capped = |k: &str| -> Value { json!({"incomplete": ag["incomplete"][k], "reason": src["reason"]}) };
         let _ = writeln!(w, "<h3>agentq fleet (one row per installation)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Version</th><th>Last seen</th><th>Heartbeat</th><th>Runs (non-zero exits)</th><th>Retrievals (failed)</th></tr>");
@@ -321,7 +322,7 @@ fn clients(w: &mut String, c: &Value, cc: &Value, cr: &Value, now: u64) {
     let none = |why: &Value| format!("<span class=\"unknown\" title=\"unknown: {}\">—</span>", esc(why.as_str().unwrap_or("not reported")));
     let _ = writeln!(w, "<h3>agentq clients (use over 24 h)</h3>\n<table>\n<tr><th>Host</th><th>Installation</th><th>Client</th><th>Routing</th><th>Hooks (last failure)</th><th>MCP</th><th>Hook compress (compressed · bytes saved)</th><th>Compress records</th><th>Retrievals (installation)</th></tr>");
     for r in c["rows"].as_array().into_iter().flatten() {
-        let client = AGENTS.iter().find(|(k, _)| r["client"] == *k).map_or_else(|| none(&r["use_reason"]), |(_, n)| n.to_string());
+        let client = r["client"].as_str().and_then(runtimes::client_key).map_or_else(|| none(&r["use_reason"]), |c| c.label.to_string());
         let fresh = r["heartbeat"]["state"] == "ok";
         let stale = if fresh { String::new() } else { " <span class=\"detail\">last known</span>".into() };
         // a stale or unconfirmed heartbeat never shows a current badge (D6)
@@ -785,10 +786,9 @@ fn integrations(w: &mut String, inst: &Value, controls: bool) {
                 aq_glyph("MCP", &p["mcp"]),
                 aq_word(&eff["state"])
             );
-            let routing_note = match (p["kind"].as_str(), p["routing"].as_str()) {
+            let routing_note = match (p["kind"].as_str().and_then(runtimes::client_key).and_then(|c| c.direct), p["routing"].as_str()) {
                 (_, Some("unsupported")) => "This client has no provider route.",
-                (Some("codex"), Some("direct")) => "Direct keeps MCP and telemetry; it bypasses the provider optimization.",
-                (Some("claude-code"), Some("direct")) => "Direct removes the AgentQ route; the command hook can still use RTK.",
+                (Some(note), Some("direct")) => note,
                 (_, Some("routed")) => "The client's provider runs through the local AgentQ proxy.",
                 (_, Some("bypassed")) => "Another provider owns the route; AgentQ does not overwrite it.",
                 _ => "Routing could not be read.",
@@ -1008,7 +1008,13 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
             let shown = if version.is_null() { unknown("running version not reported") } else { text(version) };
             let _ = writeln!(w, "<div class=\"service\" tabindex=\"0\" title=\"{}\"><span>{label}</span><span>{shown}</span><span class=\"detail\">{}</span></div>", esc(&why), esc(match update { "current" => "version current", "available" => "update available", "error" => "update error", _ => "update unknown" }));
         }
-        let _ = writeln!(w, "</div><div class=\"cell\"><span class=\"label\">Client sign-in</span><div class=\"login\">Claude {}</div><div class=\"login\">Codex {}</div></div>", host_observation(&h, "login", "claude", now), host_observation(&h, "login", "codex", now));
+        let _ = write!(w, "</div><div class=\"cell\"><span class=\"label\">Client sign-in</span>");
+        for r in runtimes::runtimes() {
+            if let Some(field) = r.login {
+                let _ = write!(w, "<div class=\"login\">{} <small>{}</small> {}</div>", esc(r.label), esc(r.brand), host_observation(&h, "login", field, now));
+            }
+        }
+        let _ = writeln!(w, "</div>");
         let observation = format!("{}; observed {}; {}", src["state"].as_str().unwrap_or("unknown"), at(&src["at"], now), src["reason"].as_str().unwrap_or("resource sample"));
         let cpu = c["cpu"]["percent"].as_f64();
         let shown = cpu.map_or_else(|| unknown(c["cpu"]["reason"].as_str().unwrap_or("no resource sample")), |p| format!("{p:.1}%"));
@@ -1168,7 +1174,7 @@ fn servers(w: &mut String, res: &Value, now: u64) {
         let warm = h["reason"].as_str().map(|x| format!(" <span class=\"detail\">{}</span>", esc(x))).unwrap_or_default();
         let _ = writeln!(
             w,
-            "<article class=\"node\" id=\"node-{inst}\"><div class=\"who\"><b>{}</b> <small>{} · {}</small> {}{}{warm}<br><span class=\"policy detail\">Work mode: no TaskQ policy adapter</span></div>",
+            "<article class=\"node\" id=\"node-{inst}\"><div class=\"who\"><b>{}</b> <small>{} · {}</small> {}{}{warm}<br><span class=\"policy detail\">Balancing: no TaskQ policy adapter</span></div>",
             text(&r["host"]),
             text(&r["runtime"]),
             text(&r["provenance"]),
@@ -1818,7 +1824,7 @@ mod tests {
         let mac = node("inst-mac");
         assert!(mac.contains("no trend yet") && !mac.contains("<polyline") && mac.contains("9.5 %"), "{mac}");
         assert!(node("inst-fra").contains("title=\"unknown: stat failed\">—</span>"));
-        assert_eq!(first.matches("Work mode: no TaskQ policy adapter</span>").count(), 4);
+        assert_eq!(first.matches("Balancing: no TaskQ policy adapter</span>").count(), 4);
         assert!(first.contains("data-boards="));
         assert!(first.contains("Shared TaskQ blocks require JavaScript."));
         assert!(first.contains("https://github.com/taskqorg/taskq/issues"));
