@@ -2306,7 +2306,7 @@ mod tests {
         let (_, anon) = data(&app, "", None);
         assert_eq!((anon["installations"]["rows"].clone(), anon["sources"]["enrollment"]["reason"].as_str()), (json!([]), Some("no signed-in subject")));
         assert_eq!(data(&app, "host=fra%2Fnative", Some(Scope::All)).1["installations"]["rows"], json!([]));
-        assert_eq!(data(&app, "host=mac-1%2Fnative", Some(Scope::All)).1["installations"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(data(&app, &format!("host=mac-1%2F{}", coreq::enroll::runtime()), Some(Scope::All)).1["installations"]["rows"].as_array().unwrap().len(), 1);
         assert!(crate::actor(Some(HOST), HOST, None).is_none());
         assert!(matches!(crate::actor(Some(HOST), HOST, Some("github|1")), Some(Scope::Subject("github|1"))));
         assert!(matches!(crate::actor(Some("127.0.0.1:18882"), HOST, None), Some(Scope::All)));
