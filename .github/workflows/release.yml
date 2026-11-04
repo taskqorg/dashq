@@ -14,19 +14,24 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - hosted: '"ubuntu-latest"'
+            local: '["self-hosted", "Linux", "X64", "dashq-wsl"]'
             target: x86_64-unknown-linux-musl
             name: linux-x86_64
-          - os: ubuntu-24.04-arm
+          # No local Linux arm64 host.
+          - hosted: '"ubuntu-24.04-arm"'
+            local: '"ubuntu-24.04-arm"'
             target: aarch64-unknown-linux-musl
             name: linux-aarch64
-    runs-on: ${{ matrix.os }}
+    # A release builds on our hosts; pull requests, forks included, stay on disposable GitHub runners.
+    runs-on: ${{ fromJSON(github.event_name == 'push' && matrix.local || matrix.hosted) }}
     env:
       DASHQ_SELFTEST_OFFLINE: '1'
       TARGET: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - if: runner.environment == 'github-hosted'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - run: rustup update stable --no-self-update && rustup default stable && rustup target add "$TARGET"
       - name: Tag equals Cargo.toml version
         run: |
@@ -34,14 +39,14 @@ jobs:
           test -n "$ver"
           if [ "$GITHUB_REF_TYPE" = tag ]; then test "${GITHUB_REF_NAME#v}" = "$ver"; fi
           echo "VER=$ver" >> "$GITHUB_ENV"
-      # Tests need headless Chrome (snapshot PNG): ubuntu-latest ships it, the arm runner does not.
+      # Tests need headless Chrome (snapshot PNG): ubuntu-latest and the WSL host have it, the arm runner does not.
       # The arm artifact is still gated by its own selftest below. On a pull request tests.yml runs them.
       - if: matrix.name == 'linux-x86_64' && github.ref_type == 'tag'
         run: cargo test --locked
       - run: cargo build --locked --release --target "$TARGET"
       - name: Selftest and stage
         run: |
-          bin="target/$TARGET/release/dashq"
+          bin="${CARGO_TARGET_DIR:-target}/$TARGET/release/dashq"
           file "$bin" | grep -Eq 'static(ally|-pie) linked'
           "$bin" selftest
           mkdir dist
