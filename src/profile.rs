@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 /// Measured operations (D20): name, p95 budget in ms, error budget as a failure rate.
-pub const OPS: [(&str, u64, f64); 18] = [
+pub const OPS: [(&str, u64, f64); 19] = [
     ("http.page", 3000, 0.01),
     ("http.data", 3000, 0.01),
     ("http.enroll", 500, 0.01),
@@ -27,6 +27,7 @@ pub const OPS: [(&str, u64, f64); 18] = [
     ("read.taskq", 10000, 0.05),
     ("read.serverq", 50, 0.01),
     ("read.tasklog", 500, 0.01),
+    ("push.limits", 10000, 0.05),
     ("update.check", 15000, 0.05),
     ("update", 120000, 0.05),
     ("restart", 30000, 0.05),
