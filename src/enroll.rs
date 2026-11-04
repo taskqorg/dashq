@@ -2267,7 +2267,7 @@ mod tests {
     /// Test config without Langfuse or GitHub and with an unreadable serverq report: every optional source fails.
     fn app(e: Result<Enroll, String>, langfuse: Option<(String, String)>) -> crate::App {
         let cfg = crate::Config { assetq: None, prices: Value::Null, langfuse, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: "/nonexistent/report.json".into(), serverq_host: "fra/native".into(), public_host: HOST.into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: crate::store::LIMITS };
-        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }
+        crate::App { cfg, cache: crate::source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }
     }
 
     fn data(app: &crate::App, query: &str, scope: Option<Scope>) -> (&'static str, Value) {

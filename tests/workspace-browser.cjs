@@ -1,7 +1,7 @@
 // #186 A2-A6: the exact shipped bundles and DashQ adapter; lost replies, local state and navigation.
 const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
 const read=f=>fs.readFileSync(f,'utf8');
-const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'].map(read).join('\n');
+const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/assetq.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css','assets/taskq/pm-composer.css','assets/workspace.css'].map(read).join('\n')+'\n@scope (#taskq-workspace) {'+read('assets/taskq/task-workspace.css')+'}';
 const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 (async()=>{

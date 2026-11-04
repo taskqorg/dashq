@@ -26,6 +26,12 @@ struct Slot {
 pub struct Cache(Mutex<HashMap<String, Arc<Mutex<Slot>>>>);
 
 impl Cache {
+    /// The next read of `key` goes to the source; a write this process just made must not wait for the cache.
+    pub fn forget(&self, key: &str) {
+        let slot = self.0.lock().unwrap().get(key).cloned();
+        if let Some(slot) = slot { slot.lock().unwrap().next = 0; }
+    }
+
     pub fn get(&self, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), Fail>) -> Value {
         let slot = self.0.lock().unwrap().entry(key.to_string()).or_default().clone();
         // single flight: the slot lock is held during the read, so waiting callers share its result

@@ -2,11 +2,16 @@
 //! recommendations and assets. This module reads them with a GET-only credential, projects an allowlist of
 //! metadata (R1) and renders one guarded view. No field passes through unless it is named here.
 
+use crate::enroll::{Enroll, Req, Resp};
 use crate::page::esc;
 use crate::source::{self, Fail};
+use crate::store::{self, Store};
+use rusqlite::{OptionalExtension, params};
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 const FRESH_S: u64 = 180;
 const TTL_S: u64 = 60;
@@ -122,9 +127,16 @@ fn observation(v: &Value) -> Value {
     }
 }
 
+/// What a person reviews before cancelling. `updated_at` is not it: AssetQ touches a job on every poll, so that
+/// time would read stale for any job still running.
+fn job_revision(j: &Value) -> String {
+    format!("{}/{}/{}/{}", j["phase"].as_str().unwrap_or(""), j["step"], j["effect"].as_str().unwrap_or(""), j["cancel"].as_str().unwrap_or(""))
+}
+
 fn job(v: &Value, origin: &str) -> Value {
     let mut o = pick(v, &["id", "method", "phase", "step", "steps", "effect", "provider_operation", "submissions", "cancel", "reserved_credits", "attempts", "created_at", "updated_at"]);
     o["operation"] = v["request"]["operation"].clone();
+    o["revision"] = json!(job_revision(v));
     o["usage"] = json!({"credits": v["usage"]["credits"], "unknown_reason": line(&v["usage"]["unknown_reason"])});
     o["reason"] = line(&v["reason"]);
     if let Some(id) = v["id"].as_str() {
@@ -305,7 +317,7 @@ fn link(href: &Value, label: &str) -> String {
 }
 
 /// A closed or denied form never reaches the server: `data-assetq-can` is the server's answer for this actor.
-fn gate(w: &mut String, p: &Value, grant: &str) {
+fn gated(w: &mut String, p: &Value, grant: &str) {
     let can = p["controls"][grant] == true;
     let reason = p["controls"]["reason"].as_str().unwrap_or("Actions unavailable.");
     let _ = write!(w, "<fieldset class=\"asset-gate\" data-assetq-can=\"{can}\" disabled>");
@@ -316,7 +328,7 @@ fn gate(w: &mut String, p: &Value, grant: &str) {
 fn action_form(w: &mut String, p: &Value, grant: &str, key: &str, action: &str, revision: &Value, body: impl FnOnce(&mut String, &str)) {
     let id = format!("assetq-{}-{}", val(&p["project"]), esc(key));
     let _ = write!(w, "<form id=\"{id}\" class=\"asset-form\" data-assetq-action=\"{}\" data-project=\"{}\" data-revision=\"{}\">", esc(action), val(&p["project"]), val(revision));
-    gate(w, p, grant);
+    gated(w, p, grant);
     body(w, &id);
     w.push_str("</fieldset><output class=\"asset-receipt\" role=\"status\"></output></form>");
 }
@@ -336,7 +348,7 @@ fn job_rows(w: &mut String, p: &Value) {
         let _ = write!(w, "<span>{} · {}</span>", link(&j["links"]["record"], "Record"), link(&j["links"]["result"], "Result"));
         // AssetQ decides whether a repeat changes anything; a requested cancellation offers nothing more here.
         if j["cancel"].is_null() || j["cancel"] == "none" {
-            action_form(w, p, "jobs", &format!("cancel-{}", j["id"].as_str().unwrap_or("")), "job.cancel", &j["updated_at"], |w, _| { let _ = write!(w, "<input type=\"hidden\" name=\"job\" value=\"{}\"><button type=\"submit\">Cancel job</button>", val(&j["id"])); });
+            action_form(w, p, "jobs", &format!("cancel-{}", j["id"].as_str().unwrap_or("")), "job.cancel", &j["revision"], |w, _| { let _ = write!(w, "<input type=\"hidden\" name=\"job\" value=\"{}\"><button type=\"submit\">Cancel job</button>", val(&j["id"])); });
         }
         w.push_str("</div>");
     }
@@ -381,7 +393,7 @@ fn methods(w: &mut String, p: &Value) {
         if m["spec"].is_object() {
             let _ = write!(w, "<details class=\"asset-action\" id=\"assetq-{0}-edit-{1}\"><summary id=\"assetq-{0}-edit-{1}-summary\">Edit as new version</summary>", val(&p["project"]), val(&m["name"]));
             action_form(w, p, "methods", &format!("save-{}", m["name"].as_str().unwrap_or("")), "method.save", &p["revisions"]["registry"], |w, id| {
-                let _ = write!(w, "<input type=\"hidden\" name=\"id\" value=\"{}\"><label>Status {}</label><label>Specification (JSON) <textarea id=\"{id}-spec\" name=\"spec\" rows=\"8\" spellcheck=\"false\">{}</textarea></label><p class=\"note\">Saving creates the next version. Running jobs keep their version. AssetQ validates the specification.</p><button type=\"submit\">Save new version</button>", val(&m["id"]), status_select(&format!("{id}-status"), &m["status"]), esc(&serde_json::to_string_pretty(&m["spec"]).unwrap_or_default()));
+                let _ = write!(w, "<input type=\"hidden\" name=\"method_id\" value=\"{}\"><label>Status {}</label><label>Specification (JSON) <textarea id=\"{id}-spec\" name=\"spec\" rows=\"8\" spellcheck=\"false\">{}</textarea></label><p class=\"note\">Saving creates the next version. Running jobs keep their version. AssetQ validates the specification.</p><button type=\"submit\">Save new version</button>", val(&m["id"]), status_select(&format!("{id}-status"), &m["status"]), esc(&serde_json::to_string_pretty(&m["spec"]).unwrap_or_default()));
             });
             w.push_str("</details>");
         }
@@ -389,7 +401,7 @@ fn methods(w: &mut String, p: &Value) {
     }
     let _ = write!(w, "<details class=\"asset-action\" id=\"assetq-{0}-add\"><summary id=\"assetq-{0}-add-summary\">Add method</summary>", val(&p["project"]));
     action_form(w, p, "methods", "add-method", "method.save", &p["revisions"]["registry"], |w, id| {
-        let _ = write!(w, "<label>Method ID <input id=\"{id}-id\" name=\"id\" maxlength=\"100\" required autocomplete=\"off\"></label><label>Status {}</label><label>Specification (JSON) <textarea id=\"{id}-spec\" name=\"spec\" rows=\"8\" spellcheck=\"false\" required></textarea></label><button type=\"submit\">Add method</button>", status_select(&format!("{id}-status"), &json!("experimental")));
+        let _ = write!(w, "<label>Method ID <input id=\"{id}-id\" name=\"method_id\" maxlength=\"100\" required autocomplete=\"off\"></label><label>Status {}</label><label>Specification (JSON) <textarea id=\"{id}-spec\" name=\"spec\" rows=\"8\" spellcheck=\"false\" required></textarea></label><button type=\"submit\">Add method</button>", status_select(&format!("{id}-status"), &json!("experimental")));
     });
     w.push_str("</details></details>");
 }
@@ -472,6 +484,336 @@ pub fn render(w: &mut String, assets: &Value) {
     w.push_str("</section>");
 }
 
+// ---------------------------------------------------------------- actions (D27)
+
+pub struct Ctx<'a> {
+    pub enroll: &'a Result<Enroll, String>,
+    pub cfg: Option<&'a Config>,
+    pub public_host: &'a str,
+    pub state: &'a State,
+    pub cache: &'a source::Cache,
+}
+
+/// Per-process guards: the write rate per actor and one action at a time per project.
+#[derive(Default)]
+pub struct State {
+    recent: Mutex<HashMap<String, Vec<i64>>>,
+    projects: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+const PER_MINUTE: usize = 10;
+const MAX_TEXT: usize = 65536;
+const MAX_ATTACHMENTS: usize = 16;
+const STATUSES: [&str; 4] = ["experimental", "recommended", "deprecated", "disabled"];
+const TERMINAL: [&str; 3] = ["succeeded", "failed", "cancelled"];
+
+/// One journal row (`assetq_ops`). It holds a digest, never the text, specification or constraints (R1).
+pub struct Op {
+    pub digest: Vec<u8>,
+    pub state: String,
+    pub receipt: String,
+    pub baseline: Option<i64>,
+}
+
+impl Store {
+    pub fn assetq_grant(&self, workspace: &str, subject: &str, grant: &str, on: bool) -> Result<(), store::Error> {
+        self.write(|tx| {
+            if on { tx.execute("INSERT OR IGNORE INTO assetq_grants VALUES (?1,?2,?3)", [workspace, subject, grant])?; }
+            else { tx.execute("DELETE FROM assetq_grants WHERE workspace=?1 AND subject=?2 AND grant_name=?3", [workspace, subject, grant])?; }
+            Ok(())
+        })
+    }
+
+    /// The separate grant and the workspace administrator role; checked on every request, so revocation is immediate.
+    pub fn assetq_can(&self, workspace: &str, subject: &str, grant: &str) -> Result<bool, store::Error> {
+        Ok(self.lock()?.query_row("SELECT EXISTS(SELECT 1 FROM assetq_grants g JOIN members m USING(workspace,subject) WHERE g.workspace=?1 AND g.subject=?2 AND g.grant_name=?3 AND m.role='admin')", [workspace, subject, grant], |r| r.get(0))?)
+    }
+
+    pub fn assetq_op(&self, op_id: &str) -> Result<Option<Op>, store::Error> {
+        Ok(self.lock()?.query_row("SELECT digest,state,receipt,baseline FROM assetq_ops WHERE op_id=?1", [op_id], |r| Ok(Op { digest: r.get(0)?, state: r.get(1)?, receipt: r.get(2)?, baseline: r.get(3)? })).optional()?)
+    }
+
+    // ponytail: rows stay, one small row per rate-limited action; prune with a retention rule if the file ever matters.
+    fn assetq_record(&self, op_id: &str, project: &str, digest: &[u8], state: &str, receipt: &str, baseline: Option<i64>, now: i64) -> Result<(), store::Error> {
+        self.write(|tx| {
+            tx.execute("INSERT INTO assetq_ops VALUES (?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(op_id) DO UPDATE SET state=?4, receipt=?5, at=?7", params![op_id, project, digest, state, receipt, baseline, now])?;
+            Ok(())
+        })
+    }
+}
+
+fn reply(status: &'static str, v: Value) -> Resp {
+    Resp { status, ctype: "application/json", body: v.to_string().into_bytes(), headers: String::new(), forms: false }
+}
+
+/// A refusal before any effect or journal row: never reflected input.
+fn refuse(status: &'static str, reason: &str) -> Resp {
+    reply(status, json!({"state": "refused", "reason": reason}))
+}
+
+pub fn route(c: &Ctx, r: &Req, now: i64) -> Option<Resp> {
+    if r.path != "/assetq/control" { return None }
+    Some(match r.method {
+        "GET" => capability(c, r, now),
+        "POST" => post(c, r, now),
+        _ => Resp { status: "405 Method Not Allowed", ctype: "text/plain", body: b"method not allowed".to_vec(), headers: String::new(), forms: false },
+    })
+}
+
+fn purpose(subject: &str, project: &str, day: i64) -> String {
+    format!("{subject}\nassetq/control\n{project}\n{day}")
+}
+
+fn actor<'a>(c: &'a Ctx, r: &'a Req) -> Result<(&'a Config, &'a Enroll, &'a str), Resp> {
+    let (Some(cfg), Ok(e)) = (c.cfg, c.enroll) else { return Err(refuse("503 Service Unavailable", "unavailable")) };
+    let Some(subject) = r.header(crate::enroll::SUBJECT).filter(|s| crate::enroll::valid_subject(s)) else { return Err(refuse("401 Unauthorized", "unauthorized")) };
+    Ok((cfg, e, subject))
+}
+
+/// A foreign or unknown project reads the same (no oracle).
+fn member<'a>(cfg: &'a Config, e: &Enroll, subject: &str, project: &str) -> Result<&'a Project, Resp> {
+    let p = cfg.projects.iter().find(|p| p.id == project).ok_or_else(|| refuse("403 Forbidden", "authority"))?;
+    let w = e.store().workspaces(subject).map_err(|_| refuse("503 Service Unavailable", "unavailable"))?;
+    if w.iter().any(|(x, role)| *x == p.workspace && role == "admin") { Ok(p) } else { Err(refuse("403 Forbidden", "authority")) }
+}
+
+/// `GET ?project=P`: a CSRF token and capabilities for this actor and project only. Reading grants nothing.
+fn capability(c: &Ctx, r: &Req, now: i64) -> Resp {
+    let (cfg, e, subject) = match actor(c, r) { Ok(x) => x, Err(x) => return x };
+    let q = crate::enroll::form(r.query.as_bytes());
+    let p = match member(cfg, e, subject, q.get("project").map_or("", String::as_str)) { Ok(p) => p, Err(x) => return x };
+    let can = |g: &str| p.control_token.is_some() && e.store().assetq_can(&p.workspace, subject, g).unwrap_or(false);
+    reply("200 OK", json!({"csrf": e.token_for(&purpose(subject, &p.id, now / 86400)), "jobs": can("jobs"), "methods": can("methods")}))
+}
+
+/// What this actor may do on one project (`/data.assets[].controls`). The server repeats the check on every request.
+pub fn controls(p: &Project, e: &Result<Enroll, String>, subject: Option<&str>, source: &Value) -> Value {
+    let off = |why: String| json!({"jobs": false, "methods": false, "reason": why});
+    if p.control_token.is_none() { return off("AssetQ actions are not configured for this project.".into()) }
+    let Some(subject) = subject else { return off("Sign in through the dashboard name to act.".into()) };
+    if !matches!(source["state"].as_str(), Some("ok" | "incomplete")) {
+        return off(format!("AssetQ read is {}; actions wait for a fresh read.", source["state"].as_str().unwrap_or("unknown")));
+    }
+    let Ok(e) = e else { return off("Grant store unavailable.".into()) };
+    let can = |g: &str| e.store().assetq_can(&p.workspace, subject, g).unwrap_or(false);
+    let (jobs, methods) = (can("jobs"), can("methods"));
+    let missing: Vec<&str> = [("jobs", jobs), ("methods", methods)].into_iter().filter(|(_, x)| !x).map(|(n, _)| n).collect();
+    json!({"jobs": jobs, "methods": methods, "reason": if missing.is_empty() { Value::Null } else { json!(format!("Needs the AssetQ {} grant in {}.", missing.join(" and "), p.workspace)) }})
+}
+
+fn limited(s: &State, actor: &str, now: i64) -> bool {
+    let mut m = s.recent.lock().unwrap();
+    let w = m.entry(actor.to_string()).or_default();
+    w.retain(|t| now - *t < 60);
+    if w.len() >= PER_MINUTE { return true }
+    w.push(now);
+    false
+}
+
+fn plain(v: &Value, max: usize) -> bool {
+    v.as_str().is_some_and(|s| !s.is_empty() && s.len() <= max && !s.chars().any(char::is_control))
+}
+
+fn exact(v: &Value, keys: &[&str]) -> bool {
+    v.as_object().is_some_and(|o| o.len() == keys.len() + 4 && keys.iter().chain(["project", "action", "op_id", "revision"].iter()).all(|k| o.contains_key(*k)))
+}
+
+/// The grant an action needs, after its strict shape check; `None` refuses it. AssetQ validates the meaning.
+fn check_shape(v: &Value) -> Option<&'static str> {
+    let oid = |x: &Value| x.as_str().is_some_and(|s| crate::enroll::id(s, 128));
+    match v["action"].as_str()? {
+        "job.submit" if exact(v, &["operation", "method", "text", "attachments", "constraints", "max_credits"])
+            && plain(&v["operation"], 100) && v["method"].as_str().is_some_and(|m| m.contains('@') && plain(&v["method"], 140))
+            && v["text"].as_str().is_some_and(|t| t.len() <= MAX_TEXT)
+            && v["attachments"].as_array().is_some_and(|a| a.len() <= MAX_ATTACHMENTS && a.iter().all(oid))
+            && v["constraints"].is_object() && v["max_credits"].is_u64() => Some("jobs"),
+        "job.cancel" if exact(v, &["job"]) && oid(&v["job"]) => Some("jobs"),
+        "method.save" if exact(v, &["id", "status", "spec"]) && plain(&v["id"], 100) && v["status"].as_str().is_some_and(|s| STATUSES.contains(&s)) && v["spec"].is_object() => Some("methods"),
+        "recommendation.promote" if exact(v, &["recommendation", "use_case", "constraints"]) && oid(&v["recommendation"]) && plain(&v["use_case"], 500) && v["constraints"].is_object() => Some("methods"),
+        _ => None,
+    }
+}
+
+fn post(c: &Ctx, r: &Req, now: i64) -> Resp {
+    let (cfg, e, subject) = match actor(c, r) { Ok(x) => x, Err(x) => return x };
+    let origin = format!("https://{}", c.public_host);
+    if r.header("origin") != Some(origin.as_str()) || !r.header("content-type").is_some_and(|t| t.starts_with("application/json")) {
+        return refuse("401 Unauthorized", "unauthorized");
+    }
+    let Some(v) = crate::policy::strict(r.body).filter(Value::is_object) else { return refuse("400 Bad Request", "invalid") };
+    let project = v["project"].as_str().unwrap_or("");
+    let csrf = r.header("x-dashq-csrf").unwrap_or("");
+    if ![now / 86400, now / 86400 - 1].iter().any(|d| e.token_ok(&purpose(subject, project, *d), csrf)) { return refuse("401 Unauthorized", "unauthorized") }
+    if limited(c.state, subject, now) { return refuse("429 Too Many Requests", "busy") }
+    let p = match member(cfg, e, subject, project) { Ok(p) => p, Err(x) => return x };
+    let (Some(grant), Some(op_id), true) = (check_shape(&v), v["op_id"].as_str().filter(|o| crate::enroll::id(o, 64)), plain(&v["revision"], 200)) else { return refuse("400 Bad Request", "invalid") };
+    match e.store().assetq_can(&p.workspace, subject, grant) {
+        Ok(true) => {}
+        Ok(false) => return refuse("403 Forbidden", "authority"),
+        Err(_) => return refuse("503 Service Unavailable", "unavailable"),
+    }
+    let Some(control) = p.control_token.as_deref().and_then(|t| token(t).ok()) else { return refuse("503 Service Unavailable", "no_control_credential") };
+    let Ok(read) = token(&p.read_token) else { return refuse("503 Service Unavailable", "no_read_credential") };
+    // The digest binds actor and every field; a replay must repeat all of them.
+    let digest = crate::enroll::sha256(&format!("{subject}\n{v}"));
+    let lock = c.state.projects.lock().unwrap().entry(p.id.clone()).or_default().clone();
+    let _one = lock.lock().unwrap();
+    let t = Target { base: &cfg.base, read: &read, control: &control, project: &p.id, v: &v, op_id };
+    let seen = match e.store().assetq_op(op_id) { Ok(x) => x, Err(_) => return refuse("503 Service Unavailable", "unavailable") };
+    let (state, receipt, baseline) = match seen {
+        Some(o) if o.digest != digest => return refuse("409 Conflict", "replay_mismatch"),
+        Some(o) if o.state != "pending" && o.state != "unknown" => return answer(&o.state, serde_json::from_str(&o.receipt).unwrap_or_default()),
+        Some(o) => { let (s, x) = reconcile(&t, o.baseline); (s, x, o.baseline) }
+        None => match gate(&t) {
+            Err(why) => return refuse("503 Service Unavailable", &why),
+            Ok(Gate::Stale) => ("stale", json!({"reason": "revision_changed"}), None),
+            Ok(Gate::Refused(why)) => ("refused", json!({"reason": why}), None),
+            Ok(Gate::Go(baseline)) => {
+                // Pending commits before the effect, so a crash reconciles instead of starting a new operation.
+                if e.store().assetq_record(op_id, &p.id, &digest, "pending", "{}", baseline, now).is_err() { return refuse("503 Service Unavailable", "unavailable") }
+                let (s, x) = dispatch(&t, baseline);
+                (s, x, baseline)
+            }
+        },
+    };
+    let mut receipt = receipt;
+    for (k, val) in [("op_id", json!(op_id)), ("project", json!(p.id)), ("action", v["action"].clone()), ("state", json!(state))] { receipt[k] = val; }
+    // An unrecorded outcome keeps the row pending: the next delivery check reconciles it.
+    let _ = e.store().assetq_record(op_id, &p.id, &digest, state, &receipt.to_string(), baseline, now);
+    // The next page read and revision check see AssetQ's new state, not this cache.
+    c.cache.forget(&format!("assetq:{}", p.id));
+    answer(state, receipt)
+}
+
+fn answer(state: &str, receipt: Value) -> Resp {
+    reply(match state { "accepted" => "200 OK", "stale" => "409 Conflict", "refused" => "422 Unprocessable Content", _ => "202 Accepted" }, receipt)
+}
+
+struct Target<'a> {
+    base: &'a str,
+    read: &'a str,
+    control: &'a str,
+    project: &'a str,
+    v: &'a Value,
+    op_id: &'a str,
+}
+
+enum Gate { Go(Option<i64>), Stale, Refused(&'static str) }
+
+/// Fresh reads with the read credential, before anything is recorded or sent. `Err`: AssetQ unreadable, no effect.
+fn gate(t: &Target) -> Result<Gate, String> {
+    let v = t.v;
+    let revision = v["revision"].as_str().unwrap_or("");
+    let status = |key: &str| -> Result<bool, String> {
+        let s = get(t.base, "/v1/status", t.read).map_err(|_| "assetq_unavailable".to_string())?;
+        if s["project"] != t.project { return Err("assetq_unavailable".into()) }
+        Ok(s["revisions"][key] == revision)
+    };
+    match v["action"].as_str().unwrap_or("") {
+        "job.submit" => Ok(if status("registry")? { Gate::Go(None) } else { Gate::Stale }),
+        "method.save" => {
+            if !status("registry")? { return Ok(Gate::Stale) }
+            let rows = methods_of(t).ok_or("assetq_unavailable")?;
+            Ok(Gate::Go(Some(rows.iter().filter(|m| m["id"] == v["id"]).filter_map(|m| m["version"].as_i64()).max().unwrap_or(0))))
+        }
+        "job.cancel" => match get(t.base, &job_path(v), t.read) {
+            Err(e) if e == "HTTP 404" => Ok(Gate::Refused("not_found")),
+            Err(_) => Err("assetq_unavailable".into()),
+            Ok(j) if job_revision(&j) != revision => Ok(Gate::Stale),
+            Ok(j) if j["phase"].as_str().is_some_and(|p| TERMINAL.contains(&p)) => Ok(Gate::Refused("job_terminal")),
+            Ok(_) => Ok(Gate::Go(None)),
+        },
+        "recommendation.promote" => {
+            if !status("recommendations")? { return Ok(Gate::Stale) }
+            match record_of(t).ok_or("assetq_unavailable")? {
+                Some(r) if r["state"] == "proposed" => Ok(Gate::Go(None)),
+                Some(_) => Ok(Gate::Refused("not_proposed")),
+                None => Ok(Gate::Refused("not_found")),
+            }
+        }
+        _ => Err("invalid".into()),
+    }
+}
+
+fn job_path(v: &Value) -> String {
+    format!("/v1/jobs/{}", source::enc(v["job"].as_str().unwrap_or("")))
+}
+
+fn methods_of(t: &Target) -> Option<Vec<Value>> {
+    list(get(t.base, "/v1/methods?limit=500", t.read))["items"].as_array().cloned()
+}
+
+/// The record in its exact scope; the outer `None` is a failed read.
+fn record_of(t: &Target) -> Option<Option<Value>> {
+    let q = format!("/v1/recommendations?use_case={}&constraints={}", source::enc(t.v["use_case"].as_str().unwrap_or("")), source::enc(&t.v["constraints"].to_string()));
+    let s = get(t.base, &q, t.read).ok()?;
+    Some(s["records"].as_array()?.iter().find(|r| r["id"] == t.v["recommendation"]).cloned())
+}
+
+/// The one AssetQ write of an action, with the control credential.
+fn dispatch(t: &Target, baseline: Option<i64>) -> (&'static str, Value) {
+    let v = t.v;
+    let (path, body) = match v["action"].as_str().unwrap_or("") {
+        // The idempotency key is AssetQ's own guard against a second job for this operation.
+        "job.submit" => ("/v1/jobs".to_string(), json!({"operation": v["operation"], "method": v["method"], "text": v["text"], "attachments": v["attachments"], "constraints": v["constraints"], "budget": {"max_credits": v["max_credits"]}, "idempotency_key": format!("dashq.assetq.{}", t.op_id)})),
+        "job.cancel" => (format!("{}/cancel", job_path(v)), json!({})),
+        "method.save" => ("/v1/methods".to_string(), json!({"id": v["id"], "status": v["status"], "spec": v["spec"]})),
+        _ => (format!("/v1/recommendations/{}/promote", source::enc(v["recommendation"].as_str().unwrap_or(""))), json!({})),
+    };
+    let sent = source::send(&format!("{}{path}", t.base), &[format!("Authorization: Bearer {}", t.control), "Content-Type: application/json".into()], Some(&body.to_string()));
+    let Ok(r) = sent else { return ("unknown", json!({"reason": "no_reply"})) };
+    // AssetQ's own coded refusal is definite. Anything else, a proxy page included, leaves delivery unknown.
+    if !(200..300).contains(&r.status) {
+        return match (r.status, r.body["error"].as_str()) {
+            (400..=499 | 503 | 507, Some(code)) => ("refused", json!({"reason": line(&json!(code))})),
+            (s, _) => ("unknown", json!({"reason": format!("http_{s}")})),
+        };
+    }
+    match v["action"].as_str().unwrap_or("") {
+        "job.submit" => match r.body["job"]["id"].as_str() {
+            Some(id) => match get(t.base, &format!("/v1/jobs/{}", source::enc(id)), t.read) {
+                Ok(j) if j["id"] == id && j["method"] == v["method"] => ("accepted", json!({"job": id, "effect": j["phase"]})),
+                Ok(_) => ("unknown", json!({"job": id, "reason": "readback_mismatch"})),
+                Err(_) => ("unknown", json!({"job": id, "reason": "awaiting_readback"})),
+            },
+            None => ("unknown", json!({"reason": "unsupported_reply"})),
+        },
+        _ => reconcile(t, baseline),
+    }
+}
+
+/// Reads only, except a submit, whose same idempotency key AssetQ resolves to the same job or refuses.
+fn reconcile(t: &Target, baseline: Option<i64>) -> (&'static str, Value) {
+    let v = t.v;
+    let waiting = |what: &str| ("unknown", json!({"reason": what}));
+    match v["action"].as_str().unwrap_or("") {
+        "job.submit" => dispatch(t, baseline),
+        "job.cancel" => match get(t.base, &job_path(v), t.read) {
+            Ok(j) if j["cancel"].as_str().is_some_and(|c| c != "none") => ("accepted", json!({"job": v["job"], "effect": j["cancel"]})),
+            Ok(j) if j["phase"].as_str().is_some_and(|p| TERMINAL.contains(&p)) => ("refused", json!({"job": v["job"], "reason": "job_terminal"})),
+            Ok(_) => waiting("no_cancellation_visible"),
+            Err(_) => waiting("awaiting_readback"),
+        },
+        "method.save" => match methods_of(t) {
+            Some(rows) => {
+                let base = baseline.unwrap_or(0);
+                let mut mine: Vec<&Value> = rows.iter().filter(|m| m["id"] == v["id"] && m["version"].as_i64().is_some_and(|x| x > base) && m["spec"] == v["spec"] && m["status"] == v["status"]).collect();
+                mine.sort_by_key(|m| m["version"].as_i64());
+                match mine.first() {
+                    Some(m) => ("accepted", json!({"method": format!("{}@{}", m["id"].as_str().unwrap_or(""), m["version"]), "effect": m["status"], "reason": if m["version"].as_i64() == Some(base + 1) { Value::Null } else { json!("registry_moved") }})),
+                    None => waiting("no_new_version_visible"),
+                }
+            }
+            None => waiting("awaiting_readback"),
+        },
+        _ => match record_of(t) {
+            Some(Some(r)) if r["state"] == "promoted" => ("accepted", json!({"recommendation": v["recommendation"], "effect": "promoted"})),
+            Some(_) => waiting("no_promotion_visible"),
+            None => waiting("awaiting_readback"),
+        },
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -510,11 +852,11 @@ pub(crate) mod tests {
 
     pub const NOW: u64 = 1_800_000_000;
 
-    pub fn controls() -> Value { json!({"jobs": true, "methods": true, "reason": null}) }
+    pub fn all_controls() -> Value { json!({"jobs": true, "methods": true, "reason": null}) }
 
     pub fn doc() -> Value {
         let snap = json!({"value": raw(), "at": NOW - 20, "error": null, "incomplete": false});
-        build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW, controls())], NOW)
+        build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW, all_controls())], NOW)
     }
 
     /// R1/D27: request text, dataset cases, free-form evidence and receipt fields never reach /data or the page.
@@ -526,6 +868,10 @@ pub(crate) mod tests {
         for leak in ["SECRET", "file:///"] {
             assert!(!d.to_string().contains(leak), "/data leaked {leak}");
             assert!(!html.contains(leak), "page leaked {leak}");
+        }
+        // A4: the real records stay one link away; this page copies none of their bytes.
+        for record in ["/v1/objects/object-1/content", "/v1/objects/object-1\"", "/v1/jobs/job-active/result", "/v1/comparisons/comparison-1"] {
+            assert!(html.contains(&format!("https://assets.example.com{record}")), "{record}");
         }
     }
 
@@ -548,11 +894,11 @@ pub(crate) mod tests {
         assert!(html.contains("— · unknown: provider did not report usage"));
         // a failed read keeps the values with their time and never reads ok
         let snap = json!({"value": raw(), "at": NOW - 900, "error": "timeout", "incomplete": false});
-        let r = project(&config_fixture(), "https://assets.example.com", &snap, NOW, controls());
+        let r = project(&config_fixture(), "https://assets.example.com", &snap, NOW, all_controls());
         assert_eq!(r["source"]["state"], "unconfirmed");
         assert_eq!(r["jobs"]["rows"].as_array().unwrap().len(), 2);
         // no read at all renders no empty panel of zeros
-        let none = project(&config_fixture(), "https://assets.example.com", &json!({"value": null, "at": null, "error": "timeout"}), NOW, controls());
+        let none = project(&config_fixture(), "https://assets.example.com", &json!({"value": null, "at": null, "error": "timeout"}), NOW, all_controls());
         assert_eq!(none["source"]["state"], "unknown");
         assert!(none["jobs"].is_null());
     }
@@ -595,5 +941,421 @@ pub(crate) mod tests {
             std::fs::create_dir_all(&path).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.html"), &html).unwrap();
         }
+    }
+    // ---------------------------------------------------------------- actions, over real HTTP to an in-process stub
+
+    use crate::enroll::SUBJECT as HEADER;
+    use std::io::{BufRead, BufReader, Read as _, Write as _};
+
+    const ACTOR: &str = "github|invented-admin";
+    const WS: &str = "invented-workspace";
+    const PUBLIC: &str = "dash.example.com";
+    const ACTIVE_JOB: &str = "active/1/submitted/none";
+
+    /// Scripted AssetQ state; `calls` records method, path and bearer token. Only the shapes D27 reads are served.
+    #[derive(Default)]
+    struct Stub { registry: String, job_cancel: String, job_phase: String, rec_state: String, methods: Vec<Value>, calls: Vec<(String, String, String)>, jobs: HashMap<String, Value>, lose_next_reply: bool, refuse_next: Option<(u16, String)>, html_next: bool, last_body: Value }
+
+    fn serve_stub(stub: Arc<Mutex<Stub>>) -> String {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", l.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for s in l.incoming().flatten() {
+                let mut r = BufReader::new(s.try_clone().unwrap());
+                let mut first = String::new();
+                if r.read_line(&mut first).is_err() { continue }
+                let (mut len, mut auth) = (0usize, String::new());
+                loop {
+                    let mut h = String::new();
+                    if r.read_line(&mut h).unwrap_or(0) == 0 || h.trim().is_empty() { break }
+                    let lower = h.to_ascii_lowercase();
+                    if let Some(x) = lower.strip_prefix("content-length:") { len = x.trim().parse().unwrap_or(0); }
+                    if lower.starts_with("authorization:") { auth = h["authorization:".len()..].trim().trim_start_matches("Bearer ").to_string(); }
+                }
+                let mut body = vec![0; len];
+                let _ = r.read_exact(&mut body);
+                let mut parts = first.split_whitespace();
+                let (method, target) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
+                let (status, out) = stub_reply(&stub, &method, &target, &auth, &body);
+                let mut s = s;
+                if status == 0 { continue } // the reply is lost after the effect
+                let reply = if status == 1 { "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".to_string() } else { format!("HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{out}", out.len()) };
+                let _ = s.write_all(reply.as_bytes());
+            }
+        });
+        base
+    }
+
+    fn stub_reply(stub: &Mutex<Stub>, method: &str, target: &str, auth: &str, body: &[u8]) -> (u16, String) {
+        let mut g = stub.lock().unwrap();
+        let path = target.split('?').next().unwrap_or("").to_string();
+        g.calls.push((method.into(), path.clone(), auth.into()));
+        let body: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+        if method == "POST" {
+            g.last_body = body.clone();
+            if g.html_next { g.html_next = false; return (1, String::new()) }
+            if let Some((s, code)) = g.refuse_next.take() { return (s, json!({"error": code, "reason": "SECRET-REASON-TEXT"}).to_string()) }
+        }
+        let job = |g: &Stub| json!({"id": "job-1", "method": "synthetic.fake@1", "phase": g.job_phase, "step": 1, "effect": "submitted", "cancel": g.job_cancel, "updated_at": format!("{}", g.calls.len())});
+        let (status, out) = match (method, path.as_str()) {
+            ("GET", "/v1/status") => (200, json!({"project": "invented-project", "jobs": {}, "revisions": {"registry": g.registry, "recommendations": g.rec_state}})),
+            ("GET", "/v1/methods") => (200, json!({"items": g.methods, "next": null})),
+            ("GET", "/v1/jobs/job-1") => (200, job(&g)),
+            ("GET", "/v1/recommendations") => (200, json!({"records": [{"id": "rec-1", "state": g.rec_state}]})),
+            ("POST", "/v1/jobs") => {
+                let key = body["idempotency_key"].as_str().unwrap_or("").to_string();
+                let created = !g.jobs.contains_key(&key);
+                let id = g.jobs.entry(key).or_insert_with(|| json!({"id": "job-new", "method": body["method"], "phase": "queued"})).clone();
+                g.jobs.insert("job-new".into(), id.clone());
+                (if created { 201 } else { 200 }, json!({"job": id, "created": created}))
+            }
+            ("GET", "/v1/jobs/job-new") => (200, g.jobs["job-new"].clone()),
+            ("POST", "/v1/jobs/job-1/cancel") => { g.job_cancel = "requested".into(); (200, job(&g)) }
+            ("POST", "/v1/methods") => {
+                let version = g.methods.iter().filter(|m| m["id"] == body["id"]).filter_map(|m| m["version"].as_i64()).max().unwrap_or(0) + 1;
+                let m = json!({"id": body["id"], "version": version, "status": body["status"], "spec": body["spec"]});
+                g.methods.push(m.clone());
+                g.registry = format!("registry-{version}");
+                (201, m)
+            }
+            ("POST", "/v1/recommendations/rec-1/promote") => { g.rec_state = "promoted".into(); (200, json!({"id": "rec-1", "state": "promoted"})) }
+            _ => (404, json!({"error": "no_route"})),
+        };
+        if method == "POST" && g.lose_next_reply { g.lose_next_reply = false; return (0, String::new()) }
+        (status, out.to_string())
+    }
+
+    struct Rig { dir: PathBuf, e: Result<Enroll, String>, cfg: Config, state: State, cache: source::Cache, stub: Arc<Mutex<Stub>> }
+
+    impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+
+    fn rig(name: &str, granted: &[&str]) -> Rig {
+        let dir = std::env::temp_dir().join(format!("dashq-assetq-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("read"), "invented-read-token\n").unwrap();
+        std::fs::write(dir.join("control"), "invented-control-token\n").unwrap();
+        Enroll::admin(&dir, WS, ACTOR).unwrap();
+        let e = Enroll::open(&dir, PUBLIC);
+        let s = e.as_ref().unwrap().store();
+        for g in granted { s.assetq_grant(WS, ACTOR, g, true).unwrap(); }
+        let stub = Arc::new(Mutex::new(Stub { registry: "registry-1".into(), job_cancel: "none".into(), job_phase: "active".into(), rec_state: "proposed".into(),
+            methods: vec![json!({"id": "invented.method", "version": 1, "status": "experimental", "spec": {"operation": "synthetic.generate"}})], ..Default::default() }));
+        let base = serve_stub(stub.clone());
+        let cfg = Config { base, projects: vec![Project { id: "invented-project".into(), workspace: WS.into(), read_token: dir.join("read"), control_token: Some(dir.join("control")) }] };
+        Rig { dir, e, cfg, state: State::default(), cache: source::Cache::default(), stub }
+    }
+
+    impl Rig {
+        fn ctx(&self) -> Ctx<'_> { Ctx { enroll: &self.e, cfg: Some(&self.cfg), public_host: PUBLIC, state: &self.state, cache: &self.cache } }
+        fn csrf(&self) -> String { self.e.as_ref().unwrap().token_for(&purpose(ACTOR, "invented-project", NOW as i64 / 86400)) }
+        fn call(&self, subject: Option<&str>, csrf: &str, body: &Value) -> (String, Value) {
+            let mut h = vec![("origin".to_string(), format!("https://{PUBLIC}")), ("content-type".to_string(), "application/json".to_string()), ("x-dashq-csrf".to_string(), csrf.to_string())];
+            if let Some(s) = subject { h.push((HEADER.to_string(), s.to_string())); }
+            let bytes = body.to_string();
+            let r = route(&self.ctx(), &Req { method: "POST", path: "/assetq/control", query: "", headers: &h, body: bytes.as_bytes() }, NOW as i64).unwrap();
+            (r.status.into(), serde_json::from_slice(&r.body).unwrap())
+        }
+        fn post(&self, body: &Value) -> (String, Value) { self.call(Some(ACTOR), &self.csrf(), body) }
+        fn writes(&self) -> Vec<(String, String, String)> { self.stub.lock().unwrap().calls.iter().filter(|c| c.0 == "POST").cloned().collect() }
+    }
+
+    fn submit(op: &str, revision: &str) -> Value {
+        json!({"project": "invented-project", "action": "job.submit", "op_id": op, "revision": revision, "operation": "synthetic.generate", "method": "synthetic.fake@1", "text": "SECRET-PROMPT-TEXT", "attachments": [], "constraints": {}, "max_credits": 1})
+    }
+    fn cancel(op: &str, revision: &str) -> Value {
+        json!({"project": "invented-project", "action": "job.cancel", "op_id": op, "revision": revision, "job": "job-1"})
+    }
+    fn save(op: &str, revision: &str) -> Value {
+        json!({"project": "invented-project", "action": "method.save", "op_id": op, "revision": revision, "id": "invented.method", "status": "experimental", "spec": {"operation": "synthetic.generate", "note": "SECRET-SPEC-TEXT"}})
+    }
+    fn promote(op: &str, revision: &str) -> Value {
+        json!({"project": "invented-project", "action": "recommendation.promote", "op_id": op, "revision": revision, "recommendation": "rec-1", "use_case": "invented use case", "constraints": {}})
+    }
+
+    /// A3: each allowed action reaches AssetQ once with the control credential; reads use only the read credential;
+    /// the receipt follows readback. Defect guarded: a GET-only credential used to write, or a reply trusted unread.
+    #[test]
+    fn assetq_actions_dispatch_once_with_verified_receipts() {
+        let t = rig("actions", &["jobs", "methods"]);
+        let (s, r) = t.post(&submit("op-submit", "registry-1"));
+        assert_eq!((s.as_str(), r["state"].as_str(), r["job"].as_str()), ("200 OK", Some("accepted"), Some("job-new")));
+        assert_eq!(t.stub.lock().unwrap().last_body["idempotency_key"], "dashq.assetq.op-submit");
+        assert_eq!(t.stub.lock().unwrap().last_body["budget"]["max_credits"], 1);
+        let (_, r) = t.post(&cancel("op-cancel", ACTIVE_JOB));
+        assert_eq!((r["state"].as_str(), r["effect"].as_str()), (Some("accepted"), Some("requested")));
+        let (_, r) = t.post(&save("op-save", "registry-1"));
+        assert_eq!((r["state"].as_str(), r["method"].as_str()), (Some("accepted"), Some("invented.method@2")));
+        let (_, r) = t.post(&promote("op-promote", "proposed"));
+        assert_eq!((r["state"].as_str(), r["effect"].as_str()), (Some("accepted"), Some("promoted")));
+        let calls = t.stub.lock().unwrap().calls.clone();
+        assert_eq!(calls.iter().filter(|c| c.0 == "POST").count(), 4);
+        for (method, path, token) in &calls {
+            assert_eq!(token, if method == "POST" { "invented-control-token" } else { "invented-read-token" }, "{method} {path}");
+        }
+        // R1: neither the receipt nor the journal holds the text or the specification
+        for op in ["op-submit", "op-save"] {
+            let o = t.e.as_ref().unwrap().store().assetq_op(op).unwrap().unwrap();
+            assert!(!o.receipt.contains("SECRET"), "{}", o.receipt);
+        }
+    }
+
+    /// A3: reading never grants a mutation. Each missing authority stops the action before AssetQ sees a write.
+    #[test]
+    fn assetq_authority_stays_separate() {
+        let t = rig("authority", &["jobs"]);
+        let body = save("op-1", "registry-1");
+        assert_eq!(t.post(&body).0, "403 Forbidden", "jobs grant must not edit methods");
+        assert_eq!(t.call(None, &t.csrf(), &submit("op-2", "registry-1")).0, "401 Unauthorized");
+        assert_eq!(t.call(Some(ACTOR), "00", &submit("op-3", "registry-1")).0, "401 Unauthorized");
+        let other = "github|invented-other";
+        let store = t.e.as_ref().unwrap().store();
+        // a workspace member without the administrator role holds no action, whatever the grant row says
+        store.add_member(WS, other, "member").unwrap();
+        store.assetq_grant(WS, other, "jobs", true).unwrap();
+        let token = t.e.as_ref().unwrap().token_for(&purpose(other, "invented-project", NOW as i64 / 86400));
+        assert_eq!(t.call(Some(other), &token, &submit("op-4", "registry-1")).0, "403 Forbidden");
+        // revocation applies on the next request
+        store.assetq_grant(WS, ACTOR, "jobs", false).unwrap();
+        assert_eq!(t.post(&submit("op-5", "registry-1")).0, "403 Forbidden");
+        // an extra field is refused, so a request cannot smuggle authority or configuration
+        store.assetq_grant(WS, ACTOR, "jobs", true).unwrap();
+        let mut smuggled = submit("op-6", "registry-1");
+        smuggled["permissions"] = json!("owner");
+        assert_eq!(t.post(&smuggled).0, "400 Bad Request");
+        assert!(t.writes().is_empty(), "a refused action reached AssetQ: {:?}", t.writes());
+        // no control credential: reads may work, every action stays off
+        let mut off = t.cfg.clone();
+        off.projects[0].control_token = None;
+        let c = Ctx { enroll: &t.e, cfg: Some(&off), public_host: PUBLIC, state: &t.state, cache: &t.cache };
+        let h = vec![("origin".to_string(), format!("https://{PUBLIC}")), ("content-type".to_string(), "application/json".to_string()), ("x-dashq-csrf".to_string(), t.csrf()), (HEADER.to_string(), ACTOR.to_string())];
+        let b = submit("op-7", "registry-1").to_string();
+        assert_eq!(route(&c, &Req { method: "POST", path: "/assetq/control", query: "", headers: &h, body: b.as_bytes() }, NOW as i64).unwrap().status, "503 Service Unavailable");
+        assert!(t.writes().is_empty());
+        let shown = controls(&off.projects[0], &t.e, Some(ACTOR), &json!({"state": "ok"}));
+        assert_eq!((&shown["jobs"], &shown["methods"]), (&json!(false), &json!(false)));
+    }
+
+    /// A3: an exact revision. A moved registry, job or recommendation refuses before any write, and a stale read
+    /// source gates the form. Defect guarded: a change nobody reviewed applied through an old draft.
+    #[test]
+    fn assetq_exact_revisions_refuse_stale_actions() {
+        let t = rig("revisions", &["jobs", "methods"]);
+        for body in [submit("a", "old"), cancel("b", "old"), save("c", "old"), promote("d", "old")] {
+            let (s, r) = t.post(&body);
+            assert_eq!((s.as_str(), r["state"].as_str(), r["reason"].as_str()), ("409 Conflict", Some("stale"), Some("revision_changed")), "{body}");
+        }
+        t.stub.lock().unwrap().job_phase = "succeeded".into();
+        assert_eq!(t.post(&cancel("e", "succeeded/1/submitted/none")).1["reason"], "job_terminal");
+        t.stub.lock().unwrap().rec_state = "promoted".into();
+        assert_eq!(t.post(&promote("f", "promoted")).1["reason"], "not_proposed");
+        assert!(t.writes().is_empty(), "{:?}", t.writes());
+        // a stored receipt repeats without another read or write
+        let reads = t.stub.lock().unwrap().calls.len();
+        assert_eq!(t.post(&submit("a", "old")).1["state"], "stale");
+        assert_eq!(t.stub.lock().unwrap().calls.len(), reads);
+        assert_eq!(controls(&t.cfg.projects[0], &t.e, Some(ACTOR), &json!({"state": "stale"}))["jobs"], false);
+        assert_eq!(controls(&t.cfg.projects[0], &t.e, Some(ACTOR), &json!({"state": "incomplete"}))["jobs"], true);
+    }
+
+    /// D27 / AssetQ R4: a lost reply reads unknown and never starts a second effect. Defect guarded: a retried POST
+    /// that creates a second method version or a second job.
+    #[test]
+    fn assetq_unknown_delivery_reconciles_without_a_second_effect() {
+        let t = rig("delivery", &["jobs", "methods"]);
+        t.stub.lock().unwrap().lose_next_reply = true;
+        let body = save("op-save", "registry-1");
+        let (s, r) = t.post(&body);
+        assert_eq!((s.as_str(), r["state"].as_str()), ("202 Accepted", Some("unknown")), "the effect happened; the reply was lost");
+        // the row stays deduplicated: same ID and payload reads back, the registry having moved is no refusal
+        let (_, r) = t.post(&body);
+        assert_eq!((r["state"].as_str(), r["method"].as_str()), (Some("accepted"), Some("invented.method@2")));
+        assert_eq!(t.writes().len(), 1, "method.save posted twice: {:?}", t.writes());
+        let mut changed = body.clone();
+        changed["status"] = json!("disabled");
+        assert_eq!(t.post(&changed).0, "409 Conflict", "same ID, different payload");
+
+        // a submit repeats the same AssetQ idempotency key, so one job exists
+        t.stub.lock().unwrap().registry = "registry-2".into();
+        t.stub.lock().unwrap().lose_next_reply = true;
+        let job = submit("op-job", "registry-2");
+        assert_eq!(t.post(&job).1["state"], "unknown");
+        let (_, r) = t.post(&job);
+        assert_eq!((r["state"].as_str(), r["job"].as_str()), (Some("accepted"), Some("job-new")));
+        assert_eq!(t.stub.lock().unwrap().jobs.values().filter(|j| j["id"] == "job-new").count(), 2, "one job, one key plus its lookup row");
+        assert_eq!(t.stub.lock().unwrap().jobs.len(), 2);
+
+        // a cancel with nothing visible stays unknown and does not post again
+        let before = t.writes().len();
+        t.stub.lock().unwrap().html_next = true;
+        let stop = cancel("op-stop", ACTIVE_JOB);
+        assert_eq!(t.post(&stop).1["reason"], "http_502", "a proxy page is no AssetQ refusal");
+        assert_eq!(t.post(&stop).1["reason"], "no_cancellation_visible");
+        assert_eq!(t.writes().len(), before + 1, "cancel posted twice");
+    }
+
+    /// A3: AssetQ's role and limits still decide; its coded refusal is final and never reflects its text (R1).
+    #[test]
+    fn assetq_refusal_keeps_only_its_code() {
+        let t = rig("refusal", &["methods"]);
+        t.stub.lock().unwrap().refuse_next = Some((403, "forbidden".into()));
+        let (s, r) = t.post(&save("op-1", "registry-1"));
+        assert_eq!((s.as_str(), r["state"].as_str(), r["reason"].as_str()), ("422 Unprocessable Content", Some("refused"), Some("forbidden")));
+        assert!(!r.to_string().contains("SECRET"));
+        assert_eq!(t.post(&save("op-1", "registry-1")).1["reason"], "forbidden");
+        assert_eq!(t.writes().len(), 1);
+    }
+
+    /// D2/R5: a closed route without config; a read needs the workspace administrator and hands out no capability.
+    #[test]
+    fn assetq_route_gates() {
+        let t = rig("route", &["jobs"]);
+        let get = |c: &Ctx, subject: Option<&str>, q: &str| {
+            let h: Vec<(String, String)> = subject.map(|s| (HEADER.to_string(), s.to_string())).into_iter().collect();
+            let r = route(c, &Req { method: "GET", path: "/assetq/control", query: q, headers: &h, body: b"" }, NOW as i64).unwrap();
+            (r.status.to_string(), serde_json::from_slice::<Value>(&r.body).unwrap_or(Value::Null))
+        };
+        let (s, v) = get(&t.ctx(), Some(ACTOR), "project=invented-project");
+        assert_eq!((s.as_str(), &v["jobs"], &v["methods"]), ("200 OK", &json!(true), &json!(false)));
+        assert!(v["csrf"].is_string());
+        assert_eq!(get(&t.ctx(), Some("github|invented-other"), "project=invented-project").0, "403 Forbidden");
+        assert_eq!(get(&t.ctx(), Some(ACTOR), "project=foreign").0, "403 Forbidden");
+        assert_eq!(get(&t.ctx(), None, "project=invented-project").0, "401 Unauthorized");
+        let off = Ctx { enroll: &t.e, cfg: None, public_host: PUBLIC, state: &t.state, cache: &t.cache };
+        assert_eq!(get(&off, Some(ACTOR), "project=invented-project").0, "503 Service Unavailable");
+        assert!(route(&t.ctx(), &Req { method: "GET", path: "/other", query: "", headers: &[], body: b"" }, 0).is_none());
+        assert_eq!(route(&t.ctx(), &Req { method: "PUT", path: "/assetq/control", query: "", headers: &[], body: b"" }, 0).unwrap().status, "405 Method Not Allowed");
+    }
+
+    /// A5: the same read and actions against a real local AssetQ service; run by docs/design/evidence/assetq/README.md.
+    #[test]
+    #[ignore = "needs a running AssetQ service, see docs/design/evidence/assetq/README.md"]
+    fn assetq_live_local_service() {
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} required"));
+        let dir = std::env::temp_dir().join(format!("dashq-assetq-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("read"), var("ASSETQ_MEMBER_TOKEN")).unwrap();
+        std::fs::write(dir.join("control"), var("ASSETQ_OWNER_TOKEN")).unwrap();
+        let project = var("ASSETQ_PROJECT");
+        Enroll::admin(&dir, WS, ACTOR).unwrap();
+        let e = Enroll::open(&dir, PUBLIC);
+        let s = e.as_ref().unwrap().store();
+        for g in ["jobs", "methods"] { s.assetq_grant(WS, ACTOR, g, true).unwrap(); }
+        let cfg = Config { base: var("ASSETQ_BASE"), projects: vec![Project { id: project.clone(), workspace: WS.into(), read_token: dir.join("read"), control_token: Some(dir.join("control")) }] };
+        let (state, cache) = (State::default(), source::Cache::default());
+        let c = Ctx { enroll: &e, cfg: Some(&cfg), public_host: PUBLIC, state: &state, cache: &cache };
+        let view = || project_row(&cfg, &cache, &e);
+        // A repeated run is a new set of operations; AssetQ's idempotency key would otherwise return the old job.
+        let run = source::now().to_string();
+        let post = |mut b: Value| {
+            b["project"] = json!(project);
+            b["op_id"] = json!(format!("{}-{run}", b["op_id"].as_str().unwrap()));
+            let h = vec![("origin".to_string(), format!("https://{PUBLIC}")), ("content-type".to_string(), "application/json".to_string()), ("x-dashq-csrf".to_string(), e.as_ref().unwrap().token_for(&purpose(ACTOR, &project, now_day()))), (HEADER.to_string(), ACTOR.to_string())];
+            let body = b.to_string();
+            let r = route(&c, &Req { method: "POST", path: "/assetq/control", query: "", headers: &h, body: body.as_bytes() }, source::now() as i64).unwrap();
+            serde_json::from_slice::<Value>(&r.body).unwrap()
+        };
+        // read: a real status, a real registry with its qualification records, explicit unknowns
+        let first = view();
+        println!("read state: {} / {}", first["source"]["state"], first["source"]["reason"]);
+        assert!(matches!(first["source"]["state"].as_str(), Some("ok" | "incomplete")), "{}", first["source"]);
+        assert_eq!(first["backup"]["state"], "unknown");
+        assert!(first["methods"].as_array().unwrap().iter().any(|m| m["id"] == "synthetic.fake"));
+        assert!(first["methods"].as_array().unwrap().iter().any(|m| m["qualification"].is_object()), "real qualification records");
+        let registry = first["revisions"]["registry"].as_str().unwrap().to_string();
+        // a stale revision reaches no write
+        assert_eq!(post(submit("live-stale", "old"))["state"], "stale");
+        // submit: real durable admission, same job on repeat, no prompt text in /data
+        let job = json!({"action": "job.submit", "op_id": "live-submit", "revision": registry, "operation": "synthetic.generate", "method": "synthetic.fake@1", "text": "SECRET-LIVE-PROMPT", "attachments": [], "constraints": {"polls": 100000}, "max_credits": 1});
+        let r = post(job.clone());
+        println!("submit: {r}");
+        assert_eq!(r["state"], "accepted", "{r}");
+        let id = r["job"].as_str().unwrap().to_string();
+        assert_eq!(post(job)["job"], id.as_str());
+        let after = view();
+        assert!(!after.to_string().contains("SECRET-LIVE-PROMPT"), "prompt reached /data");
+        assert!(after["jobs"]["rows"].as_array().unwrap().iter().any(|j| j["id"] == id.as_str()), "submitted job is listed");
+        // cancel at the row's exact revision. A fresh job moves queued, active, waiting; a move reads stale until the
+        // page shows it, so each try reads the row again like a person after a stale receipt.
+        let mut r = Value::Null;
+        for attempt in 0..8 {
+            let shown = view();
+            let row = shown["jobs"]["rows"].as_array().unwrap().iter().find(|j| j["id"] == id.as_str()).cloned().expect("job still listed");
+            r = post(json!({"action": "job.cancel", "op_id": format!("live-cancel-{attempt}"), "revision": row["revision"], "job": id}));
+            println!("cancel: {r}");
+            if r["state"] != "stale" { break }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        assert_eq!(r["state"], "accepted", "{r}");
+        // method edit creates the next version; old revision goes stale
+        let revision = view()["revisions"]["registry"].as_str().unwrap().to_string();
+        assert_eq!(revision, registry, "a job does not move the registry");
+        let spec = first["methods"].as_array().unwrap().iter().find(|m| m["id"] == "synthetic.fake").unwrap()["spec"].clone();
+        let r = post(json!({"action": "method.save", "op_id": "live-save", "revision": revision, "id": "synthetic.fake", "status": "experimental", "spec": spec}));
+        println!("save: {r}");
+        assert_eq!(r["state"], "accepted", "{r}");
+        assert!(r["method"].as_str().unwrap().starts_with("synthetic.fake@"));
+        let fresh = view();
+        assert_ne!(fresh["revisions"]["registry"].as_str().unwrap(), revision);
+        assert_eq!(post(json!({"action": "method.save", "op_id": "live-save-2", "revision": revision, "id": "synthetic.fake", "status": "experimental", "spec": {"operation": "x"}}))["state"], "stale");
+        // a member grant cannot edit: AssetQ's role still decides
+        std::fs::write(dir.join("control"), var("ASSETQ_MEMBER_TOKEN")).unwrap();
+        let denied = post(json!({"action": "method.save", "op_id": "live-denied", "revision": fresh["revisions"]["registry"], "id": "synthetic.fake", "status": "experimental", "spec": fresh["methods"][0]["spec"]}));
+        println!("member edit: {denied}");
+        assert_eq!(denied["state"], "refused", "{denied}");
+        std::fs::write(dir.join("control"), var("ASSETQ_OWNER_TOKEN")).unwrap();
+        // a real comparison: incomplete evidence, per-method metrics, its scope's recommendation read, no winner, no case text
+        let owner = |path: &str, body: Value| {
+            for _ in 0..8 {
+                let r = source::send(&format!("{}{path}", cfg.base), &[format!("Authorization: Bearer {}", var("ASSETQ_OWNER_TOKEN")), "Content-Type: application/json".into()], Some(&body.to_string())).unwrap();
+                if r.body["error"] == "admission_busy" { std::thread::sleep(std::time::Duration::from_millis(500)); continue }
+                assert!((200..300).contains(&r.status), "{path}: {}", r.body);
+                return r.body;
+            }
+            panic!("{path}: admission stayed busy");
+        };
+        owner("/v1/datasets", json!({"id": "live-set", "version": 1, "document": {"operation": "synthetic.generate", "cases": [{"id": "case-1", "text": "SECRET-LIVE-CASE", "attachments": []}]}}));
+        owner("/v1/evaluators", json!({"id": "live-eval", "version": 1, "document": {"decision_rule": "invented rule", "quality_rubric": "invented rubric"}}));
+        let cmp = owner("/v1/comparisons", json!({"use_case": "dashq live check", "dataset_version": "live-set@1", "evaluator_version": "live-eval@1", "method_versions": ["synthetic.fake@1"], "plan": {"dataset": "live-set@1", "evaluator": "live-eval@1", "constraints": {}, "repeats": 1, "max_jobs": 1, "max_credits": 1}}));
+        owner(&format!("/v1/comparisons/{}/run", cmp["id"].as_str().unwrap()), json!({}));
+        let seen = view();
+        assert!(!seen.to_string().contains("SECRET-LIVE"), "case or prompt text reached /data");
+        let row = seen["comparisons"].as_array().unwrap().iter().find(|c| c["id"] == cmp["id"]).expect("comparison listed");
+        println!("comparison: {}", json!({"state": row["state"], "missing": row["missing_cases"], "metrics": row["method_metrics"], "winner": row["winner"]}));
+        assert_eq!(row["method_metrics"][0]["method"], "synthetic.fake@1");
+        // the page renders these real replies: rows, records and no content
+        let mut html = String::new();
+        render(&mut html, &build(&cfg.base, vec![seen.clone()], source::now()));
+        for shown in ["synthetic.fake@1", "image.worker.v1@5", "general dispatch refused", "Backup", "Save new version", "job not terminal"] {
+            assert!(html.contains(shown), "{shown}");
+        }
+        assert!(!html.contains("SECRET-LIVE"), "content reached the page");
+        assert!(row["winner"].is_null());
+        assert_eq!(seen["recommendations"][0]["use_case"], "dashq live check");
+        assert!(seen["recommendations"][0]["recommended"].is_null(), "no promoted route yet");
+        // promotion of a proposed record in its exact scope, with an owner credential
+        let rec = owner("/v1/recommendations", json!({"use_case": "dashq live check", "method": "synthetic.fake@1", "evidence": {"source": "local synthetic check"}, "observed_at": "2026-11-05T00:00:00Z"}));
+        let revision = view()["revisions"]["recommendations"].as_str().unwrap().to_string();
+        // AssetQ's `admission_busy` is a definite refusal of that operation while its executor holds admission; a person
+        // sends a new one. Nothing here retries for them, so the check does.
+        let mut r = Value::Null;
+        for attempt in 0..8 {
+            r = post(json!({"action": "recommendation.promote", "op_id": format!("live-promote-{attempt}"), "revision": revision, "recommendation": rec["id"], "use_case": "dashq live check", "constraints": {}}));
+            println!("promote: {r}");
+            if r["reason"] != "admission_busy" { break }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+        assert_eq!(r["state"], "accepted", "{r}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn now_day() -> i64 { source::now() as i64 / 86400 }
+
+    fn project_row(cfg: &Config, cache: &source::Cache, e: &Result<Enroll, String>) -> Value {
+        let p = &cfg.projects[0];
+        cache.forget(&format!("assetq:{}", p.id));
+        let snap = cached(cache, &cfg.base, p);
+        let _ = e;
+        project(p, &cfg.base, &snap, source::now(), all_controls())
     }
 }

@@ -22,7 +22,7 @@ const DashqAssetq = (() => {
           max_credits: Number(value(form, 'max_credits')) };
       }
       case 'job.cancel': return { job: value(form, 'job') };
-      case 'method.save': return { id: value(form, 'id'), status: value(form, 'status'), spec: parseJSON(value(form, 'spec'), 'Specification') };
+      case 'method.save': return { id: value(form, 'method_id'), status: value(form, 'status'), spec: parseJSON(value(form, 'spec'), 'Specification') };
       case 'recommendation.promote': return { recommendation: value(form, 'recommendation'), use_case: value(form, 'use_case'), constraints: parseJSON(value(form, 'constraints'), 'Constraints') };
       default: throw new Error('Unknown action');
     }
@@ -75,7 +75,8 @@ const DashqAssetq = (() => {
     if (state !== 'unknown') {
       sent.delete(form.id);
       reviewed.delete(form.id);
-      if (state === 'accepted') refresh();
+      // A stale receipt also needs the new revision on the page.
+      if (state === 'accepted' || state === 'stale') refresh();
     }
     show(form);
   }

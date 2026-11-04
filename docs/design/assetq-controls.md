@@ -1,12 +1,13 @@
 # AssetQ controls
 
-Design package of [D27](../../dashq.md#d27-assetq-controls). AssetQ owns jobs, methods, comparisons, recommendations and assets; this page defines how DashQ reads them and transports the allowed actions. The candidate below is a proposal until the owner approves it.
+Design package of [D27](../../dashq.md#d27-assetq-controls). AssetQ owns jobs, methods, comparisons, recommendations and assets; this page defines how DashQ reads them and transports the allowed actions. The owner approved the page layout below on the task.
 
 ## Owner request
 
 - [#246](https://github.com/taskqorg/dashq/issues/246) goal: "Give people one source-backed AssetQ control surface for jobs, generation methods, comparisons and storage state."
 - A3: "Support allowed submit/cancel and method add/edit/promotion actions with scoped grants, exact revisions and verified receipts; reading never grants a mutation."
 - The owner's answer on that task selects keeping A3 in DashQ over the earlier summary-only note: "Keep full A3 in DashQ - + all actions in one page; - overrides note and AssetQ R9, duplicates site editor".
+- The owner's answer on the visual candidate: "Approve this page layout - + dense, current page style, forms stay closed; - long scroll to reach methods".
 - Previews, full asset browsing and benchmark actions are not in A3 and stay on the AssetQ site, as that note assigns.
 
 AssetQ R9 and its method-evaluation page still say DashQ receives summary metadata only and no generation authority. AssetQ must amend them in its own repository before production enablement; DashQ does not edit them.
@@ -43,11 +44,13 @@ The host administrator runs `dashq assetq-grant WORKSPACE SUBJECT jobs|methods o
 | `action` | Grant | Fields | Exact revision check before dispatch | AssetQ call | Readback for the receipt |
 |---|---|---|---|---|---|
 | `job.submit` | `jobs` | `operation`, `method` (`id@version`), `text`, `attachments`, `constraints`, `max_credits` | `revisions.registry` from `GET /v1/status` | `POST /v1/jobs` with `idempotency_key` `dashq.assetq.<op_id>` | Returned job ID, then `GET /v1/jobs/{id}` |
-| `job.cancel` | `jobs` | `job` | The job's `updated_at`; a terminal job is refused | `POST /v1/jobs/{id}/cancel` | `GET /v1/jobs/{id}` shows its `cancel` state |
+| `job.cancel` | `jobs` | `job` | The job's `phase/step/effect/cancel`; a terminal job is refused | `POST /v1/jobs/{id}/cancel` | `GET /v1/jobs/{id}` shows its `cancel` state |
 | `method.save` | `methods` | `id`, `status`, `spec` | `revisions.registry` from `GET /v1/status` | `POST /v1/methods` | The new version from `GET /v1/methods` with an equal specification |
 | `recommendation.promote` | `methods` | `recommendation`, `use_case`, `constraints` | `revisions.recommendations` from `GET /v1/status` | `POST /v1/recommendations/{id}/promote` | The record reads `promoted` in the scoped read |
 
 All carry `project`, `action`, `op_id` and `revision`. A method's `spec` passes AssetQ's own validation; DashQ checks only that it is a JSON object. A submit carries no permission or configuration field, and `max_credits` is the per-job budget AssetQ enforces; DashQ adds no budget of its own.
+
+A job's `updated_at` is not its revision: AssetQ touches a running job on every poll, so that time would refuse every cancellation. The job revision names what a person reviewed.
 
 The revision check narrows a race but cannot close it: AssetQ has no conditional write. DashQ serializes its own actions per project, and a receipt names the resulting version, so a concurrent change is visible. A conditional write belongs to AssetQ.
 
@@ -59,7 +62,7 @@ The D11 store keeps `assetq_ops`: operation ID, actor digest, workspace, project
 - `pending` is recorded before dispatch. A lost reply or restart leaves it `unknown`.
 - `Check delivery` resends the operation in the page session. It never dispatches a second effect: `job.submit` repeats the same idempotency key, which AssetQ resolves to the same job or refuses. `job.cancel`, `method.save` and `recommendation.promote` only read back; without visible evidence they stay `unknown`.
 
-Receipt states are `accepted`, `stale`, `refused`, `unknown`. Only `accepted` follows a verified readback. AssetQ's `402`, `403`, `409`, `413`, `422`, `429`, `503` and `507` replies read `refused` with its error code; a timeout reads `unknown`.
+Receipt states are `accepted`, `stale`, `refused`, `unknown`. Only `accepted` follows a verified readback. A `4xx`, `503` or `507` reply carrying AssetQ's own error code reads `refused` with that code and no other text. A timeout, a lost reply or any other reply, including a proxy page, reads `unknown`. An unreadable AssetQ during the revision check refuses with nothing recorded or sent.
 
 ## States
 
@@ -75,17 +78,17 @@ Receipt states are `accepted`, `stale`, `refused`, `unknown`. Only `accepted` fo
 | Denied | A disabled action names the missing grant, credential or role |
 | Refused or stale | The draft stays; the receipt names the reason |
 
-## Visual candidate
+## Approved layout
 
-One `/assets` page in the existing dense operator style, with one group per project: jobs, then storage, then methods, comparisons and retained records in disclosures. Action forms stay closed until opened, and only offered actions appear. The candidate uses invented data and the shared page chrome:
+One `/assets` page in the existing dense operator style, with one group per project: jobs, then storage, then methods, comparisons and retained records in disclosures. Action forms stay closed until opened, and only offered actions appear. The approved review images use invented data and the shared page chrome:
 
 - [Desktop, 1280 px](assetq-controls/assets-desktop.png)
 - [Narrow, 360 px with actions open](assetq-controls/assets-narrow.png)
 
-Owner approval is recorded on the task; the images are layout evidence, not live qualification.
+The images are layout evidence, not live qualification.
 
 ## Qualification and rollback
 
-Fixture and adapter checks prove the projection and gates, not a deployment. Production needs the published AssetQ service, owner-provisioned credentials, grants and config, and the amended AssetQ contract; none of these is implied by this package.
+[Evidence](evidence/assetq/README.md) records the stub, local-service and browser checks. They prove the projection and gates, not a deployment. Production needs the published AssetQ service, owner-provisioned credentials, grants and config, and the amended AssetQ contract; none of these is implied by this package.
 
 Rollback: remove `assetq` from the config and restart, or remove one grant. This stops further reads or dispatch; it does not undo AssetQ jobs, versions or promotions. Journal rows stay.

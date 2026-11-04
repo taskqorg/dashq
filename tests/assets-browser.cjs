@@ -51,6 +51,8 @@ const css=read('assets/style.css');
    reply={status:200,body:{state:'accepted',job:'job-new',effect:'queued'}};
    await page.locator(`[id="${id}"] .asset-receipt button`).click();
    await page.locator(`[id="${id}"] .asset-receipt`,{hasText:'Accepted · job job-new'}).waitFor();
+   await page.waitForFunction(()=>!busy);
+   await page.locator(`[id="${id}"] .asset-receipt`,{hasText:'Accepted · job job-new'}).waitFor();
    assert.equal(posts.length,2);assert.equal(posts[0].op_id,posts[1].op_id,'repeat changed the operation');
    assert.equal(posts[0].action,'job.submit');assert.equal(posts[0].revision,'3:17');assert.equal(posts[0].method,'synthetic.fake@1');
    await page.waitForFunction(()=>!busy);
@@ -66,6 +68,9 @@ const css=read('assets/style.css');
    reply={status:409,body:{state:'stale',reason:'revision_changed'}};
    await page.locator(`[id="${add}-spec"]`).fill('{"operation":"synthetic.generate"}');
    await page.locator(`[id="${add}"] button[type=submit]`).click();
+   await page.locator(`[id="${add}"] .asset-receipt`,{hasText:'Stale · revision_changed'}).waitFor();
+   // The stale receipt fetches the new revision; the receipt must survive that swap (a field named `id` once broke its key).
+   await page.waitForFunction(()=>!busy);
    await page.locator(`[id="${add}"] .asset-receipt`,{hasText:'Stale · revision_changed'}).waitFor();
    assert.equal(await page.locator(`[id="${add}-id"]`).inputValue(),'invented.method','stale lost the draft');
    // A failed refresh keeps values and marks them unconfirmed.

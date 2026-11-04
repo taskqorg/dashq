@@ -39,7 +39,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | assetq-grant WORKSPACE SUBJECT jobs|methods on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -221,6 +221,7 @@ struct App {
     resources: policy::State,
     export: export::Last,
     link: link::Relay,
+    assetq: assetq::State,
 }
 
 impl App {
@@ -326,9 +327,11 @@ impl App {
             Some(store::Scope::Subject(s)) => self.enroll.as_ref().ok().and_then(|e| e.store().workspaces(s).ok()).is_some_and(|w| w.iter().any(|(x, _)| x == ws)),
             None => false,
         };
+        let subject = match scope { Some(store::Scope::Subject(s)) => Some(s), _ => None };
         let rows = c.projects.iter().filter(|p| member(&p.workspace)).map(|p| {
-            let controls = json!({"jobs": false, "methods": false, "reason": "Actions are not available yet."});
-            assetq::project(p, &c.base, &assetq::cached(&self.cache, &c.base, p), now, controls)
+            let mut row = assetq::project(p, &c.base, &assetq::cached(&self.cache, &c.base, p), now, Value::Null);
+            row["controls"] = assetq::controls(p, &self.enroll, subject, &row["source"]);
+            row
         }).collect();
         doc["assets"] = assetq::build(&c.base, rows, now);
         doc["sources"]["assetq"] = doc["assets"]["source"].clone();
@@ -402,8 +405,12 @@ fn handle(app: &App, mut s: TcpStream) {
     let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
+    let actx = assetq::Ctx { enroll: &app.enroll, cfg: c.assetq.as_ref(), public_host: &c.public_host, state: &app.assetq, cache: &app.cache };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = assetq::route(&actx, &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.assetq", x.status)
+    } else if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.link", x.status)
     } else if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
@@ -499,7 +506,7 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -648,7 +655,7 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(1800, json!({}), None);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
@@ -731,7 +738,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
             let enroll = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -749,6 +756,13 @@ fn main() {
             let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
             e.store().pm_requester(workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&format!("PM grant: {e:?}")));
             println!("PM actor: {} · {op} in {workspace}", pm::actor(subject));
+        }
+        ["assetq-grant", workspace, subject, grant @ ("jobs" | "methods"), op @ ("on" | "off")] => {
+            if !enroll::id(workspace, 64) || !enroll::valid_subject(subject) { t.die("assetq-grant: bad workspace or subject"); }
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
+            e.store().assetq_grant(workspace, subject, grant, *op == "on").unwrap_or_else(|e| t.die(&format!("AssetQ grant: {e:?}")));
+            println!("AssetQ {grant} grant: {subject} {op} in {workspace}");
         }
         ["controller", workspace, subject, op @ ("on" | "off")] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -915,6 +929,41 @@ mod tests {
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }
 
+    /// D27/D11: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok, and an
+    /// unconfigured product adds no key, view link or panel (D10).
+    #[test]
+    fn assetq_view_is_scoped_and_absent_without_config() {
+        let dir = std::env::temp_dir().join(format!("dashq-assetq-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("read"), "invented-read-token").unwrap();
+        enroll::Enroll::admin(&dir, "invented-workspace", "github|member").unwrap();
+        let e = enroll::Enroll::open(&dir, "dash.example.com");
+        e.as_ref().unwrap().store().assetq_grant("invented-workspace", "github|member", "jobs", true).unwrap();
+        let mut cfg = load_config_fixture();
+        let plain = App { cfg: load_config_fixture(), cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let doc = plain.doc(1800, json!({}), Some(store::Scope::All));
+        assert!(doc.get("assets").is_none() && doc["sources"].get("assetq").is_none());
+        assert!(!page::render_view(&doc, &json!({}), "/").contains("id=\"view-assets\""));
+        cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: dir.join("read"), control_token: Some(dir.join("read")) }] });
+        let app = App { cfg, cache: Default::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let host = app.doc(1800, json!({}), Some(store::Scope::All));
+        assert_eq!(host["assets"]["projects"][0]["source"]["state"], "unknown");
+        assert_eq!(host["sources"]["assetq"]["state"], "unknown");
+        assert!(host["assets"]["projects"][0]["source"]["reason"].as_str().unwrap().contains("read failed"));
+        assert!(!host.to_string().contains("invented-read-token"), "R7");
+        assert_eq!(host["assets"]["projects"][0]["controls"]["jobs"], false, "a host-local reader holds no action");
+        let html = page::render_view(&host, &json!({}), "/assets");
+        assert!(html.contains("id=\"view-assets\"") && html.contains("No AssetQ observation yet"));
+        let mine = app.doc(1800, json!({}), Some(store::Scope::Subject("github|member")));
+        assert_eq!(mine["assets"]["projects"].as_array().unwrap().len(), 1);
+        let foreign = app.doc(1800, json!({}), Some(store::Scope::Subject("github|other")));
+        assert_eq!(foreign["assets"]["projects"], json!([]));
+        assert_eq!(foreign["assets"]["source"]["state"], "unknown");
+        assert_eq!(app.doc(1800, json!({}), None)["assets"]["projects"], json!([]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn fixture_rendering_is_pinned() {
         let html = fixture_html();
@@ -946,7 +995,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         let missing = route(&app, "GET", "/nope", "", None);
         assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
@@ -977,7 +1026,7 @@ mod tests {
         s.grant(&store::Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" }, "ws", "github|1", r#"["taskq-telemetry/1"]"#, b"v1", now).unwrap();
         let payload = r#"{"schema":1,"first":{"seq":1,"id":"a"},"last":{"seq":2,"id":"b"},"rows":2,"bytes":1,"gzip":"x"}"#;
         s.accept(b"v1", &[store::Event { id: "t-1", schema: "taskq-telemetry/1", observed: now, kind: store::Kind::Telemetry, payload }], now).unwrap();
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "block=t-1", Some(store::Scope::All));
         let data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--block=t-1"]).unwrap();
@@ -1047,7 +1096,7 @@ mod tests {
         let mut cfg = load_config_fixture();
         cfg.projects = vec!["taskqorg/dashq".into()];
         cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
-        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
         let mut data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--period=7200"]).unwrap();
@@ -1092,7 +1141,7 @@ mod tests {
         let p = PathBuf::from(std::env::var("DASHQ_LIVE_CONFIG").expect("DASHQ_LIVE_CONFIG"));
         let cfg = load_config(&p).unwrap();
         let enroll = enroll::Enroll::open_with(p.parent().unwrap(), &cfg.public_host, cfg.limits);
-        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=86400&cursor=0", Some(store::Scope::All));
         let (period, filters) = report_query(&["--period=86400", "--cursor=0"]).unwrap();
         fn calm(v: &mut Value) {
@@ -1131,7 +1180,7 @@ mod tests {
         std::fs::write(&path, report.to_string()).unwrap();
         let mut cfg = load_config_fixture();
         cfg.serverq_report = path.to_string_lossy().into();
-        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
         let good = app.doc(1800, json!({}), None);
         assert_eq!(good["sources"]["serverq"]["state"], "ok");
         std::fs::write(&path, "invalid").unwrap();

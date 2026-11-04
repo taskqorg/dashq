@@ -1,0 +1,55 @@
+# AssetQ controls evidence (#246)
+
+Evidence for [D27](../../../../dashq.md#d27-assetq-controls) and the [design package](../../assetq-controls.md). Each section names what it proves and what it leaves open.
+
+## Scope of this evidence
+
+| Acceptance | Executable evidence | Open |
+|---|---|---|
+| A1 | D27, R3, R4, the views and process detail and the design package precede the code in history. The owner chose full A3 and approved the [page layout](../../assetq-controls.md#approved-layout) on #246. | AssetQ's own R9 and method-evaluation text still say summary only. |
+| A2 | `assetq_live_local_service` reads status, jobs, methods with qualification records, a planned comparison, its scoped recommendation read and objects from a real AssetQ. | Deployed service. |
+| A3 | `assetq_actions_dispatch_once_with_verified_receipts`, `assetq_authority_stays_separate`, `assetq_exact_revisions_refuse_stale_actions`, `assetq_unknown_delivery_reconciles_without_a_second_effect`, `assetq_refusal_keeps_only_its_code`, `assetq_route_gates`, and all four actions in the live check. | AssetQ has no conditional write, so a revision check narrows a race without closing it. |
+| A4 | `assetq_projection_drops_content`, `assetq_unknowns_stay_explicit`, `assetq_view_is_scoped_and_absent_without_config`. Links point at AssetQ's job, result, object, download and comparison records. | AssetQ's browser session for those links ([assetq#9](https://github.com/taskqorg/assetq/issues/9)). |
+| A5 | `tests/assets-browser.cjs`, the local-service check below, the built-binary check below, and the unchanged existing suites. | `real configured service`: see [Not verified](#not-verified). |
+
+## Real local service
+
+`assetq_live_local_service` is ignored by default and needs a running service. It ran against AssetQ source `47f2cbd18c94bdbc6070696f767e6c66d8601640`, built unchanged, with a disposable PostgreSQL 18 cluster on loopback, on Windows, with the synthetic provider and no provider credential. No paid effect is possible on that method.
+
+```sh
+ASSETQ_BASE=http://127.0.0.1:18740 ASSETQ_PROJECT=<project> ASSETQ_MEMBER_TOKEN=<member> ASSETQ_OWNER_TOKEN=<owner> \
+  cargo test --locked assetq_live_local_service -- --ignored --nocapture
+```
+
+The plain-HTTP base works only in test builds, as for the other in-process receivers. Observed, with invented project data:
+
+- Read `ok`: real registry rows, `general dispatch refused` qualification records, unknown backup and restore. Neither prompt nor dataset case text reached `/data` or the page.
+- `job.submit`: `accepted`, durable job, and the same job on a repeated operation.
+- `job.cancel`: `accepted`, effect `requested`.
+- `method.save`: `accepted`, next version `synthetic.fake@2`; the earlier revision then reads `stale`.
+- `method.save` through a `member` credential: `refused`, code `forbidden`. AssetQ's role still decides.
+- `recommendation.promote`: `accepted`, effect `promoted`, after two `refused` receipts with code `admission_busy` while AssetQ's executor held admission.
+- A comparison reads `incomplete` with `job not terminal` and `usage unknown`, null credits and no winner.
+
+This proves the adapter against AssetQ's real API and storage semantics. It does not prove a real provider, the managed store or a deployment.
+
+## Defects found by these checks
+
+- Before: every cancellation of a running job read `stale` against the real service, because AssetQ updates `updated_at` on each poll. The stub had hidden it. After: the job revision is `phase/step/effect/cancel`, and the same check reads `accepted`.
+- Before: after the refresh a stale receipt triggers, the method form lost its receipt, because a field named `id` shadowed `form.id`, the key of drafts and receipts. After: the field is `method_id`, and the browser check waits through that refresh.
+
+## Browser and binary
+
+- `tests/assets-browser.cjs`: eight cells (1280/360 px, light/dark, 16/24 px) on the actual Rust HTML with a stubbed control route. It checks visibility, selected navigation, unknown text, no content, no overflow, draft survival, one operation ID across `Check delivery`, a disabled submit while delivery is unknown, invalid JSON sending nothing, a stale receipt keeping its draft, failed-refresh retention and no enabled action without the script.
+- Built binary on loopback, with an unreachable AssetQ origin and invented credential files: `/assetq/control` reads 401 without a subject and 405 for PUT; an actor reads `{"jobs":true,"methods":false}`; a POST reads 503 `assetq_unavailable` with no effect; a foreign Origin reads 401; `/data` holds no credential and reads `unknown` with its reason; actions read off; `/assets` and `dashq report` still answer.
+- The forward-auth guard itself was not exercised; these requests set the guard's verified header directly.
+
+## Not verified
+
+`real configured service` in A5 is not met by this evidence. No configured deployment exists to test:
+
+- `https://assets.ufobe.com` timed out from this Windows host on `/v1/health`. The cause is unknown.
+- No DashQ deployment has `assetq` configured. No credential, grant or production configuration was created or changed, and scope forbids an implicit one.
+- AssetQ must first amend its R9 and method-evaluation text, which still deny DashQ generation authority.
+
+Production enablement needs those inputs and then the live check above through the real guard and HTTPS origin, with the `assetq` config, `read_token`, `control_token` and `dashq assetq-grant` set explicitly.

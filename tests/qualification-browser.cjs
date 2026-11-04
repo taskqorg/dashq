@@ -7,7 +7,7 @@ const read=f=>fs.readFileSync(f,'utf8'),digest=s=>crypto.createHash('sha256').up
 const reference=read('docs/design/operator-redesign/overview-candidate.html');
 assert.equal(digest(reference),JSON.parse(read('docs/design/operator-redesign/approval.json')).public_reference_sha256,'F1 public reference pin');
 const live=process.env.DASHQ_QUALIFY_URL,dir=process.env.DASHQ_QUALIFY_EVIDENCE;
-const jsFiles=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'];
+const jsFiles=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/assetq.js','assets/boards.js','assets/app.js'];
 const cssFiles=['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css','assets/taskq/pm-composer.css','assets/workspace.css'];
 const js=jsFiles.map(read).join('\n'),css=cssFiles.map(read).join('\n')+'\n@scope (#taskq-workspace) {'+read('assets/taskq/task-workspace.css')+'}';
 const html=live?null:read(path.join(dir,'page.html')),fixtureDoc=live?null:read(path.join(dir,'data.json'));

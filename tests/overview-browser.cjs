@@ -6,7 +6,7 @@ const reference=read('docs/design/operator-redesign/overview-candidate.html');
 const digest=s=>crypto.createHash('sha256').update(s.replace(/\r\n/g,'\n')).digest('hex');
 assert.equal(digest(reference),JSON.parse(read('docs/design/operator-redesign/approval.json')).public_reference_sha256,'F1 public reference pin');
 const html=read(process.env.DASHQ_OVERVIEW_PAGE||path.join(dir,'page.html'));
-const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/boards.js','assets/app.js'].map(read).join('\n');
+const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/assetq.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css'].map(read).join('\n');
 (async()=>{
  const browser=await chromium.launch({headless:true});
