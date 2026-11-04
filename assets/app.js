@@ -2,7 +2,7 @@
 'use strict';
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
-const viewSections = {'/fleet': ['fleet'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
+const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
 const viewPositions = new Map();
@@ -176,7 +176,7 @@ async function refresh() {
   } catch (e) {
     const readingY = scrollY;
     expireHostObservations(true);
-    document.querySelectorAll('.attempt-source,.report-source [data-report-state],[data-fleet-state]').forEach(e => {
+    document.querySelectorAll('.attempt-source,.report-source [data-report-state],[data-fleet-state],[data-assets-state]').forEach(e => {
       e.dataset.retained ||= e.textContent;
       e.textContent = 'Unconfirmed after refresh failure. Retained: ' + e.dataset.retained;
     });
@@ -256,6 +256,7 @@ function bind() {
   document.getElementById('refresh')?.addEventListener('click', refresh);
   document.querySelectorAll('.aq-edit').forEach(box => { aqRender(box); aqLoad(box); });
   DashqResources.bind();
+  DashqAssetq.bind();
 }
 // agentq-settings.md G1–G3 (#63): the host plans the draft, review shows its exact diff, apply confirms that plan,
 // results come from the host and its readback. Per installation: CSRF, operations, the reviewed plan, a pending apply ID.

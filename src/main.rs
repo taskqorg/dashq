@@ -2,6 +2,7 @@
 
 mod accounting;
 mod agent_work;
+mod assetq;
 mod fleet;
 mod model_use;
 mod answer;
@@ -66,6 +67,8 @@ struct Config {
     resources: bool,
     /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
     agentq_configure: bool,
+    /// `assetq` names the AssetQ origin and per-project credential files (D27); absent: no view, no action.
+    assetq: Option<assetq::Config>,
     /// `taskq_logs` `{host: absolute taskq.log path}`: attempt stage records for Agent work (D21); empty: not configured.
     taskq_logs: Vec<(String, String)>,
     /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
@@ -147,6 +150,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key agentq_configure")?,
     };
+    let assetq = assetq::config(&v)?;
     let (report, host) = if v.get("serverq").is_some() {
         (s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?,
          s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?)
@@ -188,6 +192,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         pm_requests,
         resources,
         agentq_configure,
+        assetq,
         taskq_logs,
         prices,
     })
@@ -303,11 +308,30 @@ impl App {
         }
         // the page offers review/apply only where the route is on (D16)
         doc["controls"] = json!({"agentq_configure": c.agentq_configure});
+        self.assets(&mut doc, scope, now);
         // outbox counts span every workspace: host-local readers only (D11)
         if let (Some(store::Scope::All), Ok(e)) = (scope, &self.enroll) {
             doc["sources"]["export"] = export::status(Some(e.store()), &self.export, c.langfuse.is_some() && c.forward, now);
         }
         doc
+    }
+}
+
+impl App {
+    /// `/data.assets` (D27): only the projects of the actor's workspaces, read independently of other sources.
+    fn assets(&self, doc: &mut Value, scope: Option<store::Scope>, now: u64) {
+        let Some(c) = &self.cfg.assetq else { return };
+        let member = |ws: &str| match scope {
+            Some(store::Scope::All) => true,
+            Some(store::Scope::Subject(s)) => self.enroll.as_ref().ok().and_then(|e| e.store().workspaces(s).ok()).is_some_and(|w| w.iter().any(|(x, _)| x == ws)),
+            None => false,
+        };
+        let rows = c.projects.iter().filter(|p| member(&p.workspace)).map(|p| {
+            let controls = json!({"jobs": false, "methods": false, "reason": "Actions are not available yet."});
+            assetq::project(p, &c.base, &assetq::cached(&self.cache, &c.base, p), now, controls)
+        }).collect();
+        doc["assets"] = assetq::build(&c.base, rows, now);
+        doc["sources"]["assetq"] = doc["assets"]["source"].clone();
     }
 }
 
@@ -528,7 +552,7 @@ fn serve(t: &Tool, service: bool) -> ! {
 }
 
 fn app_js() -> String {
-    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/taskq/task-workspace.js"), include_str!("../assets/taskq/pm-composer.js"), include_str!("../assets/workspace.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
+    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/taskq/task-workspace.js"), include_str!("../assets/taskq/pm-composer.js"), include_str!("../assets/workspace.js"), include_str!("../assets/assetq.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
 }
 
 fn style_css() -> String {
@@ -1092,7 +1116,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { assetq: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
