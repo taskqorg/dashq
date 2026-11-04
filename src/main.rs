@@ -655,11 +655,16 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(1800, json!({}), None);
+    let doc = selftest_read(cfg);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
     Ok(())
+}
+
+/// One read of each configured source (D2), in the host-local scope. No store and no actor, so it holds no action.
+fn selftest_read(cfg: Config) -> Value {
+    App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(1800, json!({}), Some(store::Scope::All))
 }
 
 /// The release the coreq launcher rolled back: newer than `running`, never healthy, three starts of `project` (D2).
@@ -927,6 +932,21 @@ mod tests {
     fn answer_live_gate_stops_before_writes() {
         let out = std::process::Command::new("node").arg("tests/answer-live-stub.cjs").current_dir(env!("CARGO_MANIFEST_DIR")).output().expect("node is required for the answer live gate");
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// D2: selftest reads each source once, AssetQ included. Defect guarded: a selftest that printed an empty AssetQ
+    /// scope and never touched the configured service.
+    #[test]
+    fn selftest_reads_each_assetq_project() {
+        let mut cfg = load_config_fixture();
+        let read = std::env::temp_dir().join(format!("dashq-selftest-read-{}", std::process::id()));
+        std::fs::write(&read, "invented-read-token").unwrap();
+        cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: read.clone(), control_token: None }] });
+        let doc = selftest_read(cfg);
+        let _ = std::fs::remove_file(&read);
+        assert_eq!(doc["assets"]["projects"].as_array().map(Vec::len), Some(1), "{}", doc["assets"]);
+        assert!(doc["sources"]["assetq"]["reason"].as_str().unwrap().contains("read failed"), "{}", doc["sources"]["assetq"]);
+        assert_eq!(doc["assets"]["projects"][0]["controls"]["jobs"], false, "selftest holds no action");
     }
 
     /// D27/D11: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok, and an

@@ -3,6 +3,7 @@ const {chromium}=require('playwright'),fs=require('node:fs'),path=require('node:
 const dir=process.env.DASHQ_ASSETS_EVIDENCE,shots=process.env.DASHQ_ASSETS_SHOTS;
 const read=f=>fs.readFileSync(f,'utf8');
 const html=read(path.join(dir,'page.html'));
+const unconfigured=read(path.join(dir,'unconfigured.html'));
 const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/assetq.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=read('assets/style.css');
 (async()=>{
@@ -30,7 +31,13 @@ const css=read('assets/style.css');
    assert(await root.isVisible());
    assert.equal(await page.locator('#view-assets').getAttribute('aria-current'),'page');
    const text=await root.innerText();
-   for(const s of ['invented-project','Uncertain submissions 1','job-active','— · unknown: provider did not report usage','Cancellation requested','Backup','no fresh backup or restore observation recorded','Integrity','New job'])assert(text.includes(s),s);
+   for(const s of ['invented-project','Uncertain submissions 1','job-active','— · unknown: provider did not report usage','Cancellation requested','Backup','no fresh backup or restore observation recorded','Integrity','New job','Failed jobs · ≥1 (capped)','Retained records · ≥1 (capped)'])assert(text.includes(s),s);
+   // A failed job shows AssetQ's reason and offers nothing to act on.
+   await page.locator('[id="assetq-invented-project-failed"]').evaluate(d=>d.open=true);
+   const failed=await page.locator('[id="assetq-invented-project-failed"]').innerText();
+   for(const s of ['job-failed','validation refused the import','a verified manifest reports validation'])assert(failed.includes(s),s);
+   assert.equal(await page.locator('[id="assetq-invented-project-failed"] form').count(),0,'a failed job offers an action');
+   await page.locator('[id="assetq-invented-project-failed"]').evaluate(d=>d.open=false);
    assert(!text.includes('SECRET'),'content leaked');
    const noOverflow=()=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1);
    assert(await noOverflow(),'horizontal overflow '+JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1).map(e=>[e.tagName,e.id,e.className]).slice(0,8))));
@@ -89,6 +96,18 @@ const css=read('assets/style.css');
    assert(await staticPage.locator('#assets').count(),'server-rendered AssetQ missing without JavaScript');
    assert.equal(await staticPage.locator('#assets fieldset:not([disabled])').count(),0,'an action is enabled without the adapter');
    await staticPage.close();
+   // Not configured: no navigation entry and no panel; /assets names the missing configuration, also after a refresh.
+   const bare=await browser.newPage({viewport:{width,height:1000},colorScheme:theme,reducedMotion:'reduce'});
+   await bare.route('http://fixture/**',route=>{const p=new URL(route.request().url()).pathname;return route.fulfill({status:200,contentType:p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':p==='/data'?'application/json':'text/html',body:p==='/app.js'?js:p==='/style.css'?css:p==='/data'?'{}':unconfigured});});
+   await bare.goto('http://fixture/assets');await bare.waitForFunction(()=>!busy);
+   for(const round of ['load','refresh']){
+    if(round==='refresh'){await bare.evaluate(()=>refresh());await bare.waitForFunction(()=>!busy);}
+    assert((await bare.locator('#view-unavailable').innerText()).includes('AssetQ is not configured'),round);
+    assert(await bare.locator('#view-unavailable').isVisible(),round);
+    assert.equal(await bare.locator('#assets').count(),0,'an unconfigured product created a panel');
+    assert.equal(await bare.locator('#view-assets').count(),0,'an unconfigured product kept its navigation entry');
+   }
+   await bare.close();
   }
   if(shots){
    fs.mkdirSync(shots,{recursive:true});
@@ -103,6 +122,6 @@ const css=read('assets/style.css');
    }
   }
   fs.writeFileSync(path.join(dir,'browser.json'),JSON.stringify({platform:process.platform,browser:browser.version(),cells},null,2)+'\n');
-  console.log(`AssetQ browser: ${cells.length} cells passed; drafts, delivery, refusal, failed refresh`);
+  console.log(`AssetQ browser: ${cells.length} cells passed; drafts, delivery, refusal, failed refresh, failed jobs, not configured`);
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

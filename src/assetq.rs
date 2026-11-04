@@ -20,6 +20,8 @@ const DETAIL_CAP: usize = 10;
 const SPEC_CAP: usize = 16 << 10;
 const REASON_CAP: usize = 240;
 const ACTIVE: [&str; 3] = ["queued", "active", "waiting"];
+/// Failed job rows read per project; further pages read as capped (D6).
+const FAILED_CAP: usize = 50;
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -75,6 +77,7 @@ pub fn read(base: &str, p: &Project) -> Result<(Value, bool), Fail> {
     if !status["revisions"].is_object() || !status["jobs"].is_object() { return Err(("unsupported status shape".into(), None)); }
     let mut raw = json!({"status": status, "jobs": {}, "details": {}, "recommendations": []});
     for phase in ACTIVE { raw["jobs"][phase] = list(get(base, &format!("/v1/jobs?phase={phase}&limit=100"), &token)); }
+    raw["jobs"]["failed"] = list(get(base, &format!("/v1/jobs?phase=failed&limit={FAILED_CAP}"), &token));
     raw["methods"] = list(get(base, "/v1/methods?limit=500", &token));
     raw["objects"] = list(get(base, "/v1/objects?limit=50", &token));
     raw["comparisons"] = list(get(base, "/v1/comparisons?limit=50", &token));
@@ -112,6 +115,20 @@ fn pick(v: &Value, keys: &[&str]) -> Value {
     Value::Object(o)
 }
 
+/// What a shown count means (D6): an exact total, a lower bound or no read at all.
+fn coverage(l: &Value) -> &'static str {
+    if !l["items"].is_array() { "unknown" } else if l["next"].is_null() { "complete" } else { "capped" }
+}
+
+/// A count in the view: never an exact number for a capped list, never 0 for an unread one (R2).
+fn count(n: usize, coverage: &str) -> String {
+    match coverage {
+        "complete" => n.to_string(),
+        "capped" => format!("≥{n} (capped)"),
+        _ => "— · unknown".into(),
+    }
+}
+
 /// A producer sentence: bounded, one line, never a free-form multi-line dump (R1).
 fn line(v: &Value) -> Value {
     v.as_str().map_or(Value::Null, |s| json!(s.lines().next().unwrap_or("").chars().filter(|c| !c.is_control()).take(REASON_CAP).collect::<String>()))
@@ -141,7 +158,9 @@ fn job(v: &Value, origin: &str) -> Value {
     o["reason"] = line(&v["reason"]);
     if let Some(id) = v["id"].as_str() {
         let id = source::enc(id);
-        o["links"] = json!({"record": format!("{origin}/v1/jobs/{id}"), "result": format!("{origin}/v1/jobs/{id}/result")});
+        o["links"] = json!({"record": format!("{origin}/v1/jobs/{id}")});
+        // AssetQ serves a result only for a verified manifest; a failed job has none.
+        if v["phase"] != "failed" { o["links"]["result"] = json!(format!("{origin}/v1/jobs/{id}/result")); }
     }
     o
 }
@@ -235,11 +254,13 @@ pub fn project(p: &Project, origin: &str, snap: &Value, now: u64, controls: Valu
         if !l["next"].is_null() && l["error"].is_null() { gaps.push(format!("{what} capped")); }
         l["items"].as_array().cloned().unwrap_or_default()
     };
+    let failed: Vec<Value> = listed_failed(raw, &mut gaps).iter().map(|j| job(j, origin)).collect();
     let methods: Vec<Value> = listed("methods", "methods", &mut gaps).iter().map(method).collect();
     let objects: Vec<Value> = listed("objects", "objects", &mut gaps).iter().map(|o| object(o, origin)).collect();
     let comparisons: Vec<Value> = listed("comparisons", "comparisons", &mut gaps).iter().filter(|c| !raw["details"][c["id"].as_str().unwrap_or("")].is_null()).map(|c| comparison(c, &raw["details"][c["id"].as_str().unwrap_or("")], origin)).collect();
     if raw["details_skipped"] == true { gaps.push(format!("only {DETAIL_CAP} comparison details read")); }
     if st["method_outcomes_truncated"] == true { gaps.push("method outcomes capped".into()); }
+    if raw["recommendations"].as_array().into_iter().flatten().any(|r| r["records_truncated"] == true) { gaps.push("recommendation records capped".into()); }
     if !gaps.is_empty() && source["state"] == "ok" {
         source["state"] = json!("incomplete");
         source["incomplete"] = json!(true);
@@ -249,8 +270,16 @@ pub fn project(p: &Project, origin: &str, snap: &Value, now: u64, controls: Valu
         source["reason"] = json!(match source["reason"].as_str() { Some(r) => format!("{r}; {joined}"), None => joined });
     }
     row["source"] = source;
+    let active = ACTIVE.iter().map(|p| coverage(&raw["jobs"][p])).collect::<Vec<_>>();
+    row["coverage"] = json!({
+        "active": if active.contains(&"unknown") { "unknown" } else if active.contains(&"capped") { "capped" } else { "complete" },
+        "failed": coverage(&raw["jobs"]["failed"]),
+        "methods": coverage(&raw["methods"]),
+        "objects": coverage(&raw["objects"]),
+        "comparisons": if coverage(&raw["comparisons"]) == "complete" && raw["details_skipped"] == true { "capped" } else { coverage(&raw["comparisons"]) },
+    });
     row["revisions"] = pick(&st["revisions"], &["registry", "comparisons", "recommendations", "evaluations", "qualification"]);
-    row["jobs"] = json!({"by_phase": st["jobs"]["by_phase"], "uncertain_submissions": st["jobs"]["uncertain_submissions"], "leased": st["jobs"]["leased"], "rows": jobs,
+    row["jobs"] = json!({"by_phase": st["jobs"]["by_phase"], "uncertain_submissions": st["jobs"]["uncertain_submissions"], "leased": st["jobs"]["leased"], "rows": jobs, "failed": failed,
         "capped": ACTIVE.iter().any(|p| !raw["jobs"][p]["next"].is_null())});
     row["method_outcomes"] = json!(st["methods"].as_array().into_iter().flatten().map(|m| pick(m, &["method", "phase", "jobs", "usage_unknown", "credits_reported"])).collect::<Vec<_>>());
     row["providers"] = json!(st["providers"].as_array().into_iter().flatten().map(observation).collect::<Vec<_>>());
@@ -267,6 +296,13 @@ pub fn project(p: &Project, origin: &str, snap: &Value, now: u64, controls: Valu
     row["recommendations"] = json!(raw["recommendations"].as_array().into_iter().flatten().map(scope).collect::<Vec<_>>());
     row["recommendations_note"] = json!("AssetQ lists recommendations per scope; scopes shown are those its comparisons name.");
     row
+}
+
+fn listed_failed(raw: &Value, gaps: &mut Vec<String>) -> Vec<Value> {
+    let l = &raw["jobs"]["failed"];
+    if let Some(e) = l["error"].as_str() { gaps.push(format!("failed jobs: {e}")); }
+    if coverage(l) == "capped" { gaps.push("failed jobs capped".into()); }
+    l["items"].as_array().cloned().unwrap_or_default()
 }
 
 /// `/data.assets`: every project the actor may see, each with its own source state.
@@ -339,19 +375,34 @@ fn job_rows(w: &mut String, p: &Value) {
         let text = if p["source"]["state"] == "ok" { "No queued, active or waiting jobs." } else { "Active jobs unknown · see the source state above." };
         let _ = write!(w, "<p>{text}</p>");
     }
-    for j in &rows {
-        let steps = j["steps"].as_array().map_or(0, Vec::len);
-        let step = j["step"].as_u64().map_or_else(|| "—".to_string(), |s| format!("{} of {steps}", s + 1));
-        let usage = if j["usage"]["credits"].is_null() { format!("— · unknown: {}", j["usage"]["unknown_reason"].as_str().map_or("not reported".into(), esc)) } else { val(&j["usage"]["credits"]) };
-        let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>{}</span><span>Phase {}</span><span>Step {step}</span><span>Effect {}</span><span>Cancellation {}</span><span>Credits {usage} · reserved {}</span><span>Updated {}</span>", val(&j["id"]), val(&j["method"]), val(&j["phase"]), val(&j["effect"]), val(&j["cancel"]), val(&j["reserved_credits"]), val(&j["updated_at"]));
-        if !j["reason"].is_null() { let _ = write!(w, "<span>{}</span>", val(&j["reason"])); }
-        let _ = write!(w, "<span>{} · {}</span>", link(&j["links"]["record"], "Record"), link(&j["links"]["result"], "Result"));
-        // AssetQ decides whether a repeat changes anything; a requested cancellation offers nothing more here.
-        if j["cancel"].is_null() || j["cancel"] == "none" {
-            action_form(w, p, "jobs", &format!("cancel-{}", j["id"].as_str().unwrap_or("")), "job.cancel", &j["revision"], |w, _| { let _ = write!(w, "<input type=\"hidden\" name=\"job\" value=\"{}\"><button type=\"submit\">Cancel job</button>", val(&j["id"])); });
-        }
-        w.push_str("</div>");
+    for j in &rows { job_row(w, p, j); }
+}
+
+fn job_row(w: &mut String, p: &Value, j: &Value) {
+    let steps = j["steps"].as_array().map_or(0, Vec::len);
+    let step = j["step"].as_u64().map_or_else(|| "—".to_string(), |s| format!("{} of {steps}", s + 1));
+    let usage = if j["usage"]["credits"].is_null() { format!("— · unknown: {}", j["usage"]["unknown_reason"].as_str().map_or("not reported".into(), esc)) } else { val(&j["usage"]["credits"]) };
+    let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>{}</span><span>Phase {}</span><span>Step {step}</span><span>Effect {}</span><span>Cancellation {}</span><span>Credits {usage} · reserved {}</span><span>Updated {}</span>", val(&j["id"]), val(&j["method"]), val(&j["phase"]), val(&j["effect"]), val(&j["cancel"]), val(&j["reserved_credits"]), val(&j["updated_at"]));
+    if !j["reason"].is_null() { let _ = write!(w, "<span>{}</span>", val(&j["reason"])); }
+    let links: Vec<String> = [("record", "Record"), ("result", "Result")].iter().map(|(k, label)| link(&j["links"][k], label)).filter(|l| !l.is_empty()).collect();
+    let _ = write!(w, "<span>{}</span>", links.join(" · "));
+    // AssetQ decides whether a repeat changes anything; a requested cancellation offers nothing more here.
+    let terminal = j["phase"].as_str().is_some_and(|x| TERMINAL.contains(&x));
+    if !terminal && (j["cancel"].is_null() || j["cancel"] == "none") {
+        action_form(w, p, "jobs", &format!("cancel-{}", j["id"].as_str().unwrap_or("")), "job.cancel", &j["revision"], |w, _| { let _ = write!(w, "<input type=\"hidden\" name=\"job\" value=\"{}\"><button type=\"submit\">Cancel job</button>", val(&j["id"])); });
     }
+    w.push_str("</div>");
+}
+
+/// Failed work with AssetQ's bounded reason; generation, validation and owner acceptance stay separate (AssetQ status `states`).
+fn failed_rows(w: &mut String, p: &Value) {
+    let rows = p["jobs"]["failed"].as_array().cloned().unwrap_or_default();
+    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-failed\"><summary id=\"assetq-{0}-failed-summary\">Failed jobs · {1}</summary><p class=\"note\">Phase reports generation; a verified manifest reports validation; each retained record reports owner acceptance.</p>", val(&p["project"]), count(rows.len(), p["coverage"]["failed"].as_str().unwrap_or("unknown")));
+    if rows.is_empty() {
+        let _ = write!(w, "<p>{}</p>", if p["source"]["state"] == "ok" { "No failed jobs." } else { "Failed jobs unknown · see the source state above." });
+    }
+    for j in &rows { job_row(w, p, j); }
+    w.push_str("</details>");
 }
 
 fn submit_form(w: &mut String, p: &Value) {
@@ -379,7 +430,7 @@ fn storage(w: &mut String, p: &Value) {
 
 fn methods(w: &mut String, p: &Value) {
     let rows = p["methods"].as_array().cloned().unwrap_or_default();
-    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-methods\"><summary id=\"assetq-{0}-methods-summary\">Methods · {1} versions</summary>", val(&p["project"]), rows.len());
+    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-methods\"><summary id=\"assetq-{0}-methods-summary\">Methods · {1}{2}</summary>", val(&p["project"]), count(rows.len(), p["coverage"]["methods"].as_str().unwrap_or("unknown")), if p["coverage"]["methods"] == "unknown" { "" } else { " versions" });
     w.push_str("<p class=\"note\">Registry status, qualification records and provider health are separate. A record names what it proves; it never enables dispatch.</p>");
     for m in &rows {
         let outcomes: Vec<String> = p["method_outcomes"].as_array().into_iter().flatten().filter(|o| o["method"] == m["name"]).map(|o| format!("{} {}", val(&o["phase"]), val(&o["jobs"]))).collect();
@@ -414,7 +465,7 @@ fn status_select(id: &str, current: &Value) -> String {
 fn comparisons(w: &mut String, p: &Value) {
     let rows = p["comparisons"].as_array().cloned().unwrap_or_default();
     let scopes = p["recommendations"].as_array().cloned().unwrap_or_default();
-    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-comparisons\"><summary id=\"assetq-{0}-comparisons-summary\">Comparisons · {1} · recommendation scopes · {2}</summary>", val(&p["project"]), rows.len(), scopes.len());
+    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-comparisons\"><summary id=\"assetq-{0}-comparisons-summary\">Comparisons · {1} · recommendation scopes · {2}</summary>", val(&p["project"]), count(rows.len(), p["coverage"]["comparisons"].as_str().unwrap_or("unknown")), scopes.len());
     if rows.is_empty() { let _ = write!(w, "<p>{}</p>", if p["source"]["state"] == "ok" { "No comparisons." } else { "Comparisons unknown · see the source state above." }); }
     for c in &rows {
         let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Use case {}</span><span>{}</span><span>Dataset {} · evaluator {}</span><span>State {}{}</span><span>Failure rate {} · credits {} · judgments {}</span><span>{}</span></div>", val(&c["id"]), val(&c["use_case"]), val(&c["operation"]), val(&c["dataset_version"]), val(&c["evaluator_version"]), val(&c["state"]), c["reason"].as_str().map_or(String::new(), |r| format!(" · {}", esc(r))), val(&c["failure_rate"]), val(&c["credits"]), val(&c["human_judgments"]), link(&c["link"], "Record"));
@@ -428,7 +479,9 @@ fn comparisons(w: &mut String, p: &Value) {
     let _ = write!(w, "<h4>Recommendations</h4><p class=\"note\">{}</p>", val(&p["recommendations_note"]));
     for s in &scopes {
         let current = if s["recommended"].is_object() { format!("Recommended {}", val(&s["recommended"]["method"])) } else { format!("None · {}", s["none_reason"].as_str().or(s["reason"].as_str()).map_or("unknown".into(), esc)) };
-        let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Constraints {}</span><span>{current}</span><span>Observed {}</span></div>", val(&s["use_case"]), val(&s["constraints"]), val(&s["observed_at"]));
+        let records = s["records"].as_array().map_or(0, Vec::len);
+        let shown = count(records, if s["state"] != "ok" { "unknown" } else if s["records_truncated"] == true { "capped" } else { "complete" });
+        let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Constraints {}</span><span>{current}</span><span>Records {shown}</span><span>Observed {}</span></div>", val(&s["use_case"]), val(&s["constraints"]), val(&s["observed_at"]));
         for r in s["records"].as_array().into_iter().flatten() {
             let keys: Vec<String> = r["evidence_keys"].as_array().into_iter().flatten().map(val).collect();
             let _ = write!(w, "<div class=\"asset-row asset-sub\"><strong>{}</strong><span>{} · {}</span><span>Method status {}</span><span>Evidence {} · observed {}</span>", val(&r["id"]), val(&r["method"]), val(&r["state"]), val(&r["method_status"]), if keys.is_empty() { "—".into() } else { keys.join(", ") }, val(&r["observed_at"]));
@@ -445,7 +498,7 @@ fn comparisons(w: &mut String, p: &Value) {
 
 fn records(w: &mut String, p: &Value) {
     let rows = p["objects"].as_array().cloned().unwrap_or_default();
-    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-records\"><summary id=\"assetq-{0}-records-summary\">Retained records · {1}</summary>", val(&p["project"]), rows.len());
+    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-records\"><summary id=\"assetq-{0}-records-summary\">Retained records · {1}</summary>", val(&p["project"]), count(rows.len(), p["coverage"]["objects"].as_str().unwrap_or("unknown")));
     let _ = write!(w, "<p class=\"note\">Previews, search and asset detail are on <a href=\"{}\" rel=\"noreferrer\">the AssetQ site</a>.</p>", val(&p["origin"]));
     for o in &rows {
         let synthetic = if o["synthetic"] == true { " · synthetic" } else { "" };
@@ -467,8 +520,9 @@ pub fn render(w: &mut String, assets: &Value) {
         let _ = write!(w, "<article id=\"assetq-{0}\"><h3>{0}</h3><p data-assets-state>{1} · {age} · workspace {2}</p>", val(&p["project"]), state(src), val(&p["workspace"]));
         if p["revisions"].is_object() {
             let phases = p["jobs"]["by_phase"].as_object().map_or("—".to_string(), |o| ["queued", "active", "waiting", "succeeded", "failed", "cancelled"].iter().map(|k| format!("{k} {}", o.get(*k).map_or("0".into(), val))).collect::<Vec<_>>().join(" · "));
-            let _ = write!(w, "<h4>Jobs</h4><p>{phases}</p><p>Uncertain submissions {} · leased {}. Rows list queued, active and waiting jobs.</p>", val(&p["jobs"]["uncertain_submissions"]), val(&p["jobs"]["leased"]));
+            let _ = write!(w, "<h4>Jobs</h4><p>{phases}</p><p>Uncertain submissions {} · leased {} · Active rows {}. Rows list queued, active and waiting jobs.</p>", val(&p["jobs"]["uncertain_submissions"]), val(&p["jobs"]["leased"]), count(p["jobs"]["rows"].as_array().map_or(0, Vec::len), p["coverage"]["active"].as_str().unwrap_or("unknown")));
             job_rows(w, &p);
+            failed_rows(w, &p);
             submit_form(w, &p);
             let providers: Vec<String> = p["providers"].as_array().into_iter().flatten().map(|x| format!("{} {}", val(&x["provider"]), state(x))).collect();
             let _ = write!(w, "<h4>Providers</h4><p>{}</p>", if providers.is_empty() { "Unknown · no provider observations.".to_string() } else { providers.join("<br>") });
@@ -507,7 +561,19 @@ const MAX_ATTACHMENTS: usize = 16;
 const STATUSES: [&str; 4] = ["experimental", "recommended", "deprecated", "disabled"];
 const TERMINAL: [&str; 3] = ["succeeded", "failed", "cancelled"];
 
-/// One journal row (`assetq_ops`). It holds a digest, never the text, specification or constraints (R1).
+/// The fixed columns of one journal row: digests of the actor and of the payload, never the subject, text,
+/// specification or constraints (R1).
+pub struct Entry<'a> {
+    pub op_id: &'a str,
+    pub actor: &'a [u8],
+    pub workspace: &'a str,
+    pub project: &'a str,
+    pub action: &'a str,
+    pub revision: &'a str,
+    pub digest: &'a [u8],
+}
+
+/// What a replay needs from a journal row (`assetq_ops`).
 pub struct Op {
     pub digest: Vec<u8>,
     pub state: String,
@@ -534,9 +600,9 @@ impl Store {
     }
 
     // ponytail: rows stay, one small row per rate-limited action; prune with a retention rule if the file ever matters.
-    fn assetq_record(&self, op_id: &str, project: &str, digest: &[u8], state: &str, receipt: &str, baseline: Option<i64>, now: i64) -> Result<(), store::Error> {
+    fn assetq_record(&self, e: &Entry, state: &str, receipt: &str, baseline: Option<i64>, now: i64) -> Result<(), store::Error> {
         self.write(|tx| {
-            tx.execute("INSERT INTO assetq_ops VALUES (?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(op_id) DO UPDATE SET state=?4, receipt=?5, at=?7", params![op_id, project, digest, state, receipt, baseline, now])?;
+            tx.execute("INSERT INTO assetq_ops VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(op_id) DO UPDATE SET state=?8, receipt=?9, at=?11", params![e.op_id, e.actor, e.workspace, e.project, e.action, e.revision, e.digest, state, receipt, baseline, now])?;
             Ok(())
         })
     }
@@ -656,6 +722,8 @@ fn post(c: &Ctx, r: &Req, now: i64) -> Resp {
     let Ok(read) = token(&p.read_token) else { return refuse("503 Service Unavailable", "no_read_credential") };
     // The digest binds actor and every field; a replay must repeat all of them.
     let digest = crate::enroll::sha256(&format!("{subject}\n{v}"));
+    let actor_digest = crate::enroll::sha256(subject);
+    let entry = Entry { op_id, actor: &actor_digest, workspace: &p.workspace, project: &p.id, action: v["action"].as_str().unwrap_or(""), revision: v["revision"].as_str().unwrap_or(""), digest: &digest };
     let lock = c.state.projects.lock().unwrap().entry(p.id.clone()).or_default().clone();
     let _one = lock.lock().unwrap();
     let t = Target { base: &cfg.base, read: &read, control: &control, project: &p.id, v: &v, op_id };
@@ -670,7 +738,7 @@ fn post(c: &Ctx, r: &Req, now: i64) -> Resp {
             Ok(Gate::Refused(why)) => ("refused", json!({"reason": why}), None),
             Ok(Gate::Go(baseline)) => {
                 // Pending commits before the effect, so a crash reconciles instead of starting a new operation.
-                if e.store().assetq_record(op_id, &p.id, &digest, "pending", "{}", baseline, now).is_err() { return refuse("503 Service Unavailable", "unavailable") }
+                if e.store().assetq_record(&entry, "pending", "{}", baseline, now).is_err() { return refuse("503 Service Unavailable", "unavailable") }
                 let (s, x) = dispatch(&t, baseline);
                 (s, x, baseline)
             }
@@ -679,7 +747,7 @@ fn post(c: &Ctx, r: &Req, now: i64) -> Resp {
     let mut receipt = receipt;
     for (k, val) in [("op_id", json!(op_id)), ("project", json!(p.id)), ("action", v["action"].clone()), ("state", json!(state))] { receipt[k] = val; }
     // An unrecorded outcome keeps the row pending: the next delivery check reconciles it.
-    let _ = e.store().assetq_record(op_id, &p.id, &digest, state, &receipt.to_string(), baseline, now);
+    let _ = e.store().assetq_record(&entry, state, &receipt.to_string(), baseline, now);
     // The next page read and revision check see AssetQ's new state, not this cache.
     c.cache.forget(&format!("assetq:{}", p.id));
     answer(state, receipt)
@@ -836,7 +904,8 @@ pub(crate) mod tests {
                 "restore": {"state": "unknown", "reason": "backup/restore qualification deferred; no fresh scoped restore observation"},
                 "revisions": {"registry": "3:17", "comparisons": "1:5", "recommendations": "2:9", "evaluations": "2:3", "qualification": "abc"},
                 "admission": {"metadata": {"state": "observed", "used_bytes": 1024}}},
-            "jobs": {"queued": {"items": [], "next": null}, "active": {"items": [job("job-active", "active", "none", Value::Null)], "next": null}, "waiting": {"items": [job("job-waiting", "waiting", "requested", json!(1))], "next": null}},
+            "jobs": {"queued": {"items": [], "next": null}, "active": {"items": [job("job-active", "active", "none", Value::Null)], "next": null}, "waiting": {"items": [job("job-waiting", "waiting", "requested", json!(1))], "next": null},
+                "failed": {"items": [{"id": "job-failed", "method": "synthetic.fake@1", "phase": "failed", "step": 2, "steps": ["provider.submit", "provider.import", "validate"], "effect": "done", "cancel": "none", "usage": {"credits": 1, "unknown_reason": null}, "reserved_credits": 0, "reason": "validation refused the import\nSECRET-SECOND-LINE", "attempts": 1, "request": {"operation": "synthetic.generate", "text": "SECRET-PROMPT-TEXT"}, "created_at": "2026-11-05 09:00:00+00", "updated_at": "2026-11-05 09:01:00+00"}], "next": "job-failed"}},
             "methods": {"items": [
                 {"id": "synthetic.fake", "version": 1, "status": "experimental", "created_at": "2026-11-01", "qualification": null, "spec": {"operation": "synthetic.generate", "provider": "synthetic.fake", "model": "none", "max_credits": 1, "synthetic": true, "steps": ["provider.submit"]}},
                 {"id": "image.worker.v1", "version": 5, "status": "experimental", "created_at": "2026-11-04", "spec": {"operation": "image.generate", "provider": "agentq.image", "model": "inherit", "max_credits": 0},
@@ -929,6 +998,60 @@ pub(crate) mod tests {
         }
     }
 
+    fn rendered(raw: Value) -> String {
+        let snap = json!({"value": raw, "at": NOW - 20, "error": null, "incomplete": false});
+        let d = build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW, all_controls())], NOW);
+        let mut html = String::new();
+        render(&mut html, &d);
+        html
+    }
+
+    /// D6: a capped list counts `≥N (capped)`, and a failed list read counts unknown, never 0 (R2). Defect guarded:
+    /// a truncated or unread list shown as an exact total.
+    #[test]
+    fn assetq_capped_counts_read_at_least() {
+        let html = rendered(raw());
+        assert!(html.contains("Retained records · ≥1 (capped)"), "objects has a next page");
+        assert!(html.contains("Methods · 3 versions"), "a complete list stays exact");
+        assert!(html.contains("Failed jobs · ≥1 (capped)"), "failed has a next page");
+        let mut r = raw();
+        r["methods"] = json!({"error": "HTTP 500"});
+        r["comparisons"] = json!({"error": "timeout"});
+        let html = rendered(r);
+        assert!(html.contains("Methods · — · unknown"), "a failed read is no zero");
+        assert!(html.contains("Comparisons · — · unknown"));
+        // details read for only part of the list: the shown count is a lower bound
+        let mut r = raw();
+        r["details_skipped"] = json!(true);
+        assert!(rendered(r).contains("Comparisons · ≥1 (capped)"));
+        // a recommendation scope with truncated records
+        let mut r = raw();
+        r["recommendations"][0]["records_truncated"] = json!(true);
+        assert!(rendered(r).contains("Records ≥1 (capped)"), "truncated scope records");
+        // jobs: a further page on any active phase
+        let mut r = raw();
+        r["jobs"]["active"]["next"] = json!("job-active");
+        assert!(rendered(r).contains("Active rows ≥2 (capped)"));
+    }
+
+    /// Design States, AssetQ status `states`: a failed job keeps AssetQ's bounded reason, offers no action and no result,
+    /// and names validation and owner acceptance as separate. Defect guarded: failed work visible only as a count.
+    #[test]
+    fn assetq_failed_jobs_keep_their_reason() {
+        let html = rendered(raw());
+        assert!(html.contains("job-failed") && html.contains("validation refused the import"));
+        assert!(!html.contains("SECRET"), "only the first line, no request");
+        assert!(!html.contains("cancel-job-failed"), "a terminal job offers no cancellation");
+        assert!(html.contains("https://assets.example.com/v1/jobs/job-failed\""));
+        assert!(!html.contains("/v1/jobs/job-failed/result"), "a failed job has no verified manifest");
+        assert!(html.contains("Phase reports generation; a verified manifest reports validation; each retained record reports owner acceptance."));
+        let mut r = raw();
+        r["jobs"]["failed"] = json!({"error": "HTTP 500"});
+        let snap = json!({"value": r, "at": NOW - 20, "error": null, "incomplete": false});
+        let row = project(&config_fixture(), "https://assets.example.com", &snap, NOW, all_controls());
+        assert!(row["source"]["reason"].as_str().unwrap().contains("failed jobs: HTTP 500"));
+    }
+
     /// Writes the review page used by tests/assets-browser.cjs.
     #[test]
     fn assetq_page_evidence() {
@@ -937,9 +1060,14 @@ pub(crate) mod tests {
         doc_full["assets"] = doc();
         let html = crate::page::render_view(&doc_full, &json!({}), "/assets");
         assert!(html.contains("id=\"view-assets\"") && html.contains("id=\"assets\""));
+        let mut none = doc_full.clone();
+        none.as_object_mut().unwrap().remove("assets");
+        let unconfigured = crate::page::render_view(&none, &json!({}), "/assets");
+        assert!(!unconfigured.contains("id=\"view-assets\"") && !unconfigured.contains("id=\"assets\""), "no navigation entry and no panel");
         if let Ok(path) = std::env::var("DASHQ_ASSETS_EVIDENCE") {
             std::fs::create_dir_all(&path).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.html"), &html).unwrap();
+            std::fs::write(std::path::Path::new(&path).join("unconfigured.html"), &unconfigured).unwrap();
         }
     }
     // ---------------------------------------------------------------- actions, over real HTTP to an in-process stub
@@ -1098,6 +1226,25 @@ pub(crate) mod tests {
             let o = t.e.as_ref().unwrap().store().assetq_op(op).unwrap().unwrap();
             assert!(!o.receipt.contains("SECRET"), "{}", o.receipt);
         }
+    }
+
+    /// Design Journal: every row names who, where and what at which revision, with a digest for the actor and none of
+    /// the text. Defect guarded: a journal that cannot answer which actor acted on which revision.
+    #[test]
+    fn assetq_journal_holds_the_design_columns() {
+        let t = rig("journal", &["jobs", "methods"]);
+        assert_eq!(t.post(&submit("op-j", "registry-1")).1["state"], "accepted");
+        assert_eq!(t.post(&save("op-m", "registry-1")).1["state"], "accepted");
+        let s = t.e.as_ref().unwrap().store();
+        let g = s.lock().unwrap();
+        let columns: Vec<String> = g.prepare("SELECT name FROM pragma_table_info('assetq_ops')").unwrap().query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        assert_eq!(columns, ["op_id", "actor", "workspace", "project", "action", "revision", "digest", "state", "receipt", "baseline", "at"]);
+        let (actor, workspace, project, action, revision, digest, state): (Vec<u8>, String, String, String, String, Vec<u8>, String) = g.query_row("SELECT actor,workspace,project,action,revision,digest,state FROM assetq_ops WHERE op_id='op-j'", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?))).unwrap();
+        assert_eq!(actor, crate::enroll::sha256(ACTOR), "a digest, never the subject");
+        assert_eq!((workspace.as_str(), project.as_str(), action.as_str(), revision.as_str(), state.as_str()), (WS, "invented-project", "job.submit", "registry-1", "accepted"));
+        assert_eq!(digest.len(), 32);
+        let row: String = g.query_row("SELECT op_id||workspace||project||action||revision||receipt FROM assetq_ops WHERE op_id='op-m'", [], |r| r.get(0)).unwrap();
+        assert!(!row.contains("SECRET") && !row.contains(ACTOR), "{row}");
     }
 
     /// A3: reading never grants a mutation. Each missing authority stops the action before AssetQ sees a write.

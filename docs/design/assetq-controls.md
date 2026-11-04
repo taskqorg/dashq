@@ -56,7 +56,7 @@ The revision check narrows a race but cannot close it: AssetQ has no conditional
 
 ## Journal and delivery
 
-The D11 store keeps `assetq_ops`: operation ID, actor digest, workspace, project, action, revision, payload digest, state, receipt and time. Text, specification and constraints are not stored; receipts hold IDs, versions, states and AssetQ error codes.
+The D11 store keeps `assetq_ops`: operation ID, actor digest, workspace, project, action, revision, payload digest, state, receipt, baseline and time. The baseline is the method's newest version before a `method.save`, so a readback finds the version this operation made. Text, specification and constraints are not stored; receipts hold IDs, versions, states and AssetQ error codes.
 
 - A stored terminal receipt repeats without dispatch. The same ID with a different digest is refused.
 - `pending` is recorded before dispatch. A lost reply or restart leaves it `unknown`.
@@ -68,13 +68,13 @@ Receipt states are `accepted`, `stale`, `refused`, `unknown`. Only `accepted` fo
 
 | Case | Presentation |
 |---|---|
-| Not configured | No navigation entry and no panel; `/assets` names the missing configuration |
+| Not configured | No navigation entry and no panel; `/assets` names the missing `assetq` key |
 | Loading or read failure | Last values stay, labelled `unconfirmed` with their time |
-| Empty list | `No active jobs` or `No comparisons` only when the read is `ok`; otherwise unknown with the reason |
-| Capped list | `≥N (capped)` and `incomplete` |
+| Empty list | `No queued, active or waiting jobs`, `No failed jobs` or `No comparisons` only when the read is `ok`; otherwise unknown with the reason |
+| Capped list | Its count reads `≥N (capped)` and the source `incomplete`; a list whose read failed counts `—` with `unknown` |
 | Long-running | Step, effect and last AssetQ update; no percentage or remaining time |
 | Cancelled | `requested`, `provider_confirmed`, `locally_stopped` and `uncertain` stay distinct |
-| Failed | AssetQ's bounded reason; generation success, validation and owner acceptance stay separate |
+| Failed | Failed jobs, in a closed disclosure inside the jobs group: AssetQ's bounded reason and the job record, with no action and no result link. Generation success (job phase), validation (verified manifest) and owner acceptance (retained record) stay separate |
 | Denied | A disabled action names the missing grant, credential or role |
 | Refused or stale | The draft stays; the receipt names the reason |
 
@@ -85,7 +85,7 @@ One `/assets` page in the existing dense operator style, with one group per proj
 - [Desktop, 1280 px](assetq-controls/assets-desktop.png)
 - [Narrow, 360 px with actions open](assetq-controls/assets-narrow.png)
 
-The images are layout evidence, not live qualification.
+The images are layout evidence, not live qualification. They predate the closed `Failed jobs` disclosure, which the States table requires and which adds one summary line inside the approved jobs group.
 
 ## Qualification and rollback
 

@@ -5,6 +5,8 @@
 const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
+// D27: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
+const viewMissing = {'/assets': 'AssetQ is not configured: the config has no assetq key, so nothing is read and no action exists. '};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
@@ -28,6 +30,7 @@ function applyView() {
   const missing = document.getElementById('view-unavailable');
   if (missing) {
     missing.hidden = location.pathname === '/' || viewSections[location.pathname].some(id => document.getElementById(id));
+    missing.firstChild.textContent = viewMissing[location.pathname] ?? 'No observations available for this view. ';
     missing.querySelector('a').href = '/' + location.search;
   }
   applyAttempts();
