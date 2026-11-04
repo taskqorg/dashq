@@ -11,6 +11,8 @@ permissions:
   contents: read
 jobs:
   build:
+    # Required checks name these three values; a matrix with local labels would rename them.
+    name: build (${{ fromJSON(matrix.hosted) }}, ${{ matrix.target }}, ${{ matrix.name }})
     strategy:
       matrix:
         include:
