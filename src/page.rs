@@ -63,7 +63,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 11] = [("/", "Overview"), ("/projects", "Tasks"), ("/fleet", "Fleet"), ("/assets", "Assets"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
+pub const VIEWS: [(&str, &str); 11] = [("/", "Overview"), ("/projects", "Tasks"), ("/fleet", "Fleet"), ("/assets", "Assets"), ("/hosts", "Servers"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -138,6 +138,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
 
     let _ = write!(w, "<h2 id=\"overview-title\">Overview</h2>");
     host_grid(w, doc, now);
+    crate::servers::render(w, &doc["servers"], now);
     w.push_str(&action_html);
     let _ = writeln!(w, "<details id=\"source-status\"><summary>Source status \u{00b7} {} non-ok</summary><ul class=\"summary\">{}</ul></details>", not_ok.len(), not_ok.join(""));
     changes(w, &doc["changes"], now);

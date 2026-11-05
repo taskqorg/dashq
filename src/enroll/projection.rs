@@ -179,6 +179,30 @@ pub fn observations(e: &Result<Enroll, String>, rows: &Value, now: u64, period: 
     doc
 }
 
+/// D30: scope and current generation precede the cache and inventory read; browser requests never wait.
+pub fn server_inventory(e: &Result<Enroll, String>, rows: &Value, background: bool) -> Value {
+    let Ok(e) = e else { return Value::Null };
+    let pairs: Vec<(String,String,i64)> = rows.as_array().into_iter().flatten()
+        .filter(|r| names_observations(r) && r["connection"] != "revoked" && r["activity"]["state"] != "retired")
+        .filter_map(|r| Some((r["installation"].as_str()?.into(),r["workspace"].as_str()?.into(),r["generation"].as_i64()?))).collect();
+    if pairs.is_empty() { return Value::Null }
+    let key = format!("observations:servers:{}",crate::base64(&ring::digest::digest(&ring::digest::SHA256,json!(pairs).to_string().as_bytes()).as_ref()[..12]));
+    let db = e.fleet_db.clone();
+    let read = move || {
+        let now = crate::source::now() as i64;
+        let mut samples = crate::servers::Samples::default();
+        let scope: Vec<_> = pairs.iter().map(|(i,w,_)| (i.clone(),w.clone())).collect();
+        Store::observations(&db,&scope,0,i64::MAX,&["inventory"],|r| {
+            if !pairs.iter().any(|(i,w,g)| *i == r.installation && *w == r.workspace && *g == r.generation) { return }
+            // Historic/corrupt records do not bypass today's typed boundary.
+            let v = serde_json::from_str::<Value>(&r.payload).unwrap_or(Value::Null);
+            if super::ingestion::inventory(&v["observation"]["inventory"]) { samples.push(r,now); }
+        }).map_err(|_| ("store unavailable".to_string(),None))?;
+        Ok((samples.finish(),false))
+    };
+    if background { e.fleet_cache.revalidate(&key,30,read) } else { e.fleet_cache.get(&key,30,read) }
+}
+
 /// `dashq export` (D28): every stored record of the window, on the host, as JSON lines or CSV with a header.
 pub fn export_observations(e: &Result<Enroll, String>, w: &mut impl std::io::Write, format: &str, from: i64, to: i64, product: Option<&str>) -> Result<(), String> {
     let e = e.as_ref().map_err(String::clone)?;

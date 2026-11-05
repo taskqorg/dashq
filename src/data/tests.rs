@@ -376,3 +376,16 @@ fn time_boundaries() {
     let cases: Vec<(u64, String)> = serde_json::from_str(include_str!("../../fixture/time.json")).unwrap();
     for (seconds, expected) in cases { assert_eq!(dur(seconds), expected, "{seconds} seconds"); }
 }
+
+    // D30/A2: a resource-only machine is still observed even without a heartbeat or ServerQ installation.
+    #[test]
+    fn server_table_keeps_resource_only_hosts() {
+        let mut inp: Value = serde_json::from_str(crate::FIXTURE).unwrap();
+        let mut sample = inp["langfuse"]["value"]["agentq.resource"][0].clone();
+        sample["metadata"]["attributes.agentq.installation"] = json!("invented-resource-only");
+        sample["metadata"]["attributes.host.name"] = json!("invented-resource-only");
+        inp["langfuse"]["value"]["agentq.resource"] = json!([sample]);
+        let doc = build(&inp);
+        assert!(doc["resources"]["rows"].as_array().unwrap().iter().any(|r| r["host"] == "invented-resource-only/native"));
+        assert!(doc["servers"]["rows"].as_array().unwrap().iter().any(|r| r["host"] == "invented-resource-only/native"),"observed resource-only server omitted");
+    }

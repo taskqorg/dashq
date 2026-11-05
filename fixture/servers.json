@@ -1,0 +1,80 @@
+{
+  "note": "Invented D30 fixtures, no real host inventory.",
+  "now": 1794000000,
+  "installations": [
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "product": "serverq", "runtime": "native", "host_label": "sq-fresh", "connection": "active", "activity": {"state": "reporting"}, "scopes": ["coreq-observation/1"]},
+    {"installation": "sq-stale", "workspace": "example", "generation": 1, "product": "serverq", "runtime": "native", "host_label": "sq-stale", "connection": "active", "activity": {"state": "reporting"}, "scopes": ["coreq-observation/1"]},
+    {"installation": "sq-partial", "workspace": "example", "generation": 1, "product": "serverq", "runtime": "native", "host_label": "sq-partial", "connection": "active", "activity": {"state": "reporting"}, "scopes": ["coreq-observation/1"]}
+  ],
+  "series": [
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [
+      {"at": 1793913600, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1000, "ram_total_bytes": 17179869184, "ram_used_bytes": 1073741824}},
+      {"at": 1793917200, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1010, "ram_total_bytes": 17179869184, "ram_used_bytes": 1084227584}},
+      {"at": 1793920800, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1020, "ram_total_bytes": 17179869184, "ram_used_bytes": 1094713344}},
+      {"at": 1793924400, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1030, "ram_total_bytes": 17179869184, "ram_used_bytes": 1105199104}},
+      {"at": 1793928000, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1040, "ram_total_bytes": 17179869184, "ram_used_bytes": 1115684864}},
+      {"at": 1793931600, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1050, "ram_total_bytes": 17179869184, "ram_used_bytes": 1126170624}},
+      {"at": 1793935200, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1060, "ram_total_bytes": 17179869184, "ram_used_bytes": 1136656384}},
+      {"at": 1793938800, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1070, "ram_total_bytes": 17179869184, "ram_used_bytes": 1147142144}},
+      {"at": 1793942400, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1080, "ram_total_bytes": 17179869184, "ram_used_bytes": 1157627904}},
+      {"at": 1793946000, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1090, "ram_total_bytes": 17179869184, "ram_used_bytes": 1168113664}},
+      {"at": 1793949600, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1100, "ram_total_bytes": 17179869184, "ram_used_bytes": 1178599424}},
+      {"at": 1793953200, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1110, "ram_total_bytes": 17179869184, "ram_used_bytes": 1189085184}},
+      {"at": 1793956800, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1120, "ram_total_bytes": 17179869184, "ram_used_bytes": 1199570944}},
+      {"at": 1793960400, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1130, "ram_total_bytes": 17179869184, "ram_used_bytes": 1210056704}},
+      {"at": 1793964000, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1140, "ram_total_bytes": 17179869184, "ram_used_bytes": 1220542464}},
+      {"at": 1793967600, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1150, "ram_total_bytes": 17179869184, "ram_used_bytes": 1231028224}},
+      {"at": 1793971200, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1160, "ram_total_bytes": 17179869184, "ram_used_bytes": 1241513984}},
+      {"at": 1793974800, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1170, "ram_total_bytes": 17179869184, "ram_used_bytes": 1251999744}},
+      {"at": 1793978400, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1180, "ram_total_bytes": 17179869184, "ram_used_bytes": 1262485504}},
+      {"at": 1793982000, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1190, "ram_total_bytes": 17179869184, "ram_used_bytes": 1272971264}},
+      {"at": 1793985600, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1200, "ram_total_bytes": 17179869184, "ram_used_bytes": 1283457024}},
+      {"at": 1793989200, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1210, "ram_total_bytes": 17179869184, "ram_used_bytes": 1293942784}},
+      {"at": 1793992800, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1220, "ram_total_bytes": 17179869184, "ram_used_bytes": 1304428544}},
+      {"at": 1793996400, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1230, "ram_total_bytes": 17179869184, "ram_used_bytes": 1314914304}},
+      {"at": 1794000000, "inventory": {"entity": "host", "identity": "invented-fresh", "status": "ok", "cpu_count": 4, "cpu_used_milli": 1240, "ram_total_bytes": 17179869184, "ram_used_bytes": 1325400064}}
+    ]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [
+      {"at": 1793913600, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 107374182400, "disk_free_bytes": 214748364800}},
+      {"at": 1793917200, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 108447924224, "disk_free_bytes": 213674622976}},
+      {"at": 1793920800, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 109521666048, "disk_free_bytes": 212600881152}},
+      {"at": 1793924400, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 110595407872, "disk_free_bytes": 211527139328}},
+      {"at": 1793928000, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 111669149696, "disk_free_bytes": 210453397504}},
+      {"at": 1793931600, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 112742891520, "disk_free_bytes": 209379655680}},
+      {"at": 1793935200, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 113816633344, "disk_free_bytes": 208305913856}},
+      {"at": 1793938800, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 114890375168, "disk_free_bytes": 207232172032}},
+      {"at": 1793942400, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 115964116992, "disk_free_bytes": 206158430208}},
+      {"at": 1793946000, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 117037858816, "disk_free_bytes": 205084688384}},
+      {"at": 1793949600, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 118111600640, "disk_free_bytes": 204010946560}},
+      {"at": 1793953200, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 119185342464, "disk_free_bytes": 202937204736}},
+      {"at": 1793956800, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 120259084288, "disk_free_bytes": 201863462912}},
+      {"at": 1793960400, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 121332826112, "disk_free_bytes": 200789721088}},
+      {"at": 1793964000, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 122406567936, "disk_free_bytes": 199715979264}},
+      {"at": 1793967600, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 123480309760, "disk_free_bytes": 198642237440}},
+      {"at": 1793971200, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 124554051584, "disk_free_bytes": 197568495616}},
+      {"at": 1793974800, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 125627793408, "disk_free_bytes": 196494753792}},
+      {"at": 1793978400, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 126701535232, "disk_free_bytes": 195421011968}},
+      {"at": 1793982000, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 127775277056, "disk_free_bytes": 194347270144}},
+      {"at": 1793985600, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 128849018880, "disk_free_bytes": 193273528320}},
+      {"at": 1793989200, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 129922760704, "disk_free_bytes": 192199786496}},
+      {"at": 1793992800, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 130996502528, "disk_free_bytes": 191126044672}},
+      {"at": 1793996400, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 132070244352, "disk_free_bytes": 190052302848}},
+      {"at": 1794000000, "inventory": {"entity": "mount", "identity": "/", "status": "ok", "disk_total_bytes": 322122547200, "disk_used_bytes": 133143986176, "disk_free_bytes": 188978561024}}
+    ]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [
+      {"at": 1794000000, "inventory": {"entity": "folder", "identity": "/srv/invented-<cache>", "status": "ok", "disk_used_bytes": 21474836480}}
+    ]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [
+      {"at": 1794000000, "inventory": {"entity": "project_root", "identity": "/srv/invented-app", "status": "ok", "disk_used_bytes": 12884901888}}
+    ]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [
+      {"at": 1794000000, "inventory": {"entity": "service", "identity": "invented-web.service", "status": "ok", "disk_used_bytes": 2147483648}}
+    ]},
+    {"installation": "sq-stale", "workspace": "example", "generation": 1, "host": "invented-stale", "history": [
+      {"at": 1793991000, "inventory": {"entity": "host", "identity": "invented-stale", "status": "ok", "cpu_count": 8, "cpu_used_milli": 2000, "ram_total_bytes": 34359738368, "ram_used_bytes": 10737418240}}
+    ]},
+    {"installation": "sq-partial", "workspace": "example", "generation": 1, "host": "invented-partial", "history": [
+      {"at": 1794000000, "inventory": {"entity": "host", "identity": "invented-partial", "status": "partial", "cpu_count": 4, "ram_total_bytes": 8589934592, "ram_used_bytes": null, "unknown": {"ram_used_bytes": "collection-failed"}}}
+    ]}
+  ]
+}

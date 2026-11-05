@@ -84,4 +84,8 @@ const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','s
     }
     console.log(`PASS host-first runtime: ${report.matrix.length} matrix cells; navigation, direct answer, honest gaps, no writes`);
   } finally { await browser.close(); }
-})().catch(e=>{console.error(e);process.exitCode=1;});
+})().then(()=>{
+  // D30 shares this existing CI/browser entrypoint; no workflow permission or separate setup is needed.
+  const result=require('node:child_process').spawnSync(process.execPath,[...process.execArgv,path.join(__dirname,'servers-browser.cjs')],{stdio:'inherit'});
+  assert.equal(result.status,0,'D30 server comparison browser chain');
+}).catch(e=>{console.error(e);process.exitCode=1;});

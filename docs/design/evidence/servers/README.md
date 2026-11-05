@@ -1,0 +1,19 @@
+# Server table evidence (#267)
+
+D30 adds the read-only `/hosts` comparison and scoped D28 inventory projection. The owner approved typed inventory in `/data` and `report` in [answer 6669376090](https://github.com/taskqorg/dashq/issues/267#issuecomment-6669376090), and table-first delivery with live PilotQ selection in #375 in [answer 6669582313](https://github.com/taskqorg/dashq/issues/267#issuecomment-6669582313).
+
+| Requirement | Executable evidence | Boundary |
+|---|---|---|
+| A1 | D8/D28/D30; renderer has no write controls or AI | No deployment or host command added |
+| A2/A3 | `server_table_fresh_stale_partial_and_forecasts`, `tests/servers-browser.cjs` | Invented fresh, stale, partial and missing inventory; full-width native detail |
+| A4 | `forecast_requires_comparable_history` | Hourly history; short history, gaps, missing data, capacity changes, conflicts, cleanup, future times and inconsistent disk space |
+| A5 | Browser URL/selector assertions; config URL refusal cases | Link contract only; live selected-server chat belongs to PilotQ #375 |
+| A6 | Fixture test and browser matrix; `live_server_table_readback` | Authorized pds18 `/data` captured read-only, then rendered by the candidate; its inventory is unknown, not invented |
+| R1/R4/R7/D11 | `inventory_is_projected_only_in_scoped_server_rows`, `server_inventory_scope_identity_and_replay`, unchanged ingestion refusals | Subject/workspace, generation, revocation, retirement, replay, legacy isolation, typed allowlist and HTML escaping |
+| D5/D6/D10 | Browser matrix | Refresh/outage/recovery/expiry, stable focus/disclosure/table scroll, no writes, no-JS native detail |
+
+Before implementation, `cargo test --locked inventory_is_projected_only_in_scoped_server_rows -- --nocapture` failed with `D30 server rows missing`. It passes after the change. The D28 guard now permits only the approved scoped server projection and still refuses raw inventory in generic telemetry; ingestion privacy assertions are unchanged. `server_table_keeps_resource_only_hosts` also failed before the fix with `observed resource-only server omitted`; it passes after including resource/Fleet-only hosts without inferring inventory. The existing document/render pins are regenerated for the intentional additive D30 projection, not weakened.
+
+The existing `tests/host-first-browser.cjs` CI entrypoint runs the server browser check after its original assertions. Cargo emits its fixture under `DASHQ_HOST_FIRST_EVIDENCE/servers` when no separate server evidence directory is set; the workflow and its permissions are unchanged. The browser check uses Playwright 1.56.1, both themes, 1280/360 px and 16/24 px text. It found page overflow outside the table; the same check passes with a bounded host-page width and scrolling inside the table. The D7 contrast assertion first measured 4.33:1 for unknown text; the server table now reuses the existing `--muted` palette and the same assertion requires at least 4.5:1 in both themes. Pictures prove layout only. The live input check does not prove a deployed table or fresh ServerQ inventory. No live observation, service configuration, producer or PilotQ installation was changed.
+
+Reproduce fixture evidence with `DASHQ_SERVERS_EVIDENCE=<temporary directory> cargo test --locked servers::tests`, then run `tests/servers-browser.cjs` with that variable and the project's Playwright runner. The opt-in live check takes a fresh authorized `/data` capture through `DASHQ_SERVERS_LIVE_DATA` and runs `cargo test --locked live_server_table_readback -- --ignored --nocapture`. Keep live documents and screenshots private; commit only invented fixtures.

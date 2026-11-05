@@ -405,6 +405,15 @@ pub fn build(full: &Value) -> Value {
         doc["observations"] = inp["observations"].clone();
     }
     doc["fleet"] = crate::fleet::build(inp, &doc["hosts"]);
+    // D30: resource-only and telemetry-only machines are observed even without a heartbeat.
+    let mut server_hosts = doc["hosts"].as_array().cloned().unwrap_or_default();
+    for r in doc["resources"]["rows"].as_array().into_iter().flatten().chain(doc["fleet"]["hosts"].as_array().into_iter().flatten()) {
+        if let Some(host) = r["host"].as_str().filter(|h| !server_hosts.iter().any(|v| v["id"].as_str().is_some_and(|id| id.eq_ignore_ascii_case(h)))) {
+            server_hosts.push(json!({"id":host}));
+        }
+    }
+    doc["servers"] = crate::servers::build(&inp["server_inventory"], &inp["installations"]["rows"], &json!(server_hosts), fhost, inp["pilotq_url"].as_str(), now);
+    if doc["servers"]["rows"].as_array().is_some_and(|r| !r.is_empty()) { doc["sources"]["servers"] = doc["servers"]["source"].clone(); }
     if doc["fleet"]["hosts"].as_array().is_some_and(|a| !a.is_empty()) { doc["sources"]["fleet"] = doc["fleet"]["source"].clone(); }
     // D23: changes while away, person requests and the query shape, from the parts above
     let mut sources: Vec<(&str, Option<String>)> = Vec::new();

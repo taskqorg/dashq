@@ -46,6 +46,13 @@
       "reason": null,
       "incomplete": false
     },
+    "servers": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "no server inventory received",
+      "incomplete": false
+    },
     "fleet": {
       "state": "unknown",
       "at": null,
@@ -3391,6 +3398,65 @@
       ]
     }
   ],
+  "servers": {
+    "source": {
+      "state": "unknown",
+      "at": null,
+      "age_s": null,
+      "reason": "no server inventory received",
+      "incomplete": false
+    },
+    "rows": [
+      {
+        "id": "[null,\"fra/native\"]",
+        "host": "fra/native",
+        "workspace": null,
+        "installations": [],
+        "entities": [],
+        "source": {
+          "state": "unknown",
+          "at": null,
+          "age_s": null,
+          "reason": "no host inventory received",
+          "incomplete": false
+        },
+        "pilotq_selector": "[null,\"fra/native\"]",
+        "pilotq_url": null
+      },
+      {
+        "id": "[null,\"macbook-m2.local\"]",
+        "host": "macbook-m2.local",
+        "workspace": null,
+        "installations": [],
+        "entities": [],
+        "source": {
+          "state": "unknown",
+          "at": null,
+          "age_s": null,
+          "reason": "no host inventory received",
+          "incomplete": false
+        },
+        "pilotq_selector": "[null,\"macbook-m2.local\"]",
+        "pilotq_url": null
+      },
+      {
+        "id": "[null,\"win-1/native\"]",
+        "host": "win-1/native",
+        "workspace": null,
+        "installations": [],
+        "entities": [],
+        "source": {
+          "state": "unknown",
+          "at": null,
+          "age_s": null,
+          "reason": "no host inventory received",
+          "incomplete": false
+        },
+        "pilotq_selector": "[null,\"win-1/native\"]",
+        "pilotq_url": null
+      }
+    ]
+  },
   "fleet": {
     "hosts": [
       {

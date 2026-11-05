@@ -20,7 +20,7 @@ function exactTime(t) {
 }
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
-const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
+const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['server-table', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry', 'global-store'], '/reports': ['reports']};
 // D29: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
@@ -153,6 +153,7 @@ async function refresh() {
     const drafts = new Map([...document.querySelectorAll('main input[id]:not([type=hidden]):not([type=file]):not([type=password]), main textarea[id], main select[id]')]
       .map(e => [e.id, { value: e.value, checked: e.checked }]));
     const y = window.scrollY;
+    const serverScroll = document.querySelector('#server-table table')?.scrollLeft;
     // overview.md: the final number at once, a brief local tint where it changed; row and Attention swap together
     // board counters tint in renderBoards()
     const before = new Map([...document.querySelectorAll('main [data-n]')].map(e => [e.id, e.dataset.n]));
@@ -193,6 +194,7 @@ async function refresh() {
     currentBanner.hidden = data.ok;
     currentBanner.textContent = data.ok ? '' : 'All source reads failed. Current state unknown; retained evidence is not confirmed.';
     window.scrollTo(0, y);
+    if (serverScroll !== undefined && document.querySelector('#server-table table')) document.querySelector('#server-table table').scrollLeft = serverScroll;
     if (pendingAnchor) { revealConnection(); document.getElementById(pendingAnchor.slice(1))?.scrollIntoView(); pendingAnchor = null; }
   } catch (e) {
     const readingY = scrollY;
@@ -244,6 +246,18 @@ async function refresh() {
 }
 // D6 / #178: expiry also applies while refresh is unavailable or deferred by a text selection.
 function expireHostObservations(failed = false) {
+  document.querySelectorAll('[data-server-valid-for]').forEach(e => {
+    e.observedSince ??= performance.now();
+    const expired = (performance.now() - e.observedSince) / 1000 > Number(e.dataset.serverValidFor);
+    if ((e.dataset.serverState === 'ok' || e.dataset.serverState === 'unconfirmed') && (failed || expired)) {
+      e.dataset.serverState = expired ? 'stale' : 'unconfirmed';
+      if (e.classList.contains('server-trend')) e.textContent = 'unknown: fresh inventory required';
+      else {
+        e.dataset.retained ||= e.textContent;
+        e.textContent = (expired ? 'Stale inventory. Retained: ' : 'Unconfirmed inventory. Retained: ') + e.dataset.retained;
+      }
+    }
+  });
   document.querySelectorAll('.overview-summary').forEach(e => {
     e.observedSince ??= performance.now();
     const status = e.querySelector('.overview-state');
