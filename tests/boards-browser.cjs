@@ -133,6 +133,8 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.goto(url);
     const q = '[id="board-taskqorg%2Ftaskq-q-12"]';
     await page.waitForSelector(q + ' button[data-choice="1"]:not([disabled])');
+    // The answer probe can finish before the initial refresh; wait so the explicit refresh is not skipped as busy.
+    await page.waitForFunction(() => !busy);
     // D6/D13: route access must not enable a retained or incomplete board observation after refresh.
     for (const source of [{state: 'stale', incomplete: false}, {state: 'ok', incomplete: true}]) {
       snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, source: {...b.source, ...source}});
