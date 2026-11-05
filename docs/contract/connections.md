@@ -48,6 +48,7 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - Allowed: short identifier keys, numbers, booleans and short single-line strings; objects five deep, a scalar array in the fifth.
 - Refused: content, command, output, path or secret fields, and path-like values.
 - Recorded exception (#125): a `taskq-board/1` ask-card option's `text` at `tasks[].choices[].text`, still a short single-line string, because TaskQ's observation allowlist scopes choices as board content. `text` anywhere else or in another schema stays refused.
+- Recorded exception (D28): `observation.inventory` of a `coreq-observation/1` record of kind `inventory` follows [Inventory records](#inventory-records) instead. The same key anywhere else stays under this allowlist.
 
 ## Langfuse forwarding
 
@@ -127,6 +128,7 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 ## Global observation store
 
 D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/a6096f7ac1710d9e4735b3763ca3a42a853912e1/docs/design/telemetry.md#shipper). Conformance: [fixture/coreq-observation/shipper-wire.json](../../fixture/coreq-observation/shipper-wire.json) is the request `Store::ship` sent at that commit, unmodified.
+[fixture/coreq-observation/inventory-wire.json](../../fixture/coreq-observation/inventory-wire.json) is the same, for the CoreQ 0.22.0 [Inventory](https://github.com/taskqorg/coreq/blob/691878042689e62bdc84ac33504b65d812c23764/docs/design/telemetry.md#inventory) records at that pin.
 
 ### Acceptance
 
@@ -136,6 +138,27 @@ D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/
 - Replay is by (installation, workspace, event ID) in the observation table, not by the 8-day receipt window. The same content answers `accepted` and stores nothing new, also after the receipt is gone or under a new generation. Other content is `replay_mismatch`.
 - An observation never reads `expired`, whatever its age. A record `scope` still holds the shipper's cursor.
 - It still writes a C4 receipt, so `/machine/connection/receipt` and D11 silence stay accurate. It never becomes `projected`: it is not a snapshot.
+
+### Inventory records
+
+The typed exception to the [metadata allowlist](#metadata-allowlist). It applies only to `observation.inventory` when `observation.kind` is `inventory`. The object on another kind, or that kind without the object, is `payload`. Every other field of the record passes the allowlist as before.
+
+| `entity` | `identity` | Measures |
+|---|---|---|
+| `host` | name | `status`, `os`, `os_version`, `uptime_s`, `load_1_milli`, `load_5_milli`, `load_15_milli`, `cpu_count`, `cpu_used_milli`, `ram_total_bytes`, `ram_used_bytes`, `swap_total_bytes`, `swap_used_bytes` |
+| `mount` | path | `status`, `disk_total_bytes`, `disk_used_bytes`, `disk_free_bytes` |
+| `service`, `container` | name | `status`, `cpu_used_milli`, `ram_used_bytes`, `disk_used_bytes` |
+| `project_root` | path | `status`, `cpu_used_milli`, `ram_used_bytes`, `disk_used_bytes` |
+| `folder` | path | `status`, `disk_used_bytes` |
+
+- Keys: `entity`, `identity`, the entity's measures and `unknown`. Any other key is `payload`.
+- A name is 1-256 UTF-8 bytes, single line, without `=` or `://`, and any Unicode letter or space is allowed. A path-like name, which the allowlist refuses, stays refused: only the three path entities hold paths.
+- A path is 1-4096 UTF-8 bytes, single line, absolute and normalized: POSIX, drive, UNC or extended Windows (drive, UNC or volume GUID root). Empty, `.` and `..` segments are refused; one trailing separator is allowed. A UNC server holds no `@` or `:`.
+- `status`, `os` and `os_version` are codes of at most 128 bytes from ASCII letters, digits and `._:-`. Every other measure is an unsigned integer.
+- A null measure needs its reason in `unknown`, and a collected measure has none. A reason is a code keyed by one of the entity's measures. An omitted measure stays unknown, never zero.
+- This checks shape only, as CoreQ does: a secret inside a valid code or path is a collector defect, and the collector owns what it reads.
+- Receipts, replay, retention, scope and volume are the ones above; the wire schema stays `coreq-observation/1`, version 1.
+- Readers: `dashq export` keeps the object whole. `/data`, the Telemetry view and `dashq report` never project it.
 
 ### Retention and volume
 
@@ -148,7 +171,7 @@ D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/
 
 - `dashq export` runs on the host like `dashq report`, with the 0600 config and key; it sees every installation. Defaults: 86400 s window ending now, `jsonl`.
 - `jsonl`: the first line is `{export: "dashq-observations/1", schema: "coreq-observation/1", version: 1, from, to, rows, format}`; each further line is `{installation, workspace, generation, product, received, seq, id, received_ms, observation}`.
-- `csv`: the first line is `# export=dashq-observations/1 schema=coreq-observation/1 version=1 from=<s> to=<s> rows=<n>`, the second the column names. A null stays an empty cell; the `unknown` column keeps the reasons as JSON.
+- `csv`: the first line is `# export=dashq-observations/1 schema=coreq-observation/1 version=1 from=<s> to=<s> rows=<n>`, the second the column names. A null stays an empty cell; the `inventory` and `unknown` columns keep the typed object and the reasons as JSON.
 - `--product` filters by the grant's product. A window holds records whose producer time is in `from..=to`.
 
 ### Parity report
