@@ -1047,20 +1047,20 @@ pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Va
         let key=format!("fleet:{}",json!([r["installation"],r["workspace"]]));
         let snap=e.fleet_cache.get(&key,30,|| {
             let blocks=e.store.telemetry_since(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""), since, |_| true).map_err(|_|("store unavailable".to_string(),None))?;
-            let mut invalid = false;
-            let lines = blocks.into_iter().flat_map(|(_, p)| {
+            let mut known_loss = vec![];
+            let lines = blocks.into_iter().flat_map(|(id, p)| {
                 let block = p.and_then(|p| serde_json::from_str::<Value>(&p).ok()).and_then(|p| telemetry_lines(&p));
-                invalid |= block.is_none();
+                if block.is_none() { known_loss.push(json!({"block_id": id, "reason": format!("stored block {id} invalid")})); }
                 block.map(|(_, l)| l).unwrap_or_default()
             }).filter(|l| matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")));
             // A3: blocks arrive oldest first; the cap keeps the newest rows so current limits stay readable.
             let mut kept = crate::fleet::keep_newest(lines, 10_000);
-            if invalid { return Err(("stored block invalid".to_string(),None)); }
+            kept["known_loss"] = json!(known_loss);
             let capped = kept["capped"] == true;
             kept["telemetry"] = r["telemetry"].clone();
             Ok((kept,capped))
         });
-        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]})
+        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "known_loss": snap["value"]["known_loss"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]})
     }).collect::<Vec<_>>())
 }
 
@@ -1728,6 +1728,55 @@ mod tests {
             std::fs::create_dir_all(&path).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.html"),&html).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.json"),doc.to_string()).unwrap();
+        }
+    }
+
+    /// #262 A1-A3 / R2,D6,D26: a bad stored block must not hide valid rows or claim healthy coverage, even after restart.
+    #[test]
+    fn fleet_invalid_stored_block_keeps_records_after_restart() {
+        let f = crate::fleet::tests::fixture();
+        let now = f["now"].as_u64().unwrap();
+        let (d, mut e) = setup("fleet-invalid");
+        let host = dir("fleet-invalid-host");
+        let mut w = Wire { e: &e, now: now as i64, code: None, calls: vec![], tick: false };
+        let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: "pds18.ufobe.com", schemas: &[TELEMETRY], scope: None, capabilities: &[] };
+        coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        for (i, index) in [0, 2, 3].into_iter().enumerate() {
+            let mut line = f["fleet_records"][0]["records"][index].clone();
+            line["seq"] = json!(i + 1);
+            line["received_ms"] = json!(now * 1000);
+            let rec = coreq::enroll::stamp(&host, TELEMETRY, &format!("fleet-{i}"), now, block(i as u64 + 1, &[line], None)).unwrap();
+            assert_eq!(coreq::enroll::deliver(&host, &[rec], &mut Default::default(), &mut w).unwrap()[0]["state"], "accepted");
+        }
+        drop(w);
+        let db = rusqlite::Connection::open(d.join("dashq.db")).unwrap();
+        let id: i64 = db.query_row("SELECT id FROM telemetry WHERE event_id = 'fleet-1'", [], |r| r.get(0)).unwrap();
+        db.execute("UPDATE telemetry SET payload = '{' WHERE id = ?1", [id]).unwrap();
+        drop(db);
+        for restarted in [false, true] {
+            if restarted {
+                drop(e);
+                e = Enroll::open(&d, HOST);
+            }
+            let p = projection(&e, Some(Scope::Subject("github|1")), None, now).unwrap();
+            let streams = fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64);
+            assert_eq!(streams[0]["records"].as_array().map(Vec::len), Some(2), "valid blocks on both sides survive; restarted={restarted}: {streams}");
+            assert_eq!(streams[0]["known_loss"], json!([{"block_id": id, "reason": format!("stored block {id} invalid")}]));
+            assert!(streams[0]["error"].is_null(), "a decode loss is not a failed store read");
+            let mut inp = f.clone();
+            inp["fleet_records"] = streams;
+            let doc = crate::data::build(&inp);
+            for win in doc["fleet"]["hosts"][0]["streams"].as_array().unwrap() {
+                assert_eq!(win["source"]["state"], "unknown");
+                assert_eq!(win["source"]["reason"], format!("stored block {id} invalid"));
+                assert_eq!(win["known_loss"][0]["block_id"], id);
+                assert_eq!(win["projects"][0]["tokens"]["input_tokens"]["observed"], 100);
+                assert_eq!(win["completed_observed"], 1);
+                assert!(win["workers_started_observed"].is_null(), "the invalid block never becomes a zero count");
+            }
+            let html = crate::page::render_view(&doc, &json!({}), "/fleet");
+            assert!(html.contains(&format!("stored block {id} invalid")) && html.contains("invented-account"));
+            assert_eq!(fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64), inp["fleet_records"], "cached reads retain known loss");
         }
     }
 
