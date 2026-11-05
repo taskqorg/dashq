@@ -35,6 +35,9 @@ const out = process.env.DASHQ_TELEMETRY_SHOTS || fs.mkdtempSync(path.join(requir
       await page.addStyleTag({content:`html{font-size:${size}px}`});
       assert(await page.locator('#telemetry').isVisible(), 'direct entry');
       assert(!await page.locator('#host-grid').isVisible());
+      // D28: the global store's read has the Telemetry view, with its one errors list and a labelled estimate
+      const store = await page.locator('#global-store').innerText();
+      for (const part of ['Failures and unstable operations','board.issue.read','Attempts without a terminal record','no terminal record','API-equivalent estimate','never added']) assert(store.includes(part), part);
       await page.locator('#view-home').click();
       await page.locator('#more > summary').click();
       await page.locator('#view-telemetry').click();

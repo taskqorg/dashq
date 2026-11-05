@@ -124,6 +124,45 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - Each listed block links to scoped `/data?block=ID` evidence and its Connections row. No retained range proves all-event coverage.
 - D21 and D26 analyze their declared stage and Fleet metadata only; other block analysis remains a later task. Production deploy to pds18.ufobe.com needs owner approval.
 
+## Global observation store
+
+D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/a6096f7ac1710d9e4735b3763ca3a42a853912e1/docs/design/telemetry.md#shipper). Conformance: [fixture/coreq-observation/shipper-wire.json](../../fixture/coreq-observation/shipper-wire.json) is the request `Store::ship` sent at that commit, unmodified.
+
+### Acceptance
+
+- A device may request `coreq-observation/1` next to its product's own schemas. `pilotq` and `assetq` installations may enroll for that schema alone.
+- Payload `{seq, id, received_ms, observation}`, with `id` equal to `event_id`, `observation.schema` 1 and non-empty `kind`, `operation`, `outcome` and `error`. Every key and value passes the metadata allowlist with the `method:route` key exception (#181). Anything else is `payload`.
+- A key naming a price or cost, at any depth, is `payload`: records hold quantities, never prices.
+- Replay is by (installation, workspace, event ID) in the observation table, not by the 8-day receipt window. The same content answers `accepted` and stores nothing new, also after the receipt is gone or under a new generation. Other content is `replay_mismatch`.
+- An observation never reads `expired`, whatever its age. A record `scope` still holds the shipper's cursor.
+- It still writes a C4 receipt, so `/machine/connection/receipt` and D11 silence stay accurate. It never becomes `projected`: it is not a snapshot.
+
+### Retention and volume
+
+- No prune deletes observations, and revoking or retiring an installation keeps them.
+- The C5 ceiling excludes them: other kinds, D16 operations and D13 PM requests compare store size minus the measured observation volume, and SQLite's page limit rises with that volume. Filling the disk answers 503 and acknowledges nothing, so the shipper's cursor holds.
+- Volume per installation and workspace is one counter row: `rows`, `bytes` (payload plus 1024 bytes per row, an upper estimate of the row and index cost), `first_observed`, `last_observed`, `last_received`.
+- A row whose grant names the schema, or that stored observations, adds `observations` `{state, rows, bytes, first_observed, last_observed, last_received}`; `state` is `off` (`observations not in grant`), `unknown` (`no observation yet`) or `ok`. Other rows have no such key.
+
+### Export
+
+- `dashq export` runs on the host like `dashq report`, with the 0600 config and key; it sees every installation. Defaults: 86400 s window ending now, `jsonl`.
+- `jsonl`: the first line is `{export: "dashq-observations/1", schema: "coreq-observation/1", version: 1, from, to, rows, format}`; each further line is `{installation, workspace, generation, product, received, seq, id, received_ms, observation}`.
+- `csv`: the first line is `# export=dashq-observations/1 schema=coreq-observation/1 version=1 from=<s> to=<s> rows=<n>`, the second the column names. A null stays an empty cell; the `unknown` column keeps the reasons as JSON.
+- `--product` filters by the grant's product. A window holds records whose producer time is in `from..=to`.
+
+### Parity report
+
+`dashq parity` prints `{report: "dashq-parity/1", window, products, parity, langfuse}` and writes nothing. The default window is 86400 s ending 600 s ago, so both paths have settled.
+
+- `taskq`: old `taskq-telemetry/1` block lines against new observations of TaskQ grants, compared by observation ID.
+- `agentq`: old Langfuse `agentq.model` spans against new `agent.call` records of every grant, compared by count because the IDs differ. A capped or failed read, or no Langfuse config, is `unknown`.
+- `serverq`: per-rule results of old `serverq-report/1` history against new `check` records of ServerQ grants, compared by count.
+- `pilotq` and `assetq`: DashQ reads no old path, so they read `unknown` with new counts. `coreq` and `dashq` have no separate old path and read `not_applicable`. None of these four decides parity.
+- A compared row holds `old`, `new`, `matched`, `only_old`, `only_new`. It reads `parity` only with `old` > 0 and `only_old` 0, `gap` with `only_old` > 0, else `unknown` with a reason. `only_new` is reported and does not fail parity: the old path may have dropped those rows.
+- Old TaskQ blocks evicted inside the window make that row `unknown`.
+- Top-level `parity` is true only when `taskq`, `agentq` and `serverq` all read `parity`. `langfuse.stays` is its negation. Deleting Langfuse is a later task that cites this report.
+
 ## TaskQ resources
 
 - `taskq-resources/1` is a separate TaskQ schema; only a grant naming it may send it, else `scope`.

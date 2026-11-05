@@ -399,6 +399,11 @@ pub fn build(full: &Value) -> Value {
         "model_use": model_use,
         "runtimes": crate::runtimes::descriptors(),
     });
+    // D28: only once a row in scope names the schema or stored observations
+    if !inp["observations"].is_null() {
+        doc["sources"]["observations"] = inp["observations"]["source"].clone();
+        doc["observations"] = inp["observations"].clone();
+    }
     doc["fleet"] = crate::fleet::build(inp, &doc["hosts"]);
     if doc["fleet"]["hosts"].as_array().is_some_and(|a| !a.is_empty()) { doc["sources"]["fleet"] = doc["fleet"]["source"].clone(); }
     // D23: changes while away, person requests and the query shape, from the parts above

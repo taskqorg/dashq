@@ -22,7 +22,7 @@ function exactTime(t) {
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/fleet': ['fleet'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
-  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
+  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry', 'global-store'], '/reports': ['reports']};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;

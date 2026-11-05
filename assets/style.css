@@ -226,7 +226,7 @@ body[data-view="/hosts"] #host-grid,body[data-view="/hosts"] #servers,body[data-
 body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #modeluse,body[data-view="/agents"] #aqresults,
 body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
 body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
-body[data-view="/telemetry"] #telemetry { display:block; }
+body[data-view="/telemetry"] #telemetry,body[data-view="/telemetry"] #global-store { display:block; }
 body[data-view="/reports"] #reports { display:block; }
 body[data-view="/reports"]{max-width:1024px;box-sizing:border-box;padding:20px;background:light-dark(#fafbfc,#252b32);color:light-dark(#243039,#eef2f5)}
 .report-scope{font-size:.85em;color:light-dark(#59636e,#b9c3cd)}

@@ -188,6 +188,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     if let Some(rows) = doc["boards"].as_array().filter(|a| !a.is_empty()) { boards(w, rows); }
     installations(w, &doc["installations"], &doc["resources"], now);
     telemetry(w, &doc["installations"], now, &query);
+    observations(w, &doc["observations"], now);
     integrations(w, &doc["installations"], doc["controls"]["agentq_configure"] == true);
     if configured("langfuse") || has_rows(&doc["resources"]["rows"]) {
         resources(w, &doc["resources"], now);
@@ -394,6 +395,43 @@ fn versions(w: &mut String, versions: &Value, now: u64) {
         let _ = writeln!(w, "</details></section>");
     }
     let _ = writeln!(w, "<details id=\"version-meanings\"><summary id=\"summary-version-meanings\">Version meanings</summary><p><strong>Running</strong> — last observed service process.</p><p><strong>Selected</strong> — version chosen by the host launcher; may not be running yet.</p><p><strong>Available</strong> — release found by the last check; not an installation receipt. Check state and time remain separate from host observation.</p><small>coreq is a shared library, not another service. Missing or stale evidence never means healthy. Last known versions do not establish current process state.</small></details></div></section>");
+}
+
+/// D28: the global store's own read; absent until a connection names the schema, so no empty panel.
+fn observations(w: &mut String, doc: &Value, now: u64) {
+    if doc.is_null() {
+        return;
+    }
+    let store = &doc["store"];
+    let _ = writeln!(w, "<section id=\"global-store\"><h2>Global store</h2>{}<p class=\"detail\">{} records · {} estimated bytes · no fixed retention · newest received {}</p><p class=\"detail\">Window: {} records, last {}</p>",
+        unknown_line(&doc["source"]), num(&store["rows"], &doc["source"]), num(&store["bytes"], &doc["source"]), esc(&at(&store["last_received"], now)), num(&doc["records"], &doc["source"]), esc(&dur(doc["window"]["seconds"].as_u64().unwrap_or(0))));
+    let e = &doc["errors"];
+    let rows = e["rows"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let _ = writeln!(w, "<h3>Failures and unstable operations</h3><p class=\"detail\">{} refused records counted apart.</p><table><thead><tr><th>Class</th><th>Product</th><th>Operation</th><th>Error</th><th>Count</th><th>Last</th></tr></thead><tbody>", num(&e["refused"], &doc["source"]));
+    for r in rows {
+        let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", text(&r["class"]), text(&r["product"]), text(&r["operation"]), text(&r["error"]), text(&r["count"]), esc(&at(&r["last_at"], now)));
+    }
+    let _ = writeln!(w, "</tbody></table>");
+    if rows.is_empty() {
+        let _ = writeln!(w, "<p class=\"note\">{}</p>", if doc["source"]["state"] == "ok" { "No failure or unstable record in this window." } else { "Unknown · these lists need a successful read." });
+    }
+    let _ = writeln!(w, "<h3>Attempts without a terminal record</h3><p class=\"detail\">{} attempts</p><ul>", num(&e["attempts_total"], &doc["source"]));
+    for r in e["attempts"].as_array().into_iter().flatten() {
+        let _ = writeln!(w, "<li>{} #{} / attempt {} · {} · {}</li>", text(&r["project"]), text(&r["task"]), text(&r["attempt"]), text(&r["host"]), text(&r["reason"]));
+    }
+    let _ = writeln!(w, "</ul>");
+    let cost = &doc["cost"];
+    if !cost.is_null() {
+        let _ = writeln!(w, "<h3>{}</h3><p class=\"detail\">{} · agent.call records only; agent.turn totals describe the same tokens and are never added.</p>", text(&cost["label"]), crate::model_use::amounts(&cost["estimate"]));
+    }
+    if let Some(rows) = doc["operations"]["rows"].as_array().filter(|r| !r.is_empty()) {
+        let _ = writeln!(w, "<h3>Operations</h3><table><thead><tr><th>Product</th><th>Operation</th><th>Calls</th><th>Outcomes</th></tr></thead><tbody>");
+        for r in rows.iter().take(20) {
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>", text(&r["product"]), text(&r["operation"]), text(&r["calls"]), esc(&r["outcomes"].to_string()));
+        }
+        let _ = writeln!(w, "</tbody></table>");
+    }
+    let _ = writeln!(w, "</section>");
 }
 
 /// D11/D23: delivery evidence is per sender and stage, never an all-event success claim.
@@ -1359,6 +1397,10 @@ mod tests {
         let mut doc = crate::fixture_doc();
         doc["generated_at"] = json!(1000);
         doc["filters"] = json!({"host": "win", "agent": "codex", "session": "example"});
+        doc["observations"] = json!({"source":{"state":"ok","at":990,"age_s":10,"reason":null,"incomplete":false},"store":{"rows":12,"bytes":9000,"last_received":990},"window":{"seconds":1800},"records":12,
+            "errors":{"rows":[{"class":"failure","product":"taskq","operation":"board.issue.read","error":"timeout","count":2,"last_at":980}],"attempts":[{"project":"o/r","task":7,"attempt":3,"host":"win","reason":"no terminal record"}],"attempts_total":1,"refused":1},
+            "cost":{"label":"API-equivalent estimate","estimate":{"amounts":{"USD":0.5},"known":1,"of":2,"reasons":["no price for m9"]}},
+            "operations":{"rows":[{"product":"taskq","operation":"board.issue.read","calls":12,"outcomes":{"ok":10,"failed":2}}]}});
         let mut row = json!({"installation":"tq","workspace":"w","generation":2,"host_label":"win","runtime":"native","product":"taskq",
             "connection":"active","received_at":990,"projected":false,"observation":{"state":"stale","at":700,"age_s":300,"reason":"old snapshot"},
             "snapshot":{"event_id":"board-1","schema":"taskq-board/1"},"export":{"state":"not_applicable","reason":"no Langfuse export required"},

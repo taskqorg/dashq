@@ -130,17 +130,25 @@ fn union_us(v: &[&Value]) -> u64 {
     total + cur.map_or(0, |(x, y)| y - x)
 }
 
-/// Coverage of one attempt's records (D21): `complete` with no reason, else the state and reason its elapsed time
-/// is unknown. `holes` are each installation's telemetry seq ranges no stored block covers.
-fn coverage(recs: &[&Value], holes: &BTreeMap<String, Vec<(u64, u64)>>) -> (&'static str, String) {
+/// Why an attempt's records hold no terminal record, shared with the D28 errors query: a closed `build` or `review`
+/// ends an attempt unless a newer stage is open. `None`: it ended.
+pub(crate) fn terminal_gap(recs: &[&Value]) -> Option<&'static str> {
     let at = |r: &&Value| r["at_ms"].as_u64();
     let term = recs.iter().filter(|r| !open(r) && matches!(r["stage"].as_str(), Some("build" | "review"))).filter_map(at).max();
     let opened = recs.iter().filter(|r| open(r)).filter_map(at).max();
     match (term, opened) {
-        (None, Some(_)) => return ("open", "open-stage".into()),
-        (None, None) => return ("open", "no terminal record".into()),
-        (Some(t), Some(o)) if o > t => return ("open", "open-stage".into()),
-        _ => {}
+        (None, Some(_)) => Some("open-stage"),
+        (None, None) => Some("no terminal record"),
+        (Some(t), Some(o)) if o > t => Some("open-stage"),
+        _ => None,
+    }
+}
+
+/// Coverage of one attempt's records (D21): `complete` with no reason, else the state and reason its elapsed time
+/// is unknown. `holes` are each installation's telemetry seq ranges no stored block covers.
+fn coverage(recs: &[&Value], holes: &BTreeMap<String, Vec<(u64, u64)>>) -> (&'static str, String) {
+    if let Some(why) = terminal_gap(recs) {
+        return ("open", why.into());
     }
     if let Some(r) = recs.iter().find(|r| !open(r) && r["us"].is_null()) {
         return match r["unknown"].as_str() {

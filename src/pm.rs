@@ -370,7 +370,7 @@ impl Store {
             }
             if r["issued_at"].as_i64().unwrap() > now+30 || r["expires_at"].as_i64().unwrap() <= now
                 || !targets.iter().any(|t| t["grant_id"]==r["grant_id"] && t["revision"]==r["revision"] && t["target"]==r["target"]) { return Err(store::Error::Denied); }
-            if store::used(tx, &Self::path(tx))? + self.limits.reserve_bytes >= self.limits.store_bytes { return Err(store::Error::Full); }
+            if store::used_by_others(tx, &Self::path(tx))? + self.limits.reserve_bytes >= self.limits.store_bytes { return Err(store::Error::Full); }
             let count: i64 = tx.query_row("SELECT COUNT(*) FROM pm_ops",[],|r|r.get(0))?;
             if count>=4096 { return Err(store::Error::Full); }
             tx.execute("INSERT INTO pm_ops(actor,op,subject,workspace,installation,generation,revision,digest,request,expires,delivered) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0)",params![r["actor_id"].as_str(),r["op_id"].as_str(),subject,ws,installation,generation,r["revision"].as_str(),digest,r.to_string(),r["expires_at"].as_i64()])?;
@@ -651,6 +651,21 @@ mod tests {
             Err(store::Error::Full)
         );
         drop(full);
+        // Defect: observations sit outside the C5 ceiling (D28), yet their size refused a PM request as full.
+        let roomy = store::Limits { store_bytes: 2 << 20, reserve_bytes: 1 << 20, ..store::LIMITS };
+        let volume = Enroll::open_with(&t.dir, HOST, roomy).unwrap();
+        let tq = store::Installation { id: "pm-obs", product: "taskq", runtime: "native", label: "obs" };
+        volume.store().grant(&tq, "invented-workspace", SUBJECT, r#"["coreq-observation/1"]"#, b"obs", NOW).unwrap();
+        let record = json!({"seq": 1, "id": "o", "received_ms": 1, "observation": {"schema": 1, "kind": "operation", "operation": "x".repeat(400), "outcome": "ok", "error": "none"}}).to_string();
+        for batch in 0..30 {
+            let ids: Vec<String> = (0..100).map(|i| format!("o{batch}-{i}")).collect();
+            let events: Vec<store::Event> = ids.iter().map(|id| store::Event { id, schema: "coreq-observation/1", observed: NOW, kind: store::Kind::Observation, payload: &record }).collect();
+            volume.store().accept(b"obs", &events, NOW).unwrap();
+        }
+        assert!(volume.store().used().unwrap() + roomy.reserve_bytes >= roomy.store_bytes, "the file alone would meet the ceiling");
+        new["op_id"] = json!("volume-store");
+        assert_eq!(volume.store().pm_submit(SUBJECT, &new, NOW).unwrap()["outcome"], "unknown");
+        drop(volume);
         let mut invalid = r.clone();
         invalid["actor_id"] = json!("someone-else");
         assert_eq!(

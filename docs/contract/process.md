@@ -6,6 +6,7 @@ Linked detail of [dashq.md](../../dashq.md) D2 (Process), D4.2 (snapshot adapter
 
 - `dashq profile [--window=S]` prints the profile report (D20); the default window is 86400 s.
 - `dashq limits [--check]` prints the [public limits](#public-limits-push) payload, or compares it with the live page.
+- `dashq export` and `dashq parity` read the [global observation store](connections.md#global-observation-store) (D28).
 - `dashq doctor` checks the [host requirements](#host-requirements); `dashq --snapshot DIR` writes the fixture page for review ([snapshot command](#snapshot-command)).
 
 ## Config
@@ -77,7 +78,7 @@ Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/enginee
 - Measured operations, p95 budget and error budget (initial values; revise from the first production report):
   - `http.page` and `http.data` 3 s, 1 %; `http.enroll` (D11 routes) 500 ms, 1 %; `http.answer` and `http.control` 15 s, 5 %.
   - `http.resources` (D14 routes), `http.configure` (D16) and `http.pm` (D13 PM routes) 500 ms, 1 %; `http.link` (D25 routes, receive waits up to 25 s) 30 s, 1 %.
-  - `read.langfuse` and `read.taskq` 10 s, 5 %; `read.board` and `read.release` 3 s, 5 %; `read.serverq` 50 ms, 1 %; `read.tasklog` (D21) 500 ms, 1 %.
+  - `read.langfuse` and `read.taskq` 10 s, 5 %; `read.board` and `read.release` 3 s, 5 %; `read.serverq` 50 ms, 1 %; `read.tasklog` (D21) 500 ms, 1 %; `read.observations` (D28) 3 s, 5 %.
   - `push.limits` (D27) 10 s, 5 %.
   - `update.check` 15 s, 5 %; `update` 120 s, 5 %; `restart` (service reload after update) 30 s, 5 %.
 - Times include response writing; cached source hits are not reads. A 5xx is a failure classed by its code; a 4xx is the caller's. Assets and 404 are not measured.
