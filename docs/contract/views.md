@@ -6,7 +6,7 @@ Linked detail of [dashq.md](../../dashq.md): the `/data` document, the source re
 
 - Top level: `schema` (2), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources`, `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21), `model_use` (D24), `runtimes` (D4.5).
 - `resources` (D4.4): `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`.
-- D11 adds `installations`, `sources.enrollment`, `sources.export` and `telemetry_block`; D23 adds `changes` and `query`; their sections state when.
+- D11 adds `installations`, `sources.enrollment`, `sources.export` and `telemetry_block`; D23 adds `changes` and `query`; D28 adds `observations` and `sources.observations`; their sections state when.
 - Declared exceptions within `schema` 2, not additive changes:
   - removal of `boards[].tasks[].session.line` and of the `line` of `taskq-board/1` snapshot payloads (D13);
   - `agent_work.rows[].time_ms` means the sum of complete attempts' elapsed time on the row; it had summed timed stages, counting nested stages twice.
@@ -299,6 +299,23 @@ D23 detail.
 - `/data.query` `{period, from, to, timezone: "UTC", cursor, next_cursor, cap: 200}`.
 - `cursor=N` (offset, default 0) pages `changes.rows` and `agent_work.attempts` by `cap`; `next_cursor` is null on the last page.
 - Times are epoch seconds; the page prints UTC.
+
+## Observations
+
+D28 detail. `/data.observations` and `sources.observations` exist only when a row in scope names `coreq-observation/1` or stored observations, so an unconfigured store creates no panel. `dashq report` prints the same document; the Telemetry view renders it.
+
+- Shape: `{source, window {from, to, seconds}, records, newest_observed, store, totals, cost, errors, operations, work, board_calls, stages, queue_waits, pipelines}`.
+- Scope: the projected rows' (installation, workspace) pairs, including revoked and retired ones, with the D7 host filter on the record's `host`. Agent and session filters do not apply.
+- A background read per scope, period and host refreshes every 30 s over a read-only connection (`read.observations`, D20), so it holds neither ingestion nor a page. `dashq report` waits for it. An empty window is `unknown` (`no observations in window`).
+- `totals` has separate `agent.turn` and `agent.call` objects `{records, tokens}`, with per-field `{observed, known, of, state, reasons}`, as in D26. No field adds them.
+- `cost` `{label, estimate, models}`: `agent.call` records only, under the D24 rules at the price effective on the call's day. Other unknown reasons: `model not reported`, `provider credits are not priced`. `agent.turn` is never priced.
+- `errors` `{rows, attempts, attempts_total, refused}`:
+  - `rows` group by `class`, product, operation and error class, with `count` and `last_at`. Class `failure` is outcome `failed`, `unstable` is `retried`, `unknown` is outcome `unknown` or any other code outside `ok`, `refused`, `cancelled`, `ask`. A `method.start` marker is no result and is not listed.
+  - `attempts` lists at most 200 newest attempts with a stage record in the window and no terminal record, by the D21 rule, with `reason` `no terminal record` or `open-stage`. Stage records of the two days before the window count as evidence, so an attempt that ended earlier is not listed.
+  - `refused` is the count of refused records, never a row.
+- Each of `operations`, `work`, `board_calls`, `stages`, `queue_waits` and `pipelines` is `{state, reason, rows}`, `unknown` with its reason when no record answers it. They answer the specq telemetry questions: calls, duration and outcome per operation; tokens, time and outcome per project, task, attempt and actor; `board.*` calls per product, host and task; time per stage; wait per queue state; pipelines by method, units, time, retries and outcome.
+- `product` is the record's own `product`, else the grant's. The Telemetry view states the volume, errors, cost and the top operations.
+- D21 and D26 add the same records to their block reads. D26's window deduplicates by observation ID and D21 by stage key, so one record on both paths counts once.
 
 ## Model use
 

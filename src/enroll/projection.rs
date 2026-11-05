@@ -1,4 +1,5 @@
 use super::*;
+use crate::observations::SCHEMA as OBSERVATION;
 
 /// `/data` `installations` (D11): expected installations of the actor's scope with producer-time freshness;
 /// `None` while enrollment is not set up. `scope` `None`: a remote request without a verified subject sees none.
@@ -55,13 +56,18 @@ pub fn projection(e: &Result<Enroll, String>, scope: Option<Scope>, host: Option
                 telemetry_json(&r.telemetry)
             };
             let activity = activity(&r, now);
-            json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry, "activity": activity,
+            let observations = observations_json(&r);
+            let mut row = json!({"installation": r.installation, "product": r.product, "runtime": r.runtime, "host_label": r.label, "workspace": r.workspace, "telemetry": telemetry, "activity": activity,
                 "project_limits": if r.product == "taskq" { project_limits(&r, now) } else { Value::Null },
                 "generation": r.generation, "connection": r.connection,
                 "projected": r.snapshot.as_ref().is_some_and(|s| s.generation == r.generation && renders(&r.product, s)),
                 "received_at": r.received_at, "scopes": serde_json::from_str::<Value>(&r.scopes).unwrap_or(Value::Null),
                 "capabilities": r.capabilities.as_deref().map(|s| serde_json::from_str::<Value>(s).unwrap_or(Value::Null)).unwrap_or(json!([])),
-                "scope": r.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()), "observation": obs, "history": history, "export": export, "snapshot": snapshot})
+                "scope": r.board.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok()), "observation": obs, "history": history, "export": export, "snapshot": snapshot});
+            if !observations.is_null() {
+                row["observations"] = observations;
+            }
+            row
         })
         .collect();
     Some(json!({"source": src("ok", None), "rows": rows}))
@@ -88,6 +94,159 @@ pub(super) fn activity(r: &store::Row, now: u64) -> Value {
         _ => ("reporting", None),
     };
     json!({"state": state, "last_report": last, "age_s": age, "reason": reason})
+}
+
+/// An installation row's `observations` (D28), null for a row that neither names the schema nor stored any.
+fn observations_json(r: &store::Row) -> Value {
+    let named = serde_json::from_str::<Vec<String>>(&r.scopes).unwrap_or_default().iter().any(|s| s == OBSERVATION);
+    match &r.volume {
+        Some(v) => json!({"state": "ok", "rows": v.rows, "bytes": v.bytes, "first_observed": v.first_observed, "last_observed": v.last_observed, "last_received": v.last_received}),
+        None if named => json!({"state": "unknown", "reason": "no observation yet", "rows": 0, "bytes": 0, "first_observed": null, "last_observed": null, "last_received": null}),
+        None => Value::Null,
+    }
+}
+
+/// A reader's coverage of a row: its block coverage, with D28 observations as evidence of their own (D21, D26).
+fn coverage_with_observations(r: &Value) -> Value {
+    let (mut t, o) = (r["telemetry"].clone(), &r["observations"]);
+    if o["state"] == "ok" {
+        t["last_synced"] = json!(o["last_received"].as_i64().max(t["last_synced"].as_i64()));
+        if t["state"] != "ok" {
+            t["state"] = json!("ok");
+            t["reason"] = Value::Null;
+        }
+    }
+    t
+}
+
+fn names_observations(r: &Value) -> bool {
+    r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == OBSERVATION))
+}
+
+/// `/data.observations` (D28) for the projected `rows`, already scoped: null when no row names the schema or stored
+/// any. One background read per scope, period and host, over a read-only connection; `dashq report` waits for it.
+pub fn observations(e: &Result<Enroll, String>, rows: &Value, now: u64, period: u64, host: Option<&str>, prices: &Value, background: bool) -> Value {
+    let Ok(e) = e else { return Value::Null };
+    let rows = rows.as_array().map(Vec::as_slice).unwrap_or_default();
+    let relevant = rows.iter().filter(|r| !r["observations"].is_null());
+    let store = json!({
+        "rows": relevant.clone().filter_map(|r| r["observations"]["rows"].as_i64()).sum::<i64>(),
+        "bytes": relevant.clone().filter_map(|r| r["observations"]["bytes"].as_i64()).sum::<i64>(),
+        "first_observed": relevant.clone().filter_map(|r| r["observations"]["first_observed"].as_i64()).min(),
+        "last_observed": relevant.clone().filter_map(|r| r["observations"]["last_observed"].as_i64()).max(),
+        "last_received": relevant.clone().filter_map(|r| r["observations"]["last_received"].as_i64()).max(),
+        "retention": "no fixed retention",
+    });
+    if relevant.clone().next().is_none() {
+        return Value::Null;
+    }
+    let pairs: Vec<(String, String)> = rows.iter().filter_map(|r| Some((r["installation"].as_str()?.to_string(), r["workspace"].as_str()?.to_string()))).collect();
+    let (db, prices_read, host_read) = (e.fleet_db.clone(), prices.as_array().cloned().unwrap_or_default(), host.map(String::from));
+    let scope = pairs.clone();
+    // authorization precedes the cache: the key names exactly the pairs this caller may read
+    let key = format!("observations:{}", crate::base64(&ring::digest::digest(&ring::digest::SHA256, json!([pairs, period, host]).to_string().as_bytes()).as_ref()[..12]));
+    let read = move || {
+        let to = crate::source::now();
+        let (from, to) = (to.saturating_sub(period) as i64, to as i64);
+        let keep = |l: &crate::observations::Line| host_read.as_deref().is_none_or(|h| l.value["observation"]["host"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(h) || h.split('/').next().is_some_and(|b| b.eq_ignore_ascii_case(x))));
+        let collect = |from: i64, to: i64, kinds: &[&str]| -> Result<Vec<crate::observations::Line>, crate::source::Fail> {
+            let mut out = vec![];
+            Store::observations(&db, &scope, from, to, kinds, |o| {
+                let l = crate::observations::Line::new(o);
+                if keep(&l) {
+                    out.push(l);
+                }
+            })
+            .map_err(|_| ("store unavailable".to_string(), None))?;
+            Ok(out)
+        };
+        let lines = collect(from, to, &[])?;
+        let earlier = collect(from - crate::observations::EARLIER_SECS, from - 1, &["stage"])?;
+        Ok((crate::observations::query(&lines, &earlier, &prices_read, from, to), false))
+    };
+    let snap = if background { e.fleet_cache.revalidate(&key, 30, read) } else { e.fleet_cache.get(&key, 30, read) };
+    let mut source = crate::data::source(&snap, now, 600, None);
+    let mut doc = snap["value"].clone();
+    if doc.is_null() {
+        doc = json!({"window": {"from": now.saturating_sub(period), "to": now, "seconds": period}, "records": null, "newest_observed": null});
+    }
+    if source["state"] == "ok" && doc["records"] == 0 {
+        source["state"] = json!("unknown");
+        source["reason"] = json!("no observations in window");
+    }
+    doc["source"] = source;
+    doc["store"] = store;
+    doc
+}
+
+/// `dashq export` (D28): every stored record of the window, on the host, as JSON lines or CSV with a header.
+pub fn export_observations(e: &Result<Enroll, String>, w: &mut impl std::io::Write, format: &str, from: i64, to: i64, product: Option<&str>) -> Result<(), String> {
+    let e = e.as_ref().map_err(String::clone)?;
+    let rows = e.project(Scope::All).map_err(|x| format!("store: {x:?}"))?;
+    let pairs: Vec<(String, String)> = rows.iter().map(|r| (r.installation.clone(), r.workspace.clone())).collect();
+    let wanted = |o: &store::Observation| product.is_none_or(|p| o.product == p);
+    let mut count = 0u64;
+    Store::observations(&e.fleet_db, &pairs, from, to, &[], |o| count += wanted(&o) as u64).map_err(|x| format!("store: {x:?}"))?;
+    crate::observations::export_header(&mut *w, format, from, to, count).map_err(|x| format!("write: {x}"))?;
+    let mut failed = None;
+    Store::observations(&e.fleet_db, &pairs, from, to, &[], |o| {
+        if failed.is_none() && wanted(&o) {
+            failed = crate::observations::export_row(&mut *w, format, &crate::observations::Line::new(o)).err();
+        }
+    })
+    .map_err(|x| format!("store: {x:?}"))?;
+    failed.map_or(Ok(()), |x| Err(format!("write: {x}")))
+}
+
+/// `dashq parity` (D28): reads both paths on the host; `langfuse` is the old path's own read, or why it cannot be.
+pub fn parity(e: &Result<Enroll, String>, rows: &Value, from: i64, to: i64, now: i64, langfuse: Result<u64, String>) -> Result<Value, String> {
+    let e = e.as_ref().map_err(String::clone)?;
+    let rows = rows.as_array().map(Vec::as_slice).unwrap_or_default();
+    let pair = |r: &Value| Some((r["installation"].as_str()?.to_string(), r["workspace"].as_str()?.to_string()));
+    let pairs: Vec<(String, String)> = rows.iter().filter_map(pair).collect();
+    let mut new = vec![];
+    Store::observations(&e.fleet_db, &pairs, from, to, &[], |o| new.push(crate::observations::Line::new(o))).map_err(|x| format!("store: {x:?}"))?;
+    let old_taskq = || -> Result<std::collections::BTreeSet<String>, String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for r in rows.iter().filter(|r| r["product"] == "taskq" && r["telemetry"]["state"] != "off") {
+            let (inst, ws) = pair(r).ok_or("row without identity")?;
+            let t = &r["telemetry"];
+            if t["pruned"].as_array().is_some_and(|p| p.iter().any(|x| x["cause"] != "allowlist")) && t["retained"]["oldest_received"].as_i64().is_none_or(|o| o > from) {
+                return Err("old TaskQ blocks were evicted inside this window".into());
+            }
+            for (id, payload) in Store::fleet_blocks(&e.fleet_db, &inst, &ws, 0).map_err(|x| format!("store: {x:?}"))? {
+                let (_, lines) = serde_json::from_str::<Value>(&payload).ok().and_then(|p| telemetry_lines(&p)).ok_or(format!("stored block {id} invalid"))?;
+                for l in lines {
+                    let at = l["observation"]["started_ms"].as_i64().or(l["received_ms"].as_i64()).map(|ms| ms / 1000);
+                    if at.is_some_and(|a| a >= from && a <= to) {
+                        ids.insert(l["id"].as_str().ok_or("old TaskQ line without an id")?.to_string());
+                    }
+                }
+            }
+        }
+        Ok(ids)
+    };
+    let old_serverq = || -> Result<u64, String> {
+        if from < now - e.store.limits.history_secs {
+            return Err("old ServerQ history no longer covers this window".into());
+        }
+        let mut count = 0;
+        for r in rows.iter().filter(|r| r["product"] == "serverq") {
+            let (inst, ws) = pair(r).ok_or("row without identity")?;
+            let (samples, capped) = e.store.samples(&inst, &ws, from, 100_000).map_err(|x| format!("store: {x:?}"))?;
+            if capped {
+                return Err("old ServerQ history read capped".into());
+            }
+            for (_, _, p) in samples.iter().filter(|s| s.0 <= to) {
+                let p: Value = serde_json::from_str(p).unwrap_or(Value::Null);
+                if serverq_payload(&p) {
+                    count += p["rules"].as_object().map_or(0, |o| o.len() as u64);
+                }
+            }
+        }
+        Ok(count)
+    };
+    Ok(crate::observations::parity(&new, crate::observations::OldPaths { taskq: old_taskq(), agentq: langfuse, serverq: old_serverq() }, from, to))
 }
 
 /// An installation row's `telemetry` (D11 #161, #181 A3): DashQ's retained range and its known loss, and the
@@ -150,9 +309,9 @@ pub fn telemetry_block(e: &Result<Enroll, String>, rows: &Value, id: &str) -> Va
 /// `telemetry` the row's coverage, `records` as [`crate::agent_work::from_telemetry`] maps them, oldest block first.
 pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64, background: bool) -> Value {
     let Ok(e) = e else { return json!([]) };
-    let reporting = || rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == TELEMETRY)));
+    let reporting = || rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && (names_observations(r) || r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == TELEMETRY))));
     if background && e.stages_warming.load(std::sync::atomic::Ordering::SeqCst) {
-        return json!(reporting().map(|r| json!({"installation": r["installation"], "workspace": r["workspace"], "label": r["host_label"], "telemetry": r["telemetry"], "records": [], "error": "refresh in progress"})).collect::<Vec<_>>());
+        return json!(reporting().map(|r| json!({"installation": r["installation"], "workspace": r["workspace"], "label": r["host_label"], "telemetry": coverage_with_observations(r), "records": [], "error": "refresh in progress"})).collect::<Vec<_>>());
     }
     let mut memo = e.stages.lock().unwrap_or_else(|p| p.into_inner());
     let mut oldest = i64::MAX;
@@ -175,7 +334,25 @@ pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64, backg
                 }
                 Err(_) => error = json!("store unavailable"),
             }
-            Some(json!({"installation": inst, "workspace": ws, "label": label, "telemetry": r["telemetry"], "records": records, "error": error}))
+            // D28: the same records from the global store, off the page path; D21 deduplicates by stage key
+            if names_observations(r) {
+                let (db, pair, name, id) = (e.fleet_db.clone(), [(inst.to_string(), ws.to_string())], label.to_string(), inst.to_string());
+                let read = move || {
+                    let mut out = vec![];
+                    Store::observations(&db, &pair, since, i64::MAX, &["stage", "transition"], |o| {
+                        out.extend(serde_json::from_str::<Value>(&o.payload).ok().and_then(|l| crate::agent_work::from_telemetry(&l, &name, &id)));
+                    })
+                    .map_err(|_| ("store unavailable".to_string(), None))?;
+                    Ok((json!(out), false))
+                };
+                let key = format!("stages:{}", json!([inst, ws]));
+                let snap = if background { e.fleet_cache.revalidate(&key, 30, read) } else { e.fleet_cache.get(&key, 30, read) };
+                records.extend(snap["value"].as_array().into_iter().flatten().cloned());
+                if error.is_null() && snap["error"].is_string() {
+                    error = snap["error"].clone();
+                }
+            }
+            Some(json!({"installation": inst, "workspace": ws, "label": label, "telemetry": coverage_with_observations(r), "records": records, "error": error}))
         })
         .collect();
     // ponytail: ids grow with receipt time, so older entries fell out of every caller's window; a narrower scope may
@@ -188,27 +365,33 @@ pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64, backg
 /// A bounded read reports truncation; raw rows remain internal and never enter `/data`.
 pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64, background: bool) -> Value {
     let Ok(e) = e else { return json!([]) };
-    json!(rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && r["connection"] != "revoked" && r["activity"]["state"] != "retired").map(|r| {
+    json!(rows.as_array().into_iter().flatten().filter(|r| (r["product"] == "taskq" || names_observations(r)) && r["connection"] != "revoked" && r["activity"]["state"] != "retired").filter_map(|r| {
         // Authorization precedes cache access; each workspace keeps a separate single-flight last-good read.
         let key=format!("fleet:{}",json!([r["installation"],r["workspace"]]));
         let (db, row) = (e.fleet_db.clone(), r.clone());
         let read = move || {
             let blocks=Store::fleet_blocks(&db, row["installation"].as_str().unwrap_or(""), row["workspace"].as_str().unwrap_or(""), since).map_err(|_|("store unavailable".to_string(),None))?;
             let mut known_loss = vec![];
-            let lines = blocks.into_iter().flat_map(|(id, p)| {
+            let mut lines: Vec<Value> = blocks.into_iter().flat_map(|(id, p)| {
                 let block = serde_json::from_str::<Value>(&p).ok().and_then(|p| telemetry_lines(&p));
                 if block.is_none() { known_loss.push(json!({"block_id": id, "reason": format!("stored block {id} invalid")})); }
                 block.map(|(_, l)| l).unwrap_or_default()
-            }).filter(|l| matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")));
-            // A3: blocks arrive oldest first; the cap keeps the newest rows so current limits stay readable.
+            }).filter(|l| matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker"))).collect();
+            // D28: the same records from the global store; the window deduplicates by observation id
+            let pair = [(row["installation"].as_str().unwrap_or("").to_string(), row["workspace"].as_str().unwrap_or("").to_string())];
+            Store::observations(&db, &pair, since, i64::MAX, &["agent.turn", "transition", "worker"], |o| lines.extend(serde_json::from_str::<Value>(&o.payload).ok())).map_err(|_|("store unavailable".to_string(),None))?;
+            lines.sort_by_key(|l| l["received_ms"].as_u64().unwrap_or(0));
+            // A3: oldest first; the cap keeps the newest rows so current limits stay readable.
             let mut kept = crate::fleet::keep_newest(lines, 10_000);
             kept["known_loss"] = json!(known_loss);
             let capped = kept["capped"] == true;
-            kept["telemetry"] = row["telemetry"].clone();
+            kept["telemetry"] = coverage_with_observations(&row);
             Ok((kept,capped))
         };
         let snap = if background { e.fleet_cache.refresh(&key,30,read) } else { e.fleet_cache.get(&key,30,read) };
-        json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "known_loss": snap["value"]["known_loss"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]})
+        // a product other than TaskQ joins Fleet only once it reports a Fleet record
+        if r["product"] != "taskq" && snap["value"]["records"].as_array().is_none_or(|a| a.is_empty()) { return None; }
+        Some(json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "known_loss": snap["value"]["known_loss"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]}))
     }).collect::<Vec<_>>())
 }
 

@@ -39,7 +39,15 @@ CREATE TABLE IF NOT EXISTS telemetry(id INTEGER PRIMARY KEY, installation TEXT N
 CREATE INDEX IF NOT EXISTS telemetry_by_installation ON telemetry(installation, workspace, observed);
 CREATE TABLE IF NOT EXISTS telemetry_pruned(installation TEXT NOT NULL, workspace TEXT NOT NULL, cause TEXT NOT NULL, blocks INTEGER NOT NULL, rows INTEGER NOT NULL, through_seq INTEGER, at INTEGER NOT NULL, PRIMARY KEY (installation, workspace, cause));
 CREATE TABLE IF NOT EXISTS resources(installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (installation, workspace));
+CREATE TABLE IF NOT EXISTS observations(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, product TEXT NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, received INTEGER NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE (installation, workspace, event_id));
+CREATE INDEX IF NOT EXISTS observations_by_time ON observations(installation, workspace, observed);
+CREATE INDEX IF NOT EXISTS observations_by_kind ON observations(installation, workspace, kind, observed);
+CREATE TABLE IF NOT EXISTS observation_volume(installation TEXT NOT NULL, workspace TEXT NOT NULL, rows INTEGER NOT NULL, bytes INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, last_received INTEGER NOT NULL, PRIMARY KEY (installation, workspace));
 ";
+
+/// D28: one observation's measured store cost. ponytail: payload plus this fixed row and index estimate, on the high
+/// side so the ceiling of other kinds stays reachable; a measured per-table size replaces it if pruning ever needs one.
+const OBSERVATION_ROW_BYTES: u64 = 1024;
 
 /// C5 bounds; tests shrink them.
 #[derive(Clone, Copy)]
@@ -146,6 +154,29 @@ pub enum Kind {
     Telemetry,
     /// A `taskq-resources/1` projection (D11 #160): the newest one per installation and workspace, never a snapshot.
     Resources,
+    /// A `coreq-observation/1` record (D28): kept with no fixed retention, deduplicated by its own id.
+    Observation,
+}
+
+/// One stored D28 observation; `payload` is the record as the shipper sent it.
+pub struct Observation {
+    pub installation: String,
+    pub workspace: String,
+    pub generation: i64,
+    pub product: String,
+    pub observed: i64,
+    pub received: i64,
+    pub payload: String,
+}
+
+/// D28 measured volume of one installation and workspace.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Volume {
+    pub rows: i64,
+    pub bytes: i64,
+    pub first_observed: i64,
+    pub last_observed: i64,
+    pub last_received: i64,
 }
 
 pub struct Event<'a> {
@@ -199,6 +230,8 @@ pub struct Row {
     pub telemetry: Telemetry,
     /// Payload of the newest `taskq-resources/1` record of this installation and workspace and its generation.
     pub resources: Option<(i64, String)>,
+    /// D28 volume of this installation and workspace; `None`: no observation stored.
+    pub volume: Option<Volume>,
 }
 
 /// Retained `taskq-telemetry/1` blocks of one installation and workspace (#181 A3): counts, the seq range from the
@@ -390,6 +423,18 @@ pub(crate) fn used(c: &Connection, path: &Path) -> Result<u64, Error> {
     Ok(pages as u64 * page as u64 + wal)
 }
 
+/// D28: the measured store cost of all observations, which the C5 ceiling does not count.
+fn observation_bytes(c: &Connection) -> Result<u64, Error> {
+    Ok(c.query_row("SELECT COALESCE(SUM(bytes), 0) FROM observation_volume", [], |r| r.get::<_, i64>(0))? as u64)
+}
+
+/// SQLite's own page limit for this connection: the C5 ceiling plus the observation volume it does not count.
+fn page_ceiling(c: &Connection, bytes: u64) -> Result<(), Error> {
+    let page: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+    c.query_row(&format!("PRAGMA max_page_count = {}", bytes / page as u64), [], |_| Ok(()))?;
+    Ok(())
+}
+
 /// `sha256:<hex>` of a receipt's acknowledged content (#242 A2).
 fn receipt_digest(content: &str) -> String {
     let d = ring::digest::digest(&ring::digest::SHA256, content.as_bytes());
@@ -565,6 +610,8 @@ impl Store {
             limits.store_bytes / page as u64
         ))?;
         c.execute_batch(&format!("BEGIN IMMEDIATE; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"))?;
+        let volume = observation_bytes(&c)?;
+        page_ceiling(&c, limits.store_bytes.saturating_add(volume))?;
         // additive: gaps recorded before the column existed keep workspace '' and show in no scoped view
         if c.query_row("SELECT COUNT(*) FROM pragma_table_info('export_gaps') WHERE name = 'workspace'", [], |r| r.get::<_, i64>(0))? == 0 {
             c.execute_batch("ALTER TABLE export_gaps ADD COLUMN workspace TEXT NOT NULL DEFAULT ''")?;
@@ -1059,11 +1106,17 @@ impl Store {
         self.write(|tx| {
             let g = authorize(tx, verifier)?.ok_or(Error::Denied)?;
             let scopes: Vec<String> = serde_json::from_str(&g.scopes).unwrap_or_default();
-            let full = used(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes;
+            // D28: observations are outside the ceiling, so they neither fill it for other kinds nor meet it themselves
+            let volume = observation_bytes(tx)?;
+            let full = used(tx, &Self::path(tx))?.saturating_sub(volume) + l.reserve_bytes >= l.store_bytes;
+            let batch: u64 = events.iter().filter(|e| e.kind == Kind::Observation).map(|e| e.payload.len() as u64 + OBSERVATION_ROW_BYTES).sum();
+            if batch > 0 {
+                page_ceiling(tx, l.store_bytes.saturating_add(volume).saturating_add(batch))?;
+            }
             let mut outbox = tx.query_row("SELECT COALESCE(SUM(length(payload)), 0) FROM outbox", [], |r| r.get::<_, i64>(0))? as u64;
             let mut out = Vec::with_capacity(events.len());
             for e in events {
-                let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry", Kind::Resources => "resources" };
+                let kind = match e.kind { Kind::Snapshot => "snapshot", Kind::Export => "export", Kind::Telemetry => "telemetry", Kind::Resources => "resources", Kind::Observation => "observation" };
                 let content = format!("{kind}\n{}\n{}\n{}", e.schema, e.observed, e.payload);
                 // #242 A2: a receipt keeps only the digest of what it acknowledged, never a second copy of the payload
                 let digest = receipt_digest(&content);
@@ -1079,6 +1132,32 @@ impl Store {
                     Some((c, o)) if c == digest || c == content => outcome(&o),
                     Some(_) => Outcome::Rejected("replay_mismatch"),
                     None if !scopes.iter().any(|s| s == e.schema) => Outcome::Rejected("scope"),
+                    // D28: the observation row is its own dedup record, whatever the receipt window or generation
+                    None if e.kind == Kind::Observation => {
+                        let stored: Option<(i64, String)> = tx
+                            .query_row("SELECT observed, payload FROM observations WHERE installation = ?1 AND workspace = ?2 AND event_id = ?3", params![g.installation, g.workspace, e.id], |r| Ok((r.get(0)?, r.get(1)?)))
+                            .optional()?;
+                        match stored {
+                            Some((observed, payload)) if observed == e.observed && payload == e.payload => Outcome::Accepted,
+                            Some(_) => Outcome::Rejected("replay_mismatch"),
+                            None => {
+                                let p = serde_json::from_str::<serde_json::Value>(e.payload).unwrap_or_default();
+                                let product: String = tx.query_row("SELECT product FROM installations WHERE id = ?1", [&g.installation], |r| r.get(0))?;
+                                tx.execute(
+                                    "INSERT INTO observations (installation, workspace, generation, product, event_id, observed, received, kind, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                    params![g.installation, g.workspace, g.generation, product, e.id, e.observed, now, p["observation"]["kind"].as_str().unwrap_or(""), e.payload],
+                                )?;
+                                tx.execute(
+                                    "INSERT INTO observation_volume VALUES (?1, ?2, 1, ?3, ?4, ?4, ?5)
+                                     ON CONFLICT (installation, workspace) DO UPDATE SET rows = rows + 1, bytes = bytes + excluded.bytes,
+                                       first_observed = MIN(first_observed, excluded.first_observed), last_observed = MAX(last_observed, excluded.last_observed), last_received = excluded.last_received",
+                                    params![g.installation, g.workspace, (e.payload.len() as u64 + OBSERVATION_ROW_BYTES) as i64, e.observed, now],
+                                )?;
+                                tx.execute("INSERT INTO receipts VALUES (?1, ?2, ?3, ?4, ?5, 'accepted', ?6)", params![g.installation, g.generation, e.id, e.schema, digest, now])?;
+                                Outcome::Accepted
+                            }
+                        }
+                    }
                     // a dedup record may be pruned already: refuse instead of duplicating
                     None if e.observed < now - l.receipt_secs => Outcome::Rejected("expired"),
                     // an export Langfuse cannot time (after 2554) is refused before acknowledgement
@@ -1204,6 +1283,32 @@ impl Store {
             .collect::<Result<_, _>>()?)
     }
 
+    /// D28: stored observations of the `(installation, workspace)` pairs with a producer time in `from..=to`, of `kinds`
+    /// (empty: every kind), one read snapshot over a read-only connection, so no scan holds ingestion or a page.
+    pub fn observations(path: &Path, pairs: &[(String, String)], from: i64, to: i64, kinds: &[&str], mut visit: impl FnMut(Observation)) -> Result<(), Error> {
+        let mut c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        c.busy_timeout(std::time::Duration::from_secs(10))?;
+        let tx = c.transaction()?;
+        let mut read = |sql: &str, args: &[&dyn rusqlite::ToSql]| -> Result<(), Error> {
+            let mut q = tx.prepare_cached(sql)?;
+            let mut rows = q.query(args)?;
+            while let Some(r) = rows.next()? {
+                visit(Observation { installation: r.get(0)?, workspace: r.get(1)?, generation: r.get(2)?, product: r.get(3)?, observed: r.get(4)?, received: r.get(5)?, payload: r.get(6)? });
+            }
+            Ok(())
+        };
+        const COLUMNS: &str = "SELECT installation, workspace, generation, product, observed, received, payload FROM observations WHERE installation = ?1 AND workspace = ?2 AND observed >= ?3 AND observed <= ?4";
+        for (i, w) in pairs {
+            if kinds.is_empty() {
+                read(&format!("{COLUMNS} ORDER BY id"), &[i, w, &from, &to])?;
+            }
+            for k in kinds {
+                read(&format!("{COLUMNS} AND kind = ?5 ORDER BY id"), &[i, w, &from, &to, k])?;
+            }
+        }
+        Ok(())
+    }
+
     /// The newest current snapshot of an installation in any workspace.
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
@@ -1250,6 +1355,7 @@ impl Store {
                         telemetry: Telemetry::default(),
                         resources: r.get::<_, Option<i64>>(20)?.zip(r.get::<_, Option<String>>(21)?),
                         created: r.get(22)?,
+                        volume: None,
                     };
                     Ok(row)
                 })?
@@ -1257,6 +1363,11 @@ impl Store {
             drop(q);
             for row in &mut rows {
                 row.telemetry = coverage(tx, &row.installation, &row.workspace)?;
+                row.volume = tx
+                    .query_row("SELECT rows, bytes, first_observed, last_observed, last_received FROM observation_volume WHERE installation = ?1 AND workspace = ?2", [&row.installation, &row.workspace], |r| {
+                        Ok(Volume { rows: r.get(0)?, bytes: r.get(1)?, first_observed: r.get(2)?, last_observed: r.get(3)?, last_received: r.get(4)? })
+                    })
+                    .optional()?;
             }
             for row in &rows {
                 if let Some(s) = row.snapshot.as_ref().filter(|s| renders(&row.product, s)) {
@@ -1567,6 +1678,65 @@ mod tests {
         Store::open(&p, LIMITS).unwrap();
         Connection::open(&p).unwrap().execute_batch("PRAGMA user_version = 2").unwrap();
         assert!(matches!(Store::open(&p, LIMITS), Err(Error::Newer(2))));
+    }
+
+    fn observation(id: &str, pad: usize) -> String {
+        serde_json::json!({"seq": 1, "id": id, "received_ms": 1, "observation": {"schema": 1, "kind": "operation", "operation": "x".repeat(pad), "outcome": "ok", "error": "none"}}).to_string()
+    }
+
+    fn stored_observations(p: &Path, pairs: &[(String, String)]) -> usize {
+        let mut n = 0;
+        Store::observations(p, pairs, 0, i64::MAX, &[], |_| n += 1).unwrap();
+        n
+    }
+
+    // Defect: the 8-day receipt window or a fixed prune would drop or expire old observations, or a full ceiling would
+    // stop every other kind. Protects D28 retention: no fixed window, no invented size, replay stays exact.
+    #[test]
+    fn observations_outlive_every_prune_and_stay_outside_the_ceiling() {
+        let l = Limits { store_bytes: 2 << 20, reserve_bytes: 1 << 20, ..LIMITS };
+        let p = dir("observations").join("dashq.db");
+        let s = Store::open(&p, l).unwrap();
+        let tq = Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" };
+        s.grant(&tq, "w", "a", r#"["coreq-observation/1", "taskq-board/1"]"#, b"v1", NOW).unwrap();
+        let pairs = [("tq-1".to_string(), "w".to_string())];
+        let ev = |id: &'static str, observed, payload: &'static str| Event { id, schema: "coreq-observation/1", observed, kind: Kind::Observation, payload };
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        // a record far older than the receipt window is accepted, not `expired`
+        let old = NOW - 400 * 86400;
+        let first = leak(observation("o1", 1));
+        assert_eq!(s.accept(b"v1", &[ev("o1", old, first)], NOW).unwrap(), [Outcome::Accepted]);
+        assert_eq!(s.receipt(b"v1", "o1").unwrap().map(|r| r.1), Some(Outcome::Accepted), "a receipt keeps D11 silence accurate");
+        let far = NOW + 1000 * 86400;
+        s.prune(far).unwrap();
+        assert_eq!(stored_observations(&p, &pairs), 1, "no prune removes an observation");
+        assert_eq!(s.receipt(b"v1", "o1").unwrap(), None, "its receipt left with the window");
+        // replay stays exact after the receipt is gone and under a new generation
+        assert_eq!(s.accept(b"v1", &[ev("o1", old, first)], far).unwrap(), [Outcome::Accepted]);
+        let other = leak(observation("o1", 2));
+        assert_eq!(s.accept(b"v1", &[ev("o1", old, other)], far).unwrap(), [Outcome::Rejected("replay_mismatch")]);
+        s.grant(&tq, "w", "a", r#"["coreq-observation/1"]"#, b"v2", far).unwrap();
+        assert_eq!(s.accept(b"v2", &[ev("o1", old, first)], far).unwrap(), [Outcome::Accepted]);
+        assert_eq!(stored_observations(&p, &pairs), 1);
+        // observations grow far past the ceiling without filling it for other kinds
+        let pad = leak(observation("pad", 200));
+        for batch in 0..300 {
+            let events: Vec<Event> = (0..100).map(|i| ev(leak(format!("b{batch}-{i}")), NOW, pad)).collect();
+            assert!(s.accept(b"v2", &events, far).unwrap().iter().all(|o| *o == Outcome::Accepted), "batch {batch}");
+        }
+        assert_eq!(stored_observations(&p, &pairs), 30_001);
+        assert!(s.used().unwrap() > l.store_bytes, "the store passed the ceiling");
+        s.grant(&tq, "w", "a", r#"["coreq-observation/1", "taskq-board/1"]"#, b"v3", far).unwrap();
+        assert_eq!(s.accept(b"v3", &[Event { id: "s1", schema: "taskq-board/1", observed: far, kind: Kind::Snapshot, payload: "{}" }], far).unwrap(), [Outcome::Accepted]);
+        // a reopened store keeps the raised page limit, and the volume is measured per installation and workspace
+        drop(s);
+        let s = Store::open(&p, l).unwrap();
+        assert_eq!(s.accept(b"v3", &[ev("after", NOW, pad)], far).unwrap(), [Outcome::Accepted]);
+        let row = s.project(Scope::All, |_, _| false).unwrap().into_iter().find(|r| r.installation == "tq-1").unwrap();
+        let v = row.volume.unwrap();
+        assert_eq!((v.rows, v.first_observed, v.last_observed, v.last_received), (30_002, old, NOW, far));
+        assert!(v.bytes as u64 > l.store_bytes);
+        assert!(s.used().unwrap() < v.bytes as u64, "the estimate stays on the high side of the real cost");
     }
 
     #[test]

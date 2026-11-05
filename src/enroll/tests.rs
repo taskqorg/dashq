@@ -116,6 +116,89 @@
         assert!(e.as_ref().unwrap().store.authorize(&sha256(cred)).unwrap().is_none());
     }
 
+    fn shipper_wire() -> Value {
+        serde_json::from_str(include_str!("../../fixture/coreq-observation/shipper-wire.json")).unwrap()
+    }
+
+    fn receipts(v: &Value) -> Vec<(String, Option<String>)> {
+        v["receipts"].as_array().unwrap().iter().map(|r| (r["state"].as_str().unwrap().to_string(), r["reason"].as_str().map(String::from))).collect()
+    }
+
+    // Defect: CoreQ's shipper names a schema no product prefix allows, and its oldest backlog would read `expired`, so
+    // nothing would ever arrive. Protects D28 A1 with the unmodified request `Store::ship` sent.
+    #[test]
+    fn coreq_shipper_request_is_stored_once_under_the_enrollment_grant() {
+        let (d, e) = setup("shipper");
+        let host = dir("shipper-host");
+        let req = coreq::enroll::Request { installation: None, product: "taskq", host_label: "mac-1", schemas: &["taskq-board/1", crate::observations::SCHEMA], scope: None, capabilities: &[] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        let cred = a["credential"].as_str().unwrap();
+        let body = shipper_wire();
+        // the fixture's records are 72 days older than T0: older than the receipt window
+        assert!(body["records"][0]["observed_at"].as_i64().unwrap() < T0 - 8 * 86400);
+        let all_accepted = vec![("accepted".to_string(), None); 7];
+        let (status, v) = machine(&e, "/machine/ingest", Some(cred), body.clone(), T0);
+        assert_eq!((status, receipts(&v)), (200, all_accepted.clone()), "{v}");
+        // a lost reply repeats the same rows: the same receipts and nothing new
+        let (status, v) = machine(&e, "/machine/ingest", Some(cred), body.clone(), T0 + 60);
+        assert_eq!((status, receipts(&v)), (200, all_accepted));
+        let row = e.as_ref().unwrap().project(Scope::All).unwrap().into_iter().next().unwrap();
+        assert_eq!((row.volume.as_ref().unwrap().rows, row.received_at), (7, Some(T0)), "a receipt keeps D11 silence accurate");
+        let id = body["records"][0]["event_id"].as_str().unwrap();
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(cred), json!({"protocol": 1, "event_id": id}), T0 + 60).1["state"], "accepted");
+        // every kind the shipper sends is readable back, whole
+        let mut kinds = std::collections::BTreeSet::new();
+        Store::observations(&e.as_ref().unwrap().fleet_db, &[(row.installation.clone(), row.workspace.clone())], 0, i64::MAX, &[], |o| {
+            assert_eq!(o.product, "taskq");
+            let stored: Value = serde_json::from_str(&o.payload).unwrap();
+            kinds.insert(stored["observation"]["kind"].as_str().unwrap().to_string());
+        })
+        .unwrap();
+        assert_eq!(kinds.iter().map(String::as_str).collect::<Vec<_>>(), ["agent.call", "agent.turn", "check", "operation", "service.pass", "stage", "transition"]);
+        // a changed record, a priced record, a foreign id and a content key are refused alone
+        let refused = |mutate: &dyn Fn(&mut Value), id: &str| {
+            let mut r = body["records"][1].clone();
+            r["event_id"] = json!(id);
+            r["payload"]["id"] = json!(id);
+            mutate(&mut r);
+            let (_, v) = machine(&e, "/machine/ingest", Some(cred), json!({"protocol": 1, "records": [r]}), T0 + 120);
+            receipts(&v).remove(0).1
+        };
+        let mut changed = body["records"][1].clone();
+        changed["payload"]["seq"] = json!(99);
+        assert_eq!(receipts(&machine(&e, "/machine/ingest", Some(cred), json!({"protocol": 1, "records": [changed]}), T0 + 120).1)[0].1.as_deref(), Some("replay_mismatch"));
+        assert_eq!(refused(&|r| r["payload"]["observation"]["cost_usd"] = json!(1.5), "a1").as_deref(), Some("payload"), "records hold no price");
+        assert_eq!(refused(&|r| r["payload"]["observation"]["unit_price"] = json!(1.5), "a2").as_deref(), Some("payload"));
+        assert_eq!(refused(&|r| r["payload"]["id"] = json!("other"), "a3").as_deref(), Some("payload"));
+        assert_eq!(refused(&|r| r["payload"]["observation"]["prompt"] = json!("hello"), "a4").as_deref(), Some("payload"));
+        assert_eq!(refused(&|r| r["payload"]["observation"]["schema"] = json!(2), "a5").as_deref(), Some("payload"));
+        assert_eq!(refused(&|r| r["payload"]["observation"]["outcome"] = Value::Null, "a6").as_deref(), Some("payload"));
+        assert_eq!(e.as_ref().unwrap().project(Scope::All).unwrap()[0].volume.as_ref().unwrap().rows, 7);
+        drop((e, d));
+    }
+
+    // Defect: a grant without the schema must hold the cursor; a shipper-only product must not gain other schemas.
+    #[test]
+    fn observation_schema_needs_the_grant_and_widens_no_product() {
+        let (_d, e) = setup("shipper-scope");
+        let host = dir("shipper-scope-host");
+        let req = coreq::enroll::Request { installation: None, product: "agentq", host_label: "mac-1", schemas: &["agentq-snapshot/1"], scope: None, capabilities: &[] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        let (_, v) = machine(&e, "/machine/ingest", Some(a["credential"].as_str().unwrap()), shipper_wire(), T0);
+        assert!(receipts(&v).iter().all(|r| r.1.as_deref() == Some("scope")), "{v}");
+        // no credential, no write
+        assert_eq!(machine(&e, "/machine/ingest", None, shipper_wire(), T0).0, 401);
+        let device = |product: &str, schemas: Value| machine(&e, "/machine/connect/device", None, json!({"protocol": 1, "product": product, "installation": format!("{product}-1"), "runtime": "native", "host_label": "h", "schemas": schemas}), T0).0;
+        assert_eq!(device("pilotq", json!([crate::observations::SCHEMA])), 200);
+        assert_eq!(device("assetq", json!([crate::observations::SCHEMA])), 200);
+        assert_eq!(device("pilotq", json!(["pilotq-snapshot/1"])), 400);
+        assert_eq!(device("pilotq", json!([crate::observations::SCHEMA, "taskq-board/1"])), 400);
+        assert_eq!(device("taskq", json!([crate::observations::SCHEMA, "serverq-report/1"])), 400);
+        assert_eq!(device("unknownq", json!([crate::observations::SCHEMA])), 400);
+    }
+
     /// A `taskq-telemetry/1` block (taskq#1353 S3) of `lines`, with optional sender `status`.
     fn block(first: u64, lines: &[Value], status: Option<Value>) -> Value {
         use std::io::Write;
