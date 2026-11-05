@@ -55,10 +55,19 @@ Review of that result found five more. The four Rust tests below failed first wi
 
 ## Not verified
 
-`real configured service` in A5 is not met by this evidence. No configured deployment exists to test:
+A5 `real configured service`, A7 and A8 are not met by this evidence. Read-back for A6, from the Windows worker:
 
-- `https://assets.ufobe.com` timed out from this Windows host on `/v1/health`. The cause is unknown.
-- No DashQ deployment has `assetq` configured. No credential, grant or production configuration was created or changed, and scope forbids an implicit one.
-- AssetQ must first amend its R9 and method-evaluation text, which still deny DashQ generation authority.
+| Input | Read back | State |
+|---|---|---|
+| [assetq#25](https://github.com/taskqorg/assetq/issues/25) published at `https://assets.ufobe.com` | Issue closed. `GET /v1/health` with the agent Cloudflare Access credential: 200, `service: up`, `database: ok`, version 0.1.0. | Present |
+| AssetQ R9 and `docs/method-evaluation.md` allow these actions | `main` R9 still reads summary metadata and links only. `docs/method-evaluation.md` still says neither integration receives generation authority. | Missing: owner item |
+| `assetq` config, credential files and `dashq assetq-grant` rows on the target | `https://dash.ufobe.com` runs a release without this feature: `/assets` reads 404 and `/data` has no `assets` key. The Windows worker has no SSH access to the target, so the files are unknown. No agent created or changed any of them. | Unknown: owner item |
+| DashQ can read `/v1` through the public origin | `GET /v1/status` with a Bearer value and no Access credential: 302 to the Cloudflare Access sign-in. The adapter sends only the Bearer token, so a deployed read would fail. With the Access credential and no Bearer token: 401, so AssetQ still decides. | Gap: owner choice |
 
-Production enablement needs those inputs and then the live check above through the real guard and HTTPS origin, with the `assetq` config, `read_token`, `control_token` and `dashq assetq-grant` set explicitly. [#259](https://github.com/taskqorg/dashq/issues/259) holds that qualification.
+Also open:
+
+- A7 needs a build with `/assets` on the target. The latest release, v0.18.1, does not contain it.
+- [assetq#42](https://github.com/taskqorg/assetq/issues/42) is moving the origin to `pipe.ufobe.com`, with a redirect from `assets.ufobe.com`. The adapter sends a Bearer token and reads with no redirect handling, so `base_url` must name the final origin.
+- This branch's D27 number is taken on `main` by public limits push, and the branch conflicts there. The next requested rebase renumbers this section.
+
+Production enablement needs those inputs and then the live check above through the real guard and HTTPS origin, with the `assetq` config, `read_token`, `control_token` and `dashq assetq-grant` set explicitly.
