@@ -1241,6 +1241,30 @@ mod tests {
         assert_eq!(other["sources"]["observations"]["reason"], "no observations in window");
     }
 
+    // Defect: an inventory path reaching a browser document would break R1 even though ingestion and export are right.
+    // Protects D28 Inventory: `/data` counts these records and never projects the typed object.
+    #[test]
+    fn inventory_identities_stay_out_of_the_data_document() {
+        let (app, _d) = enrolled_app("inventory-data", load_config_fixture());
+        let now = source::now() as i64;
+        let s = app.enroll.as_ref().unwrap().store();
+        s.grant(&store::Installation { id: "sq-1", product: "serverq", runtime: "native", label: "srv" }, "ws", "github|1", r#"["coreq-observation/1"]"#, b"v1", now).unwrap();
+        let wire: Value = serde_json::from_str(include_str!("../fixture/coreq-observation/inventory-wire.json")).unwrap();
+        let rows: Vec<(String, String)> = wire["records"].as_array().unwrap().iter().map(|r| {
+            let mut p = r["payload"].clone();
+            p["observation"]["started_ms"] = json!(now * 1000);
+            (r["event_id"].as_str().unwrap().to_string(), p.to_string())
+        }).collect();
+        let events: Vec<store::Event> = rows.iter().map(|(id, payload)| store::Event { id, schema: observations::SCHEMA, observed: now, kind: store::Kind::Observation, payload }).collect();
+        assert!(s.accept(b"v1", &events, now).unwrap().iter().all(|o| *o == store::Outcome::Accepted));
+        let doc = app.doc(1800, json!({}), Some(store::Scope::All));
+        assert_eq!(doc["observations"]["records"], rows.len(), "the records are read");
+        let text = doc.to_string();
+        for identity in ["проекты", "данные", "сервер-1", "Windows Update", "web_1", "disk_used_bytes"] {
+            assert!(!text.contains(identity), "{identity}");
+        }
+    }
+
     // Defect: a window could be cut without saying so, or parity could read green on no evidence. Protects A5 and A6.
     #[test]
     fn export_and_parity_read_the_store_and_state_their_window() {

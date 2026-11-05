@@ -120,6 +120,153 @@
         serde_json::from_str(include_str!("../../fixture/coreq-observation/shipper-wire.json")).unwrap()
     }
 
+    fn inventory_wire() -> Value {
+        serde_json::from_str(include_str!("../../fixture/coreq-observation/inventory-wire.json")).unwrap()
+    }
+
+    fn inventory_device(name: &str) -> (Result<Enroll, String>, String) {
+        let (_d, e) = setup(name);
+        let host = dir(&format!("{name}-host"));
+        let req = coreq::enroll::Request { installation: None, product: "serverq", host_label: "srv-1", schemas: &[crate::observations::SCHEMA], scope: None, capabilities: &[] };
+        let mut w = Wire { e: &e, now: T0, code: None, calls: vec![], tick: false };
+        let a = coreq::enroll::pair(&host, "https://dash.example.com/machine", &req, &mut w).unwrap();
+        let cred = a["credential"].as_str().unwrap().to_string();
+        (e, cred)
+    }
+
+    // Defect: the generic allowlist answered `payload` for mount, project_root and folder paths, so the shipper's cursor
+    // passed them: known loss of ServerQ inventory. Protects D28 Inventory with the unmodified `Store::ship` request.
+    #[test]
+    fn coreq_inventory_request_is_stored_and_exported_whole() {
+        let (e, cred) = inventory_device("inventory");
+        let body = inventory_wire();
+        let sent = body["records"].as_array().unwrap();
+        let entities: std::collections::BTreeSet<_> = sent.iter().map(|r| r["payload"]["observation"]["inventory"]["entity"].as_str().unwrap()).collect();
+        assert_eq!(entities.into_iter().collect::<Vec<_>>(), ["container", "folder", "host", "mount", "project_root", "service"]);
+        let all_accepted = vec![("accepted".to_string(), None); sent.len()];
+        let (status, v) = machine(&e, "/machine/ingest", Some(&cred), body.clone(), T0);
+        assert_eq!((status, receipts(&v)), (200, all_accepted.clone()), "{v}");
+        // a lost reply repeats the same rows: the same receipts and nothing new
+        let (status, v) = machine(&e, "/machine/ingest", Some(&cred), body.clone(), T0 + 60);
+        assert_eq!((status, receipts(&v)), (200, all_accepted));
+        let row = e.as_ref().unwrap().project(Scope::All).unwrap().into_iter().next().unwrap();
+        assert_eq!((row.volume.as_ref().unwrap().rows, row.received_at), (sent.len() as i64, Some(T0)));
+        let id = sent[1]["event_id"].as_str().unwrap();
+        assert_eq!(machine(&e, "/machine/connection/receipt", Some(&cred), json!({"protocol": 1, "event_id": id}), T0 + 60).1["state"], "accepted");
+        let mut changed = sent[1].clone();
+        changed["payload"]["observation"]["inventory"]["identity"] = json!("/other");
+        assert_eq!(receipts(&machine(&e, "/machine/ingest", Some(&cred), json!({"protocol": 1, "records": [changed]}), T0 + 120).1)[0].1.as_deref(), Some("replay_mismatch"));
+        // what was sent reads back unchanged, in its grant's scope only
+        let scope = [(row.installation.clone(), row.workspace.clone())];
+        let mut stored = Vec::new();
+        Store::observations(&e.as_ref().unwrap().fleet_db, &scope, 0, i64::MAX, &[], |o| stored.push(serde_json::from_str::<Value>(&o.payload).unwrap())).unwrap();
+        assert_eq!(stored.iter().collect::<Vec<_>>(), sent.iter().map(|r| &r["payload"]).collect::<Vec<_>>());
+        let mut foreign = 0;
+        Store::observations(&e.as_ref().unwrap().fleet_db, &[(row.installation.clone(), "other".to_string())], 0, i64::MAX, &[], |_| foreign += 1).unwrap();
+        assert_eq!(foreign, 0);
+        let at = sent[0]["observed_at"].as_i64().unwrap();
+        let mut jsonl = Vec::new();
+        export_observations(&e, &mut jsonl, "jsonl", at, at, Some("serverq")).unwrap();
+        let exported: Vec<Value> = String::from_utf8(jsonl).unwrap().lines().skip(1).map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(exported.len(), sent.len());
+        for (x, r) in exported.iter().zip(sent) {
+            assert_eq!(&x["observation"], &r["payload"]["observation"], "identity, measures, reasons and sample time survive");
+            assert_eq!(x["observation"]["started_ms"], at * 1000);
+        }
+        let mut csv = Vec::new();
+        export_observations(&e, &mut csv, "csv", at, at, None).unwrap();
+        let csv = String::from_utf8(csv).unwrap();
+        assert!(csv.lines().nth(1).unwrap().ends_with(",inventory,unknown"));
+        for r in sent {
+            let cell = r["payload"]["observation"]["inventory"].to_string().replace('"', "\"\"");
+            assert!(csv.contains(&format!(",\"{cell}\",")), "{cell}");
+        }
+    }
+
+    // Defect: a typed exception that leaks would carry contents, environment values or credentials off the host, or admit
+    // a path anywhere else. Protects D28 Inventory and R1.
+    #[test]
+    fn inventory_keeps_refusing_secrets_contents_and_malformed_records() {
+        let (e, cred) = inventory_device("inventory-refused");
+        let base = inventory_wire()["records"].as_array().unwrap().iter().find(|r| r["payload"]["observation"]["inventory"]["identity"] == "/srv").unwrap().clone();
+        let next = std::sync::atomic::AtomicU64::new(1);
+        let answer = |mutate: &dyn Fn(&mut Value)| {
+            let mut r = base.clone();
+            // each request an hour later, so the device budget never answers for the validator
+            let n = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            r["event_id"] = json!(format!("{n:032x}"));
+            r["payload"]["id"] = r["event_id"].clone();
+            mutate(&mut r["payload"]["observation"]);
+            let (_, v) = machine(&e, "/machine/ingest", Some(&cred), json!({"protocol": 1, "records": [r]}), T0 + n as i64 * 3600);
+            receipts(&v).remove(0)
+        };
+        let refused = |mutate: &dyn Fn(&mut Value), case: &str| assert_eq!(answer(mutate), ("rejected".to_string(), Some("payload".to_string())), "{case}");
+        let inv = |o: &mut Value, k: &str, x: Value| o["inventory"][k] = x;
+        assert_eq!(answer(&|_| {}).0, "accepted", "the base record is valid");
+        for key in ["content", "file_content", "text", "env", "environment", "API_KEY", "token", "credential", "password", "secret", "prompt", "command", "stdout", "output", "path", "cost_usd", "other"] {
+            for value in ["invented file content line", "API_KEY=invented-environment-value", "ghp_aaaaaaaaaaaaaaaaaaaaaaaa"] {
+                refused(&|o| inv(o, key, json!(value)), key);
+            }
+        }
+        let long_name = "x".repeat(257);
+        let long_cyrillic = "я".repeat(129);
+        let long_path = format!("/{}", "x".repeat(4096));
+        for (entity, identity) in [
+            ("service", "API_KEY=invented-environment-value"), ("service", "https://user:invented@example.test/repo"), ("container", "line one\nline two"), ("service", ""), ("service", long_name.as_str()), ("host", long_cyrillic.as_str()),
+            ("service", "/srv/app"), ("container", r"C:\data"), ("host", r"\\nas\share"), ("service", "~/x"),
+            ("folder", ""), ("folder", "relative/path"), ("folder", "~/x"), ("folder", "/a/../b"), ("folder", "/a/./b"), ("folder", "/a//b"), ("folder", "/srv\n/invented file content"), ("folder", long_path.as_str()),
+            ("mount", "C:relative"), ("mount", r"C:\\"), ("mount", r"\\server"), ("mount", r"\\user@nas\share"), ("mount", r"\\user:invented@nas\share"), ("project_root", r"\\.\pipe\x"),
+            ("project_root", r"\\?\C:relative"), ("project_root", r"\\?\UNC\server"), ("project_root", r"\\?\UNC\user@nas\share"), ("folder", r"\\?\Volume{not-a-guid}\"), ("folder", r"\\?\Volume{00000000-0000-0000-0000-000000000000}"), ("folder", r"\\?\pipe\x"),
+            ("user", "x"),
+        ] {
+            refused(&|o| o["inventory"] = json!({"entity": entity, "identity": identity}), identity);
+        }
+        for (key, value, why) in [
+            ("identity", json!(1), "identity type"), ("identity", Value::Null, "identity null"), ("disk_used_bytes", json!("1"), "measure text"), ("disk_used_bytes", json!(-1), "negative"), ("disk_used_bytes", json!(1.5), "fraction"),
+            ("disk_used_bytes", json!(true), "bool"), ("disk_used_bytes", json!({}), "object"), ("cpu_used_milli", json!(1), "foreign measure"), ("status", json!("invented file content line"), "status text"), ("status", json!(1), "status type"),
+            ("unknown", json!("reason"), "reasons type"), ("unknown", json!({"disk_used_bytes": 1}), "reason type"), ("unknown", json!({"cpu_used_milli": "no-cgroup"}), "foreign reason"), ("unknown", json!({"other": "reason"}), "unknown reason"),
+            ("unknown", json!({"status": "invented file content"}), "reason text"),
+        ] {
+            refused(&|o| inv(o, key, value.clone()), why);
+        }
+        // a null needs its reason, and a collected value has none
+        refused(&|o| { inv(o, "disk_used_bytes", Value::Null); inv(o, "unknown", json!({})); }, "null without reason");
+        refused(&|o| o["inventory"] = json!({"entity": "folder", "identity": "/srv", "disk_used_bytes": 1, "unknown": {"disk_used_bytes": "x"}}), "value with reason");
+        // the object lives on its own kind only, and that kind needs it
+        refused(&|o| o["kind"] = json!("check"), "inventory on another kind");
+        refused(&|o| { o.as_object_mut().unwrap().remove("inventory"); }, "kind without inventory");
+        refused(&|o| o["inventory"] = json!("/srv"), "inventory is an object");
+        // a path stays refused everywhere outside the typed field
+        for key in ["operation", "source", "host", "project"] {
+            refused(&|o| o[key] = json!("/var/lib"), key);
+        }
+        refused(&|o| o["detail"] = json!({"inventory": {"entity": "folder", "identity": "/srv"}}), "nested elsewhere");
+        // generic metadata and other schemas gain nothing
+        for schema in ["agentq-snapshot/1", "serverq-report/1"] {
+            assert!(!snapshot_metadata(schema, &json!({"inventory": {"entity": "folder", "identity": "/srv"}})), "{schema}");
+        }
+        assert!(!metadata(&json!({"identity": "/srv"}), 0));
+        assert!(!metadata(&json!({"path": "x"}), 0));
+    }
+
+    /// The largest path and name CoreQ documents are accepted; one byte more is not.
+    #[test]
+    fn inventory_identity_bounds_match_coreq() {
+        let entity = |e: &str, i: String| json!({"entity": e, "identity": i});
+        assert!(inventory(&entity("service", "x".repeat(256))));
+        assert!(!inventory(&entity("service", "x".repeat(257))));
+        assert!(inventory(&entity("folder", format!("/{}", "x".repeat(4095)))));
+        assert!(!inventory(&entity("folder", format!("/{}", "x".repeat(4096)))));
+        for good in ["/", "/srv/", r"C:\", "C:/", r"C:\данные", r"/posix\backslash", r"\\nas\share", r"\\nas\share\", r"\\nas\share\日本語", r"\\?\C:\", r"\\?\C:\данные\", r"\\?\UNC\nas\share", r"\\?\UNC\nas\share\日本語\", r"\\?\Volume{00000000-0000-0000-0000-000000000000}\", r"\\?\Volume{ABCDEF01-2345-6789-abcd-0123456789ab}\данные\"] {
+            for e in ["mount", "project_root", "folder"] {
+                assert!(inventory(&entity(e, good.to_string())), "{e}: {good}");
+            }
+        }
+        for bad in [r"\\?\C:relative", r"\\?\UNC\server", "//", r"C:\\", "C://", "/srv//", r"C:\srv\\", r"\\nas\share\\", r"\\?\C:\\", r"\\?\UNC\", r"\\?\UNC\server\", r"\\?\UNC\server\\share", r"\\?\UNC\server\share\\", r"\\?\UNC\server\..", r"\\?\UNC\user@nas\share", r"\\?\C:\data\..", r"\\?\C:\data\.\x", r"\\?\Volume{00000000-0000-0000-0000-000000000000}", r"\\?\Volume{00000000-0000-0000-0000-000000000000}\\", r"\\?\Volume{not-a-guid}\", r"\\?\pipe\x", r"\\?\relative\path"] {
+            assert!(!inventory(&entity("folder", bad.to_string())), "{bad}");
+        }
+    }
+
     fn receipts(v: &Value) -> Vec<(String, Option<String>)> {
         v["receipts"].as_array().unwrap().iter().map(|r| (r["state"].as_str().unwrap().to_string(), r["reason"].as_str().map(String::from))).collect()
     }

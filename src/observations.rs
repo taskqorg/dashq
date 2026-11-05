@@ -270,7 +270,7 @@ pub fn export_header(w: &mut impl Write, format: &str, from: i64, to: i64, rows:
     if format == "csv" {
         writeln!(w, "# export={EXPORT} schema={SCHEMA} version={VERSION} from={from} to={to} rows={rows}")?;
         let store = ["installation", "workspace", "generation", "grant_product", "received", "seq", "id", "received_ms"];
-        return writeln!(w, "{},{},unknown", store.join(","), FIELDS.join(","));
+        return writeln!(w, "{},{},inventory,unknown", store.join(","), FIELDS.join(","));
     }
     writeln!(w, "{}", json!({"export": EXPORT, "schema": SCHEMA, "version": VERSION, "from": from, "to": to, "rows": rows, "format": "jsonl"}))
 }
@@ -281,7 +281,7 @@ pub fn export_row(w: &mut impl Write, format: &str, l: &Line) -> std::io::Result
     let (seq, id, received_ms) = (&l.value["seq"], &l.value["id"], &l.value["received_ms"]);
     if format == "csv" {
         let store = [json!(r.installation), json!(r.workspace), json!(r.generation), json!(r.product), json!(r.received), seq.clone(), id.clone(), received_ms.clone()];
-        let cells: Vec<String> = store.iter().map(csv).chain(FIELDS.iter().map(|f| csv(&l.o()[*f]))).chain([csv(&l.o()["unknown"])]).collect();
+        let cells: Vec<String> = store.iter().map(csv).chain(FIELDS.iter().map(|f| csv(&l.o()[*f]))).chain([csv(&l.o()["inventory"]), csv(&l.o()["unknown"])]).collect();
         return writeln!(w, "{}", cells.join(","));
     }
     writeln!(w, "{}", json!({"installation": r.installation, "workspace": r.workspace, "generation": r.generation, "product": r.product, "received": r.received, "seq": seq, "id": id, "received_ms": received_ms, "observation": l.o()}))

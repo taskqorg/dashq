@@ -289,16 +289,113 @@ fn priced(v: &Value) -> bool {
 }
 
 /// A `coreq-observation/1` payload (D28) `{seq, id, received_ms, observation}`: the shipper's shared record, metadata
-/// by the same allowlist as a telemetry line, and quantities only, never a price.
+/// by the same allowlist as a telemetry line, and quantities only, never a price. Only [`inventory`] leaves that
+/// allowlist, and only on its own kind.
 pub(super) fn observation(p: &Value, event: &str) -> bool {
     let Some(o) = p.as_object() else { return false };
     let r = &p["observation"];
     let code = |k: &str| r[k].as_str().is_some_and(|s| !s.is_empty());
+    let allowed = match r.get("inventory") {
+        None => r["kind"] != "inventory" && metadata_keys(p, 0, counter_field),
+        Some(typed) if r["kind"] == "inventory" && inventory(typed) => {
+            let mut rest = p.clone();
+            rest["observation"].as_object_mut().map(|x| x.remove("inventory"));
+            metadata_keys(&rest, 0, counter_field)
+        }
+        Some(_) => false,
+    };
     o.len() == 4 && p["seq"].is_u64() && p["received_ms"].is_u64() && p["id"] == event && r["schema"] == 1
         && ["kind", "operation", "outcome", "error"].iter().all(|k| code(k))
         && r.is_object()
         && !priced(r)
-        && metadata_keys(p, 0, counter_field)
+        && allowed
+}
+
+fn inventory_code(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 128 && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"._:-".contains(&c))
+}
+
+fn inventory_line(s: &str, limit: usize) -> bool {
+    !s.is_empty() && s.len() <= limit && !s.chars().any(char::is_control)
+}
+
+/// An absolute normalized POSIX, drive, UNC or extended Windows path; a UNC server holds no login. CoreQ's rule (R54).
+fn inventory_path(text: &str) -> bool {
+    if !inventory_line(text, 4096) {
+        return false;
+    }
+    let (text, extended) = text.strip_prefix(r"\\?\").map_or((text, false), |rest| (rest, true));
+    let bytes = text.as_bytes();
+    let unc = if extended { text.strip_prefix(r"UNC\") } else { text.strip_prefix(r"\\") };
+    let (rest, windows) = if let Some(rest) = unc {
+        let mut parts = rest.split(['\\', '/']);
+        let server = parts.next().is_some_and(|server| !server.is_empty() && !server.contains(['@', ':']));
+        if !server || parts.next().is_none_or(str::is_empty) {
+            return false;
+        }
+        (rest, true)
+    } else if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/') {
+        (&text[3..], true)
+    } else if extended {
+        let Some((volume, rest)) = text.split_once('\\') else { return false };
+        let Some(guid) = volume.strip_prefix("Volume{").and_then(|x| x.strip_suffix('}')) else { return false };
+        if guid.len() != 36 || !guid.bytes().enumerate().all(|(i, b)| if [8, 13, 18, 23].contains(&i) { b == b'-' } else { b.is_ascii_hexdigit() }) {
+            return false;
+        }
+        (rest, true)
+    } else if let Some(rest) = text.strip_prefix('/') {
+        (rest, false)
+    } else {
+        return false;
+    };
+    if rest.is_empty() {
+        return true;
+    }
+    let separator = |c: char| c == '/' || (windows && c == '\\');
+    let rest = rest.strip_suffix(separator).unwrap_or(rest);
+    rest.split(separator).all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// A display name, never an assignment or a URL, which is how environment values and credentials look, and never a
+/// path: the generic refusal of path-like strings still holds here (D28).
+fn inventory_name(v: &Value, text: &str) -> bool {
+    inventory_line(text, 256) && !text.contains('=') && !text.contains("://") && metadata_keys(v, 1, field)
+}
+
+/// `observation.inventory` (D28, CoreQ 0.22.0 Inventory): exactly the listed fields of one entity. A measure is null
+/// only with its reason, and a reason needs a null or absent measure.
+// ponytail: copies CoreQ's private validator at its pin; call it when CoreQ exports one and DashQ's pin reaches it
+pub(super) fn inventory(v: &Value) -> bool {
+    const HOST: &[&str] = &["status", "os", "os_version", "uptime_s", "load_1_milli", "load_5_milli", "load_15_milli", "cpu_count", "cpu_used_milli", "ram_total_bytes", "ram_used_bytes", "swap_total_bytes", "swap_used_bytes"];
+    const MOUNT: &[&str] = &["status", "disk_total_bytes", "disk_used_bytes", "disk_free_bytes"];
+    const WORKLOAD: &[&str] = &["status", "cpu_used_milli", "ram_used_bytes", "disk_used_bytes"];
+    const FOLDER: &[&str] = &["status", "disk_used_bytes"];
+    let Some(o) = v.as_object() else { return false };
+    let (is_path, measures) = match o.get("entity").and_then(Value::as_str) {
+        Some("host") => (false, HOST),
+        Some("mount") => (true, MOUNT),
+        Some("service" | "container") => (false, WORKLOAD),
+        Some("project_root") => (true, WORKLOAD),
+        Some("folder") => (true, FOLDER),
+        _ => return false,
+    };
+    let empty = serde_json::Map::new();
+    let reasons = match o.get("unknown") {
+        None => &empty,
+        Some(Value::Object(x)) => x,
+        Some(_) => return false,
+    };
+    let identity = o.get("identity").is_some_and(|i| i.as_str().is_some_and(|s| if is_path { inventory_path(s) } else { inventory_name(i, s) }));
+    identity
+        && o.iter().all(|(k, x)| match k.as_str() {
+            "entity" | "identity" | "unknown" => true,
+            k if !measures.contains(&k) => false,
+            k if x.is_null() => reasons.contains_key(k),
+            k if reasons.contains_key(k) => false,
+            "status" | "os" | "os_version" => x.as_str().is_some_and(inventory_code),
+            _ => x.is_u64(),
+        })
+        && reasons.iter().all(|(k, why)| measures.contains(&k.as_str()) && o.get(k).is_none_or(Value::is_null) && why.as_str().is_some_and(inventory_code))
 }
 
 /// TaskQ's allowlisted resource projection (taskq shared-resource-controls.md, Project overlay: Enrollment record).
