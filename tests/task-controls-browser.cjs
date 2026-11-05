@@ -7,7 +7,7 @@ const jsFiles = ['assets/taskq/resource-controls.js','assets/resources.js','asse
 const cssFiles = ['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css'];
 const read = f => fs.readFileSync(f,'utf8');
 const js = jsFiles.map(read).join('\n'), css = cssFiles.map(read).join('\n');
-const capture = process.argv.includes('--capture'), out = 'docs/design/evidence/task-controls';
+const capture = process.argv.includes('--capture'), out = process.env.DASHQ_CONTROL_SHOTS || fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'dashq-controls-'));
 const escape = s => s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 (async()=>{
  const browser = await chromium.launch({headless:true});

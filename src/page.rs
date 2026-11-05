@@ -42,7 +42,7 @@ pub(crate) fn badge(state: &str, label: &str) -> String {
 }
 
 fn at(v: &Value, now: u64) -> String {
-    crate::findings::time(v).map_or("—".into(), |a| format!("{} ({} ago)", clock(a, now), dur(now.saturating_sub(a))))
+    crate::findings::time(v).map_or("? unavailable".into(), |a| format!("{} ago ({})", dur(now.saturating_sub(a)), clock(a, now)))
 }
 
 fn trace(id: &Value, base: &str) -> String {
@@ -98,7 +98,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
             if *p == period { format!("<strong>{name}</strong>") } else { format!("<a href=\"/?period={p}{}\">{name}</a>", esc(&filters)) }
         })
         .collect();
-    let _ = writeln!(w, "<p class=\"bar\">Updated <time data-at=\"{now}\">{}</time> · Period {} <button id=\"refresh\" type=\"button\">Refresh</button></p>", clock(now, now), periods.join(" · "));
+    let _ = writeln!(w, "<p class=\"bar\">Updated <time data-at=\"{now}\">{}</time> · Period {} <button id=\"refresh\" type=\"button\">Refresh</button></p>", esc(&at(&json!(now), now)), periods.join(" · "));
     let _ = writeln!(w, "<p id=\"banner\" class=\"banner\" role=\"alert\" hidden></p>");
     let not_ok: Vec<String> = doc["sources"]
         .as_object()
@@ -117,7 +117,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 "assetq" => "AssetQ",
                 _ => "serverq",
             };
-            format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", dur(a))))
+            format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", esc(&dur(a)))))
         })
         .collect();
     let configured = |name: &str| doc["sources"][name].is_object() && doc["sources"][name]["reason"] != "not configured";
@@ -160,7 +160,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
         let _ = writeln!(w, "<ul class=\"items\">");
         for i in items {
             let link = i["url"].as_str().map(|u| format!(" <a href=\"{}\">issue</a>", esc(u))).unwrap_or_default();
-            let since = if i["since"].is_null() { " · in this period".into() } else { format!(" · since {}", at(&i["since"], now)) };
+            let since = if i["since"].is_null() { " · in this period".into() } else { format!(" · since {}", esc(&at(&i["since"], now))) };
             let mut line = format!("<li><b>{}</b>{} · {}{since}", text(&i["source"]), i["host"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default(), text(&i["what"]));
             let source = match i["source"].as_str() { Some("serverq") => "serverq", Some("taskq") => if doc["sources"]["taskq"].is_object() { "taskq" } else { "github" }, _ => "langfuse" };
                 let observation = if i["source"] == "taskq" {
@@ -217,7 +217,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
             let _ = writeln!(
                 w,
                 "<tr><td>{}</td><td>{}</td><td>{ver}</td><td>{}{}</td><td>{hb}</td><td>{} ({} of {})</td><td>{} ({})</td></tr>",
-                text(&x["host"]), text(&x["installation"]), at(&x["last_seen"], now), trace(&x["trace_id"], base),
+                text(&x["host"]), text(&x["installation"]), esc(&at(&x["last_seen"], now)), trace(&x["trace_id"], base),
                 num(&x["runs"], &cn), num(&x["nonzero_exits"], &cn), text(&x["exit_samples"]), num(&x["retrievals"], &cv), num(&x["failed_retrievals"], &cv)
             );
         }
@@ -227,7 +227,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
         let _ = writeln!(w, "<h3>Model activity</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Calls</th><th>Errors</th><th>Sessions</th><th>Last call</th></tr>");
         let ca = capped("activity");
         for a in ag["activity"].as_array().into_iter().flatten() {
-            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>", text(&a["host"]), name(&a["agent"]), num(&a["calls"], &ca), num(&a["errors"], &ca), num(&a["sessions"], &ca), at(&a["last_at"], now), trace(&a["trace_id"], base));
+            let _ = writeln!(w, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}{}</td></tr>", text(&a["host"]), name(&a["agent"]), num(&a["calls"], &ca), num(&a["errors"], &ca), num(&a["sessions"], &ca), esc(&at(&a["last_at"], now)), trace(&a["trace_id"], base));
         }
         let _ = writeln!(w, "</table>\n<h3>Model usage (sum and samples per field; fields are not added together)</h3>\n<table>\n<tr><th>Host</th><th>Agent</th><th>Model</th><th>Calls</th><th>Usage</th><th>Reported cost</th></tr>");
         for a in ag["activity"].as_array().into_iter().flatten() {
@@ -266,7 +266,7 @@ fn reports(w: &mut String, doc: &Value, query: &str) {
     let q = &doc["query"];
     let stamp = |v: &Value| v.as_u64().map_or("unknown".into(), crate::source::iso);
     let reasons = |v: &Value| v.as_array().into_iter().flatten().filter_map(Value::as_str).map(esc).collect::<Vec<_>>().join("; ");
-    let source = |label: &str, s: &Value| format!("<p class=\"report-source note\">{label} source: <span data-report-state>{} · {}</span> · source time {} · <span data-age-s=\"{}\">{}</span></p>", esc(s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("observed records")), stamp(&s["at"]), s["age_s"].as_u64().map_or(String::new(),|n|n.to_string()), s["age_s"].as_u64().map_or("age unknown".into(),|n|format!("{n} s old")));
+    let source = |label: &str, s: &Value| format!("<p class=\"report-source note\">{label} source: <span data-report-state>{} · {}</span> · source time {} · <span data-age-s=\"{}\">{}</span></p>", esc(s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("observed records")), stamp(&s["at"]), s["age_s"].as_u64().map_or(String::new(),|n|n.to_string()), s["age_s"].as_u64().map_or("age unknown".into(),|n|format!("{} old", esc(&dur(n)))));
     let lower = a["source"]["incomplete"] == true;
     let count = |n: u64| if lower { format!("at least {n}") } else { n.to_string() };
     let _ = write!(w, "<section id=\"reports\"><h2>Reports</h2><p class=\"report-scope\">{} → {} · UTC · host {} · agent {} · session {}</p><p class=\"note\">Time: host scope only; agent/session filters apply to model use. Attempts are selected by stage end time; whole-attempt durations are not clipped to the query window.</p><div class=\"report-grid\"><div><h3>Agent time</h3>{}", stamp(&q["from"]), stamp(&q["to"]), esc(doc["filters"]["host"].as_str().unwrap_or("all")), esc(doc["filters"]["agent"].as_str().unwrap_or("all")), esc(doc["filters"]["session"].as_str().unwrap_or("all")), source("Stage",&a["source"]));
@@ -343,7 +343,7 @@ fn clients(w: &mut String, c: &Value, cc: &Value, cr: &Value, now: u64) {
             Some(h) => h.iter().map(|h| {
                 let s = h["state"].as_str().unwrap_or("unknown");
                 let f = &h["last_failure"];
-                let fail = if f.is_null() { String::new() } else { format!(" <span class=\"detail\">failed {}: {}</span>", at(&f["at"], now), f["error"].as_str().map_or("reason withheld".into(), esc)) };
+                let fail = if f.is_null() { String::new() } else { format!(" <span class=\"detail\">failed {}: {}</span>", esc(&at(&f["at"], now)), f["error"].as_str().map_or("reason withheld".into(), esc)) };
                 format!("{} {}{fail}", text(&h["event"]), badge(if !fresh { "unconfirmed" } else if s == "failed" { "error" } else { s }, &last(s)))
             }).collect::<Vec<_>>().join("<br>"),
         };
@@ -375,22 +375,22 @@ fn versions(w: &mut String, versions: &Value, now: u64) {
         let key = id(r);
         let obs = &r["observation"];
         let update = match r["update"]["state"].as_str() { Some("available") => "Update available", Some("current") => "Version current", Some("error") => "Update error reported", _ => "Update unknown" };
-        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small>{}</span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>{}</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), r["reason"].as_str().map(|s| format!("<small>{}</small>", esc(s))).unwrap_or_default(), version(&r["running"]), version(&r["selected"]), version(&r["release"]), at(&r["release"]["at"], now), text(&r["release"]["state"]), text(&obs["state"]), at(&obs["at"], now), health(r));
+        let _ = writeln!(w, "<button type=\"button\" class=\"row version-select\" id=\"select-{key}\" aria-controls=\"{key}\" aria-pressed=\"{}\" aria-expanded=\"{}\"><span class=\"identity\"><strong>{}</strong><small>{}</small><small>Workspace: {}</small>{}</span><span><span class=\"label\">Running</span>{}</span><span><span class=\"label\">Selected</span>{}</span><span><span class=\"label\">Available</span>{}<small>Checked {}</small><small>{}</small></span><span class=\"health muted\">{update}<small>{} · {}</small><small>{}</small></span></button>", i == 0, i == 0, text(&r["product"]), text(&r["host"]), value(&r["workspace"]), r["reason"].as_str().map(|s| format!("<small>{}</small>", esc(s))).unwrap_or_default(), version(&r["running"]), version(&r["selected"]), version(&r["release"]), esc(&at(&r["release"]["at"], now)), text(&r["release"]["state"]), text(&obs["state"]), esc(&at(&obs["at"], now)), health(r));
     }
     let _ = writeln!(w, "</div>");
     for (i, r) in rows.iter().enumerate() {
         let key = id(r);
-        let _ = writeln!(w, "<section class=\"detail version-body\" id=\"{key}\" aria-labelledby=\"select-{key}\"{}><h3>{} · {}</h3><p class=\"notice\">{}. Service health does not verify every integration or workload.</p><div class=\"columns\"><section><h3>Update</h3><ol class=\"steps\">", if i == 0 { "" } else { " hidden" }, text(&r["product"]), text(&r["host"]), if verified(r) { format!("Health verified: {} wrote its status {}", text(&r["health"]["version"]), at(&r["health"]["at"], now)) } else { format!("Current health unknown: {}", text(&r["health"]["reason"])) });
+        let _ = writeln!(w, "<section class=\"detail version-body\" id=\"{key}\" aria-labelledby=\"select-{key}\"{}><h3>{} · {}</h3><p class=\"notice\">{}. Service health does not verify every integration or workload.</p><div class=\"columns\"><section><h3>Update</h3><ol class=\"steps\">", if i == 0 { "" } else { " hidden" }, text(&r["product"]), text(&r["host"]), if verified(r) { format!("Health verified: {} wrote its status {}", text(&r["health"]["version"]), esc(&at(&r["health"]["at"], now))) } else { format!("Current health unknown: {}", text(&r["health"]["reason"])) });
         for (label, v) in [("Release check", &r["release"]), ("Version comparison", &r["update"]), ("Lifecycle", &r["lifecycle"])] {
             let _ = writeln!(w, "<li><span aria-hidden=\"true\">{}</span><span>{label}: {}{}</span></li>", if v["state"] == "error" { "!" } else { "—" }, text(&v["state"]), v["reason"].as_str().map(|s| format!(" · {}", esc(s))).unwrap_or_default());
         }
         let _ = writeln!(w, "</ol></section><section><h3>Diagnostics</h3>");
         let engines = r["libraries"]["engines"].as_object().map(|e| e.iter().map(|(k,v)| format!("{} {}", esc(k), value(v))).collect::<Vec<_>>().join(" · ")).filter(|s| !s.is_empty()).unwrap_or_else(|| "Not reported".into());
-        for (label, v) in [("Health receipt", if verified(r) { format!("status_written · {} · {}", text(&r["health"]["version"]), at(&r["health"]["at"], now)) } else { "Not reported".into() }), ("Safe reason code", "Not reported".into()), ("Queue oldest age at observation", r["queue_age_s"].as_u64().map_or("Not reported".into(), dur)), ("Engine / component", engines), ("coreq version", value(&r["libraries"]["coreq"]))] {
+        for (label, v) in [("Health receipt", if verified(r) { format!("status_written · {} · {}", text(&r["health"]["version"]), esc(&at(&r["health"]["at"], now))) } else { "Not reported".into() }), ("Safe reason code", "Not reported".into()), ("Queue oldest age at observation", r["queue_age_s"].as_u64().map_or("Not reported".into(), |s| esc(&dur(s)))), ("Engine / component", engines), ("coreq version", value(&r["libraries"]["coreq"]))] {
             let _ = writeln!(w, "<div class=\"fact\"><small>{label}</small><span>{v}</span></div>");
         }
         let _ = writeln!(w, "</section></div><details id=\"events-{key}\"><summary id=\"summary-events-{key}\">Evidence &amp; timeline</summary>");
-        for (label, v) in [("Installation", value(&r["installation"])), ("Workspace", value(&r["workspace"])), ("Source", text(&r["provenance"])), ("Host observation", at(&r["observation"]["at"], now)), ("Host state", text(&r["observation"]["state"])), ("Observation reason", value(&r["observation"]["reason"])), ("Release check", at(&r["release"]["at"], now)), ("Producer-reported candidate (unverified)", value(&r["reported_available"])), ("Update history", "Not reported".into())] {
+        for (label, v) in [("Installation", value(&r["installation"])), ("Workspace", value(&r["workspace"])), ("Source", text(&r["provenance"])), ("Host observation", esc(&at(&r["observation"]["at"], now))), ("Host state", text(&r["observation"]["state"])), ("Observation reason", value(&r["observation"]["reason"])), ("Release check", esc(&at(&r["release"]["at"], now))), ("Producer-reported candidate (unverified)", value(&r["reported_available"])), ("Update history", "Not reported".into())] {
             let _ = writeln!(w, "<div class=\"fact\"><small>{label}</small><span>{v}</span></div>");
         }
         let _ = writeln!(w, "</details></section>");
@@ -414,7 +414,7 @@ fn telemetry(w: &mut String, inst: &Value, now: u64, query: &str) {
             let (state, name) = match s["state"].as_str() { Some("known") => ("known", "Known"), Some("not_applicable") => ("not_applicable", "Not applicable"), _ => ("unknown", "Unknown") };
             let value = match (state, &s["value"]) { ("known", Value::Bool(true)) => "Yes".into(), ("known", Value::Bool(false)) => "No".into(), ("known", v) => num(v, s), _ => "—".into() };
             let why = s["reason"].as_str().unwrap_or(if state == "unknown" { "no stage evidence" } else { "—" });
-            let _ = writeln!(w, "<li data-stage=\"{key}\" data-state=\"{state}\"><strong>{label}</strong><span>{name} · {value}</span><small>Evidence time: {}</small><small>{}</small></li>", at(&s["at"], now), esc(why));
+            let _ = writeln!(w, "<li data-stage=\"{key}\" data-state=\"{state}\"><strong>{label}</strong><span>{name} · {value}</span><small>Evidence time: {}</small><small>{}</small></li>", esc(&at(&s["at"], now)), esc(why));
         }
         let _ = writeln!(w, "</ol>{}<p class=\"detail\"><a href=\"/data{}\">Route projection evidence</a></p>", unknown_line(&r["observation"]), esc(query));
         let t = &r["telemetry"];
@@ -422,10 +422,10 @@ fn telemetry(w: &mut String, inst: &Value, now: u64, query: &str) {
             let k = &t["retained"];
             let _ = writeln!(w, "<h4>Coverage</h4>{}<div class=\"telemetry-coverage\"><div><strong>Retained in receipt order</strong>", unknown_line(t));
             if k.is_object() {
-                let _ = writeln!(w, "<p>seq {}–{} · {} rows · {} bytes · {} blocks</p><p class=\"detail\">First receipt: {}<br>Newest receipt: {}</p>", num(&k["first_seq"], t), num(&k["last_seq"], t), num(&k["rows"], t), num(&k["bytes"], t), num(&k["blocks"], t), at(&k["oldest_received"], now), at(&k["newest_received"], now));
+                let _ = writeln!(w, "<p>seq {}–{} · {} rows · {} bytes · {} blocks</p><p class=\"detail\">First receipt: {}<br>Newest receipt: {}</p>", num(&k["first_seq"], t), num(&k["last_seq"], t), num(&k["rows"], t), num(&k["bytes"], t), num(&k["blocks"], t), esc(&at(&k["oldest_received"], now)), esc(&at(&k["newest_received"], now)));
             } else { let _ = writeln!(w, "<p class=\"unknown\">Unknown · {}</p>", text(&t["reason"])); }
             let sender = &t["sender"];
-            let _ = writeln!(w, "</div><div><strong>Sender counters</strong><p>Backlog: {} rows · {} bytes<br>Sender gap: {} rows</p><p class=\"detail\">Newest retained block: {}</p>{}</div><div><strong>Unreceived between blocks</strong>", num(&sender["backlog_rows"], sender), num(&sender["backlog_bytes"], sender), num(&sender["gap_rows"], sender), at(&t["last_synced"], now), unknown_line(sender));
+            let _ = writeln!(w, "</div><div><strong>Sender counters</strong><p>Backlog: {} rows · {} bytes<br>Sender gap: {} rows</p><p class=\"detail\">Newest retained block: {}</p>{}</div><div><strong>Unreceived between blocks</strong>", num(&sender["backlog_rows"], sender), num(&sender["backlog_bytes"], sender), num(&sender["gap_rows"], sender), esc(&at(&t["last_synced"], now)), unknown_line(sender));
             if k.is_object() {
                 let _ = writeln!(w, "<p>{} holes · {} rows</p><ul class=\"telemetry-ranges\">", num(&t["holes_total"], t), num(&t["hole_rows"], t));
                 for hole in t["holes"].as_array().into_iter().flatten() {
@@ -442,7 +442,7 @@ fn telemetry(w: &mut String, inst: &Value, now: u64, query: &str) {
             let evidence = t["evidence"].as_array().map(Vec::as_slice).unwrap_or_default();
             let _ = writeln!(w, "</ul></div></div><details id=\"blocks-{anchor}\"><summary id=\"summary-blocks-{anchor}\">Retained block evidence · {} of {} (newest 200)</summary><ul class=\"telemetry-blocks\">", evidence.len(), num(&t["blocks"], t));
             for b in evidence {
-                let _ = writeln!(w, "<li><a href=\"/data{}&amp;block={}\">{}</a> · generation {} · seq {}–{} · {} rows<br><span class=\"detail\">Observed: {} · received: {}</span> · <a data-view-link href=\"{}\">Installation row</a></li>", esc(query), enc(b["event_id"].as_str().unwrap_or("")), text(&b["event_id"]), num(&b["generation"], t), num(&b["first_seq"], t), num(&b["last_seq"], t), num(&b["rows"], t), at(&b["observed_at"], now), at(&b["received_at"], now), esc(&connection));
+                let _ = writeln!(w, "<li><a href=\"/data{}&amp;block={}\">{}</a> · generation {} · seq {}–{} · {} rows<br><span class=\"detail\">Observed: {} · received: {}</span> · <a data-view-link href=\"{}\">Installation row</a></li>", esc(query), enc(b["event_id"].as_str().unwrap_or("")), text(&b["event_id"]), num(&b["generation"], t), num(&b["first_seq"], t), num(&b["last_seq"], t), num(&b["rows"], t), esc(&at(&b["observed_at"], now)), esc(&at(&b["received_at"], now)), esc(&connection));
             }
             let _ = writeln!(w, "</ul></details>");
         } else {
@@ -489,7 +489,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         };
         let o = &r["observation"];
         let data = match o["age_s"].as_u64() {
-            Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, dur(age), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
+            Some(age) => format!("{} {} ago{}", if revoked { "Last observation" } else { "Observed" }, esc(&dur(age)), if !revoked && o["state"] != "ok" { format!(" · {}", text(&o["state"])) } else { String::new() }),
             None => format!("Unknown · {}", o["reason"].as_str().map(esc).unwrap_or_else(|| "no observation".into())),
         };
         // #242: retired joins stale and revoked behind the filter; an Attention anchor still reveals a silent row
@@ -502,7 +502,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let _ = writeln!(w, "<button type=\"button\" class=\"connect-select\" data-inactive=\"{inactive}\" id=\"select-{id}\" aria-controls=\"{id}\" aria-expanded=\"{selected}\" aria-pressed=\"{selected}\"><span><strong>{product}</strong><small>{} · {}</small>{identity}</span><span class=\"{class}\">{connection}</span><span class=\"connect-data\">{data}</span></button>", text(&r["host_label"]), text(&r["runtime"]));
         let w = &mut panels;
         let _ = writeln!(w, "<div class=\"connect-body\" data-inactive=\"{inactive}\" id=\"{id}\" {}><strong>{product} · {} ({})</strong>", if selected { "" } else { "hidden" }, text(&r["host_label"]), text(&r["runtime"]));
-        let received = if r["received_at"].as_u64().is_some_and(|t| t > now) { "Unknown · server clock uncertain".into() } else if r["received_at"].is_null() { "Unknown · no durable receipt yet".into() } else { at(&r["received_at"], now) };
+        let received = if r["received_at"].as_u64().is_some_and(|t| t > now) { "Unknown · server clock uncertain".into() } else if r["received_at"].is_null() { "Unknown · no durable receipt yet".into() } else { esc(&at(&r["received_at"], now)) };
         let _ = writeln!(w, "<p class=\"detail\">Host activity unknown. Last durable receipt: {}. {}</p>", received, if revoked { "Local work continues independently." } else { "The host retries with its existing grant; silence does not prove it stopped or disconnected locally." });
         if let Some(reason) = o["reason"].as_str() {
             let _ = writeln!(w, "<p class=\"detail\">Producer: {}</p>", esc(reason));
@@ -532,7 +532,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let l = &r["project_limits"];
         if r["product"] == "taskq" && !revoked && l.is_object() && l["state"] != "off" {
             let age = match l["age_s"].as_u64() {
-                Some(a) => format!("observed {} ago{}", dur(a), l["reason"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default()),
+                Some(a) => format!("observed {} ago{}", esc(&dur(a)), l["reason"].as_str().map(|x| format!(" · {}", esc(x))).unwrap_or_default()),
                 None => format!("Unknown · {}", text(&l["reason"])),
             };
             let _ = writeln!(w, "<p class=\"detail\">Project limits: {age}</p>");
@@ -553,7 +553,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
             let mut line = if t["state"] == "ok" {
                 let why = json!({"reason": t["reason"].as_str().unwrap_or("not reported")});
                 let k = &t["retained"];
-                format!("last sync {} · backlog {} rows ({} bytes) · gap {} rows · retained seq {}–{} ({} rows, {} blocks)", at(&t["last_synced"], now), num(&t["backlog_rows"], &why), num(&t["backlog_bytes"], &why), num(&t["gap_rows"], &why),
+                format!("last sync {} · backlog {} rows ({} bytes) · gap {} rows · retained seq {}–{} ({} rows, {} blocks)", esc(&at(&t["last_synced"], now)), num(&t["backlog_rows"], &why), num(&t["backlog_bytes"], &why), num(&t["gap_rows"], &why),
                     text(&k["first_seq"]), text(&k["last_seq"]), text(&k["rows"]), text(&k["blocks"]))
             } else {
                 format!("Unknown · {}", text(&t["reason"]))
@@ -581,7 +581,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
         let route: Vec<String> = ["emitted", "queued", "accepted", "projected", "exported", "queryable"].iter().map(|k| {
             let s = &r["route"][*k];
             let v = match s["state"].as_str() {
-                Some("known") => match &s["value"] { Value::Bool(true) => if s["at"].is_null() { "yes".into() } else { format!("yes {}", at(&s["at"], now)) }, Value::Bool(false) => "no".into(), x => text(x) },
+                Some("known") => match &s["value"] { Value::Bool(true) => if s["at"].is_null() { "yes".into() } else { format!("yes {}", esc(&at(&s["at"], now))) }, Value::Bool(false) => "no".into(), x => text(x) },
                 Some("not_applicable") => "n/a".into(),
                 _ => format!("unknown ({})", text(&s["reason"])),
             };
@@ -611,7 +611,7 @@ fn installations(w: &mut String, inst: &Value, resources: &Value, now: u64) {
 /// One serverq report or enrolled projection: per-check status (last known unless fresh), reason, observation time
 /// and evidence; manual rules never verified; open incidents.
 fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
-    let _ = writeln!(w, "{}<p class=\"note\">{label} at {}</p>", unknown_line(&ch["source"]), at(&ch["at"], now));
+    let _ = writeln!(w, "{}<p class=\"note\">{label} at {}</p>", unknown_line(&ch["source"]), esc(&at(&ch["at"], now)));
     let _ = writeln!(w, "<table>\n<tr><th>Check</th><th>Status</th><th>Detail</th></tr>");
     for r in ch["results"].as_array().into_iter().flatten() {
         let st = r["status"].as_str().unwrap_or("unknown");
@@ -623,7 +623,7 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
         } else {
             let evidence: Vec<String> = r["evidence"].as_object().into_iter().flatten().map(|(k, v)| format!("{} {}", esc(k), text(v))).collect();
             let mut parts = vec![r["reason"].as_str().map(esc).unwrap_or_else(|| if st == "ok" { "no reason needed".into() } else { "no reason reported".into() })];
-            parts.push(format!("observed {}", at(&r["observed_at"], now)));
+            parts.push(format!("observed {}", esc(&at(&r["observed_at"], now))));
             if !evidence.is_empty() {
                 parts.push(evidence.join(", "));
             }
@@ -640,7 +640,7 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
     for f in ch["findings"].as_array().into_iter().flatten() {
         let key = crate::explain::finding_id(f);
         let st = if f["state"] == "verified" && f["source"]["state"] == "ok" { "ok" } else { "unknown" };
-        let _ = writeln!(w, "<details class=\"finding\" id=\"finding-{key}\"><summary id=\"finding-summary-{key}\">{} · {} · episode {}</summary><p>Workspace {} · installation <code>{}</code></p><p>First {} · last {} · observed {} · verified {}</p><p>Catalog {} <code>{}</code></p>", text(&f["rule"]), badge(st, f["state"].as_str().unwrap_or("unknown")), text(&f["first_seen"]), text(&f["workspace"]), text(&f["installation"]), at(&f["first_seen"], now), at(&f["last_seen"], now), at(&f["observed_at"], now), at(&f["verified_at"], now), text(&f["catalog"]["state"]), text(&f["catalog"]["sha256"]));
+        let _ = writeln!(w, "<details class=\"finding\" id=\"finding-{key}\"><summary id=\"finding-summary-{key}\">{} · {} · episode {}</summary><p>Workspace {} · installation <code>{}</code></p><p>First {} · last {} · observed {} · verified {}</p><p>Catalog {} <code>{}</code></p>", text(&f["rule"]), badge(st, f["state"].as_str().unwrap_or("unknown")), text(&f["first_seen"]), text(&f["workspace"]), text(&f["installation"]), esc(&at(&f["first_seen"], now)), esc(&at(&f["last_seen"], now)), esc(&at(&f["observed_at"], now)), esc(&at(&f["verified_at"], now)), text(&f["catalog"]["state"]), text(&f["catalog"]["sha256"]));
         let _ = writeln!(w, "{}", unknown_line(&f["source"]));
         if let Some(evidence) = f["evidence"].as_object() {
             for (key, value) in evidence { let _ = writeln!(w, "<p>{} {}</p>", esc(key), text(value)); }
@@ -661,7 +661,7 @@ fn checks(w: &mut String, ch: &Value, label: &str, now: u64) {
         let _ = writeln!(w, "<p class=\"note\">None in the report.</p>");
     }
     for i in open {
-        let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), at(&i["first_seen"], now), at(&i["last_seen"], now), text(&i["occurrences"]));
+        let _ = writeln!(w, "<p>{} · {} · first {} · last {} · {} occurrences</p>", text(&i["check"]), text(&i["state"]), esc(&at(&i["first_seen"], now)), esc(&at(&i["last_seen"], now)), text(&i["occurrences"]));
     }
 }
 
@@ -737,7 +737,7 @@ fn integrations(w: &mut String, inst: &Value, controls: bool) {
         let payload = &r["snapshot"]["payload"];
         let c = &payload["configuration"];
         let o = &r["observation"];
-        let age = o["age_s"].as_u64().map_or_else(|| esc(o["reason"].as_str().unwrap_or("age unknown")), |a| format!("observed {} ago", dur(a)));
+        let age = o["age_s"].as_u64().map_or_else(|| esc(o["reason"].as_str().unwrap_or("age unknown")), |a| format!("observed {} ago", esc(&dur(a))));
         if !matches!(c["state"].as_str(), Some("fresh" | "stale")) {
             let why = match (r["snapshot"].is_null(), c["reason"].as_str()) {
                 (true, _) => "no snapshot yet".into(),
@@ -984,7 +984,7 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         let res = r.unwrap_or(&empty);
         let (c, src) = (&res["current"], &res["source"]);
         let f = &h["freshness"];
-        let age = f["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", dur(a)));
+        let age = f["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", esc(&dur(a))));
         let observed_age = f["age_s"].as_u64().map_or(age.clone(), |a| format!("<span data-age-s=\"{a}\">{age}</span>"));
         let why = format!("{}; {}", f["reason"].as_str().unwrap_or("AgentQ heartbeat"), h["reason"].as_str().unwrap_or("canonical host identity"));
         let (name, kind) = id.split_once('/').unwrap_or((id, "kind unknown"));
@@ -1036,7 +1036,7 @@ fn host_grid(w: &mut String, doc: &Value, now: u64) {
         if let Some(obs) = h["taskq"]["observations"].as_array().filter(|a|!a.is_empty()) {
             let _ = write!(w, "<details class=\"host-evidence\" id=\"host-evidence-{key}\"><summary>TaskQ evidence</summary><div class=\"host-evidence-grid\">");
             for o in obs {
-                let _ = write!(w, "<p class=\"detail\">{} · {} · {}<br>Producer {} · workspace {}<br>Observed {} · valid until {}<br>{}</p>", text(&o["board"]["repo"]), text(&o["host"]), text(&o["kind"]), text(&o["producer"]), text(&o["workspace"]), at(&o["observed"], now), o["valid_until"].as_u64().map(|t|clock(t,now)).unwrap_or_else(|| "unknown".into()), text(&o["reason"]));
+                let _ = write!(w, "<p class=\"detail\">{} · {} · {}<br>Producer {} · workspace {}<br>Observed {} · valid until {}<br>{}</p>", text(&o["board"]["repo"]), text(&o["host"]), text(&o["kind"]), text(&o["producer"]), text(&o["workspace"]), esc(&at(&o["observed"], now)), o["valid_until"].as_u64().map(|t|clock(t,now)).unwrap_or_else(|| "unknown".into()), text(&o["reason"]));
             }
             let _ = write!(w, "</div></details>");
         }
@@ -1064,7 +1064,7 @@ fn overview_host(w: &mut String, host: &Value, res: &Value, doc: &Value, now: u6
         else if state != "ok" { "Resource data not confirmed" }
         else { "Resource samples available" };
     let source = if res.is_null() {"Host observation"}else{res["provenance"].as_str().unwrap_or("Resources")};
-    let age = src["age_s"].as_u64().map_or("Observation age unknown".into(), |age| format!("{} <span data-age-s=\"{age}\">{} old</span>", esc(source), dur(age)));
+    let age = src["age_s"].as_u64().map_or("Observation age unknown".into(), |age| format!("{} <span data-age-s=\"{age}\">{} old</span>", esc(source), esc(&dur(age))));
     let mut validity = src["age_s"].as_u64().filter(|_|has_values && state=="ok").map_or(String::new(),|age|format!(" data-resource-valid-for=\"{}\"",crate::resource::STALE.saturating_sub(age)));
     if request.is_some() {validity.push_str(" data-request=\"true\"");}
     let _ = write!(w, "<div class=\"overview-summary\"{validity}><div class=\"overview-identity\"><span class=\"overview-machine\">{}</span><div><h3 class=\"overview-name\">{}</h3><span class=\"overview-age\">{kind} {age}</span></div></div><p class=\"overview-state\">{}</p>", overview_icon("server"), esc(name), esc(status), kind=esc(kind));
@@ -1128,7 +1128,7 @@ fn actions(w: &mut String, doc: &Value, now: u64) -> usize {
         };
         let target = r["target"].as_str().unwrap_or("");
         let data = if r["kind"] == "question" { format!(" data-board-question=\"{}\" data-task=\"{}\"", text(&r["project"]), text(&r["task"])) } else { String::new() };
-        let since = if r["since"].is_null() { String::new() } else { format!(" · {}", at(&r["since"], now)) };
+        let since = if r["since"].is_null() { String::new() } else { format!(" · {}", esc(&at(&r["since"], now))) };
         let _ = writeln!(w, "<p class=\"action-row\"><span>{what} {}{since}</span><a {}{data} href=\"{}\">{}</a></p>", text(&r["reason"]), if target.starts_with('/') { "data-view-link" } else { "" }, esc(target), text(&r["action"]));
     }
     if requests.is_empty() { let _ = writeln!(w, "<p>No actions requested.</p>"); }
@@ -1140,12 +1140,12 @@ fn actions(w: &mut String, doc: &Value, now: u64) -> usize {
 fn changes(w: &mut String, c: &Value, now: u64) {
     let rows = c["rows"].as_array().map_or(&[][..], Vec::as_slice);
     let cmp = &c["comparison"];
-    let _ = writeln!(w, "<details id=\"changes\"><summary>Changes in the last {} · {}</summary>", dur(c["window_s"].as_u64().unwrap_or(0)), text(&cmp["state"]));
+    let _ = writeln!(w, "<details id=\"changes\"><summary>Changes in the last {} · {}</summary>", esc(&dur(c["window_s"].as_u64().unwrap_or(0))), text(&cmp["state"]));
     if cmp["state"] != "available" { let _ = writeln!(w, "<p class=\"note\">Comparison {}: {}</p>", text(&cmp["state"]), text(&cmp["reason"])); }
     let _ = writeln!(w, "<ul class=\"items\">");
     for r in rows {
-        let until = if r["until"].is_null() { String::new() } else { format!(" · resolved {}", at(&r["until"], now)) };
-        let _ = writeln!(w, "<li><b>{}</b> · {} · {} · since {}{until}</li>", text(&r["state"]), text(&r["source"]), text(&r["what"]), at(&r["since"], now));
+        let until = if r["until"].is_null() { String::new() } else { format!(" · resolved {}", esc(&at(&r["until"], now))) };
+        let _ = writeln!(w, "<li><b>{}</b> · {} · {} · since {}{until}</li>", text(&r["state"]), text(&r["source"]), text(&r["what"]), esc(&at(&r["since"], now)));
     }
     let _ = writeln!(w, "</ul>");
     if rows.is_empty() { let _ = writeln!(w, "<p class=\"note\">No condition with a producer time in this window.</p>"); }
@@ -1159,7 +1159,7 @@ fn servers(w: &mut String, res: &Value, now: u64) {
     let rows = res["rows"].as_array().cloned().unwrap_or_default();
     let _ = writeln!(w, "<section id=\"servers\">\n<h2>Resource history</h2>");
     if rows.is_empty() {
-        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
+        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", esc(&dur(res["window_s"].as_u64().unwrap_or(0))));
         return;
     }
     let to = res["to"].as_u64().unwrap_or(now);
@@ -1223,7 +1223,7 @@ fn boards(w: &mut String, boards: &[Value]) {
         for t in b["tasks"].as_array().into_iter().flatten().filter(|t| t["admission"].is_object()) {
             let a = &t["admission"];
             let host = a["host"].as_str().map(|h| format!(" · {}", esc(h))).unwrap_or_default();
-            let age = a["age_s"].as_u64().map_or_else(|| "time unknown".into(), |s| format!("observed {} ago", dur(s)));
+            let age = a["age_s"].as_u64().map_or_else(|| "time unknown".into(), |s| format!("observed {} ago", esc(&dur(s))));
             let _ = writeln!(waiting, "<li id=\"waiting-{}-{}\"><a href=\"{}\">{} #{}</a> {} · <b>{}</b> · {}{host} · {age}{}</li>", enc(b["project"].as_str().unwrap_or("")), text(&t["n"]), text(&t["url"]), text(&b["project"]), text(&t["n"]), text(&t["state"]),
                 text(&a["code"]), text(&a["meaning"]), a["reason"].as_str().map(|r| format!(" <span class=\"detail\">— {}</span>", esc(r))).unwrap_or_default());
         }
@@ -1246,7 +1246,7 @@ fn resources(w: &mut String, res: &Value, now: u64) {
     let rows = res["rows"].as_array().cloned().unwrap_or_default();
     let _ = writeln!(w, "<section id=\"resources\">\n<h2>Resource samples</h2>");
     if rows.is_empty() {
-        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", dur(res["window_s"].as_u64().unwrap_or(0)));
+        let _ = writeln!(w, "<p class=\"note\">No resource sample in the last {}.</p>\n</section>", esc(&dur(res["window_s"].as_u64().unwrap_or(0))));
         return;
     }
     let _ = writeln!(w, "<table>\n<tr><th>Host</th><th>Source</th><th>Sample</th><th>CPU</th><th>RAM used / total</th><th>Disks used / free / total</th><th>History</th></tr>");
@@ -1418,16 +1418,16 @@ mod tests {
         d["resources"]["rows"] = json!([]);
         d["resources"]["to"] = json!(now);
         d["attention"]["current"] = json!([]);
-        d["attention"]["requests"] = json!([{"host":"FRA","reason":"Low disk space","action":"Inspect disk","target":"/checks#fixture-disk"}]);
-        for (name, state, age) in [("Mac", "unknown", 12), ("FRA", "ok", 12), ("Desktop", "stale", 1560)] {
+        d["attention"]["requests"] = json!([{"host":"Host","reason":"Low disk space","action":"Inspect disk","target":"/checks#fixture-disk"}]);
+        for (name, state, age) in [("Mac", "unknown", 12), ("Host", "ok", 12), ("Desktop", "stale", 1560)] {
             let source = json!({"state":state,"at":now-age,"age_s":age,"reason":if state=="ok" {Value::Null}else{json!("resource evidence unavailable")}});
             d["hosts"].as_array_mut().unwrap().push(json!({"id":name,"freshness":source}));
             if name == "Mac" { continue; }
             let sample = |i: usize| json!({"at":now-1800+i as u64*298,"cpu":{"percent":([18,31,21,28,24,30,28][i])},
                 "memory":{"used_bytes":(([24.0,27.0,31.0,34.0,36.0,37.0,38.75][i]*16e9/100.0) as u64),"total_bytes":16_000_000_000u64},
                 "disks":[{"id":"root","used_bytes":([42,48,57,67,78,86,92][i] as u64*1_000_000_000),"total_bytes":100_000_000_000u64}]});
-            let points: Vec<_> = if name=="FRA" {(0..7).map(sample).collect()}else{vec![]};
-            d["resources"]["rows"].as_array_mut().unwrap().push(json!({"host":name,"installation":name,"source":source,"current":if name=="FRA" {sample(6)}else{Value::Null},"history":{"points":points,"samples":points.len(),"gaps":[],"resets":[]}}));
+            let points: Vec<_> = if name=="Host" {(0..7).map(sample).collect()}else{vec![]};
+            d["resources"]["rows"].as_array_mut().unwrap().push(json!({"host":name,"installation":name,"source":source,"current":if name=="Host" {sample(6)}else{Value::Null},"history":{"points":points,"samples":points.len(),"gaps":[],"resets":[]}}));
         }
         let html = render(&d, &json!({}));
         if let Some(dir) = std::env::var_os("DASHQ_OVERVIEW_EVIDENCE") {
@@ -1495,16 +1495,16 @@ mod tests {
         let now = 1_000_000u64;
         assert_eq!(at(&json!(999_400.75), now), at(&json!(999_400), now));
         assert!(!at(&json!(999_400.75), now).contains('—'));
-        for since in [json!(999_400.75), json!(999_400)] {
+        for (since, age) in [(json!(999_400.75), 600), (json!(999_400), 600), (json!(999_999.75), 1)] {
             let mut d = json!({"generated_at": now, "period": 1800, "checks": {"installations": [{"installation": "sq-1", "host": "fra/native", "at": now,
                 "results": [{"check": "failed-services", "status": "warn", "detail": "1 failed"}],
                 "findings": [{"rule": "failed-services", "state": "open", "workspace": "ws", "installation": "sq-1", "first_seen": since}]}]}});
             d["attention"]["requests"] = crate::explain::requests(&d, now).into();
             let r = &d["attention"]["requests"][0];
-            assert_eq!((&r["since"], &r["age_s"]), (&since, &json!(600)), "/data and dashq report print this document");
+            assert_eq!((&r["since"], &r["age_s"]), (&since, &json!(age)), "/data and dashq report print this document");
             let mut html = String::new();
             actions(&mut html, &d, now);
-            assert!(html.contains(&format!(" · {}", at(&json!(999_400), now))), "{html}");
+            assert!(html.contains(&format!(" · {}", esc(&at(&since, now)))), "{html}");
         }
     }
 
@@ -1524,7 +1524,7 @@ mod tests {
         assert!(!mixed.contains("owner evidence"),"another version receipt cannot qualify the displayed running version");
         let variant = d["resources"]["rows"][0].clone();
         d["resources"]["rows"].as_array_mut().unwrap().push(variant);
-        d["resources"]["rows"][2]["host"] = json!("FRA/native");
+        d["resources"]["rows"][2]["host"] = json!("fRa/native");
         let mut html = String::new(); host_grid(&mut html, &d, 0);
         assert_eq!(html.matches("class=\"host overview-host\"").count(),3,"case variants cannot add a host");
     }
@@ -1661,7 +1661,7 @@ mod tests {
         for case in cases["cases"].as_object().unwrap().values() {
             if let Some(id) = case["installation"].as_str() { assert!(html.contains(id), "{id}"); }
         }
-        for expected in ["Last known", "Current health unknown", "health receipt not reported", "Lifecycle: unknown", "Lifecycle: pending_disable · host_disabled", "Health verified: 0.4.16 wrote its status", "Current health unknown: health receipt unknown: no_receipt", "Update error reported", "Update history", "Host observation", "Release check", "Not reported", "0.51.0", "12s", "win-1/windows", "win-1/wsl"] {
+        for expected in ["Last known", "Current health unknown", "health receipt not reported", "Lifecycle: unknown", "Lifecycle: pending_disable · host_disabled", "Health verified: 0.4.16 wrote its status", "Current health unknown: health receipt unknown: no_receipt", "Update error reported", "Update history", "Host observation", "Release check", "Not reported", "0.51.0", "&lt;1m", "win-1/windows", "win-1/wsl"] {
             assert!(html.contains(expected), "{expected}");
         }
         for absent in ["data-phase", "data-font", "<select", "<form", "recovery confirmed", "checksum-mismatch", "Running · healthy"] { assert!(!html.contains(absent), "{absent}"); }
@@ -1873,7 +1873,7 @@ mod tests {
             w
         };
         let ok = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": 5, "backlog_bytes": 900, "gap_rows": 2, "reason": null}));
-        assert!(ok.contains("Telemetry: last sync ") && ok.contains("(60s ago) · backlog 5 rows (900 bytes) · gap 2 rows"), "{ok}");
+        assert!(ok.contains("Telemetry: last sync ") && ok.contains("1m ago (2027-01-15 08:00 UTC) · backlog 5 rows (900 bytes) · gap 2 rows"), "{ok}");
         // #181 A3: DashQ's retained range, its own removals and unreceived rows stay apart from the sender's gap
         let kept = html(json!({"state": "ok", "last_synced": now - 60, "backlog_rows": null, "backlog_bytes": null, "gap_rows": null, "reason": "status not reported by taskq",
             "retained": {"first_seq": 7, "last_seq": 12, "rows": 4, "blocks": 2}, "pruned": [{"cause": "capacity", "rows": 6}], "hole_rows": 2, "holes_total": 1, "restarts": 1}));

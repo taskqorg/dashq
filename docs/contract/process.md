@@ -5,12 +5,25 @@ Linked detail of [dashq.md](../../dashq.md) D2 (Process), D4.2 (snapshot adapter
 ## Commands
 
 - `dashq profile [--window=S]` prints the profile report (D20); the default window is 86400 s.
+- `dashq limits [--check]` prints the [public limits](#public-limits-push) payload, or compares it with the live page.
 - `dashq doctor` checks the [host requirements](#host-requirements); `dashq --snapshot DIR` writes the fixture page for review ([snapshot command](#snapshot-command)).
 
 ## Config
 
 - Config holds the Langfuse base URL, project id and keys, a read-only GitHub token, the project list (D4.2), the ServerQ report path and the host id its row joins, optional `taskq_logs` `{host: absolute taskq.log path}` (D21), optional `prices` (D24) and the public `dash.` host name.
-- Other optional keys belong to their sections: `taskq.binary` (D4.2), `serverq` (D4.3), `langfuse.forward` and `telemetry` (D11), `answer`, `task_controls` and `pm_requests` (D13), `resources` (D14), `agentq_configure` (D16), `assetq` (D27).
+- Other optional keys belong to their sections: `taskq.binary` (D4.2), `serverq` (D4.3), `langfuse.forward` and `telemetry` (D11), `answer`, `task_controls` and `pm_requests` (D13), `resources` (D14), `agentq_configure` (D16), `limits_push` (D27), `assetq` (D28).
+
+## Public limits push
+
+Linked detail of D27. `limits_push` is `{url, token?, accounts?}`.
+
+- `url` is the Worker's `https://` address ending in `/push`. Without `token`, DashQ pushes nothing; `dashq limits` still works, which is how the check runs before cutover.
+- `accounts` lists `{runtime, id, public_id, tag?}` in card order within a runtime. It maps a private account fingerprint to the card id the Worker already keys its history by, so sparklines and the tag survive the cutover. `public_id` must differ from `id`.
+- An unmapped account gets `<provider>-<n>` and tag `<n>` from 2 up, numbered in fingerprint order; a new account can renumber those, so map every account that should keep its history. A listed account with no rows reads `unknown`. `dashq limits` names unmapped fingerprints on stderr, never in the payload.
+- Provider, short label and window families come from the runtime table's `limits` entry (D4.5). `five_hour`, `seven_day` and their `_<model>` forms, `300m`, `10080m`, `<family>-5h` and `<family>-weekly` fill the page's 5h and 1w rows; any other window name stays visible as a 1w row under its own name, so a new window is never dropped.
+- A row marked `disabled` is ignored. A window older than 900 s behind the account's newest reading is dropped as superseded. A row more than 300 s ahead of the clock is ignored. Id-less `unknown` rows give one `unknown` card only for a runtime with no other card.
+- Pass: every 120 s (TaskQ's poll cadence). A push happens when the accounts changed, else every 600 s so `ts` keeps moving. A failure logs its class only and retries on the next pass; the page shows the age.
+- `--check` reads the Worker's public `/u.json` and exits 1 unless both sides are within 900 s, every card and row matches, each percent is within 5 points and each reset within 600 s. The ccusage-only plan name, `$` credit line and reset-credit count have no row source and are not compared; the page omits them once DashQ pushes (D27).
 
 ## Snapshot adapter run
 
@@ -63,8 +76,9 @@ Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/enginee
 - Counters are always on in `serve`, `service run`, `report` and `update`: one record per finished operation `{at, op, ms, outcome, error}`. `selftest` and tests write nothing.
 - Measured operations, p95 budget and error budget (initial values; revise from the first production report):
   - `http.page` and `http.data` 3 s, 1 %; `http.enroll` (D11 routes) 500 ms, 1 %; `http.answer` and `http.control` 15 s, 5 %.
-  - `http.resources` (D14 routes), `http.configure` (D16) and `http.pm` (D13 PM routes) 500 ms, 1 %; `http.assetq` (D27 routes) 30 s, 5 %; `http.link` (D25 routes, receive waits up to 25 s) 30 s, 1 %.
+  - `http.resources` (D14 routes), `http.configure` (D16) and `http.pm` (D13 PM routes) 500 ms, 1 %; `http.link` (D25 routes, receive waits up to 25 s) 30 s, 1 %.
   - `read.langfuse`, `read.taskq` and `read.assetq` 10 s, 5 %; `read.board` and `read.release` 3 s, 5 %; `read.serverq` 50 ms, 1 %; `read.tasklog` (D21) 500 ms, 1 %.
+  - `push.limits` (D27) 10 s, 5 %.
   - `update.check` 15 s, 5 %; `update` 120 s, 5 %; `restart` (service reload after update) 30 s, 5 %.
 - Times include response writing; cached source hits are not reads. A 5xx is a failure classed by its code; a 4xx is the caller's. Assets and 404 are not measured.
 - The error class is the source reason before any `:` detail, at most 40 plain characters; update and restart record only `failed`.

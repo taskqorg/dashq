@@ -7,7 +7,7 @@
       "taskqorg/taskq",
       "taskqorg/agentq"
     ],
-    "serverq_host": "hermes-fra1/native",
+    "serverq_host": "example-host/native",
     "langfuse": {
       "at": 1792026600,
       "error": null,
@@ -67,13 +67,13 @@
             }
           },
           {
-            "id": "agentq.installation-inst-fra-120",
+            "id": "agentq.installation-inst-host-120",
             "name": "agentq.installation",
             "startTime": "2026-10-15T01:08:00.000Z",
-            "traceId": "tinstfra120",
+            "traceId": "tinsthost120",
             "metadata": {
-              "attributes.agentq.installation": "inst-fra",
-              "attributes.host.name": "hermes-fra1",
+              "attributes.agentq.installation": "inst-host",
+              "attributes.host.name": "example-host",
               "attributes.agentq.runtime": "linux",
               "attributes.agentq.version": "0.6.0",
               "attributes.agentq.stage": "heartbeat"
@@ -102,8 +102,8 @@
               "updated_at": "2026-10-15T01:08:30.000Z"
             },
             {
-              "title": "taskq host hermes-fra1",
-              "body": "version 4.2.0\nservice 8d8c701e0317\nmachine hermes-fra1\nfocus off",
+              "title": "taskq host example-host",
+              "body": "version 4.2.0\nservice 8d8c701e0317\nmachine example-host\nfocus off",
               "updated_at": "2026-10-15T01:08:50.000Z"
             },
             {
@@ -243,7 +243,7 @@
       }
     },
     {
-      "id": "hermes-fra1/native",
+      "id": "example-host/native",
       "reason": null,
       "freshness": {
         "state": "ok",
@@ -264,7 +264,7 @@
           {
             "service": "8d8c701e0317",
             "workspace": "taskqorg/taskq",
-            "host": "hermes-fra1/native",
+            "host": "example-host/native",
             "at": 1792026530,
             "age_s": 70,
             "ttl": 300,
@@ -281,7 +281,7 @@
         ]
       },
       "agentq": {
-        "installation": "inst-fra",
+        "installation": "inst-host",
         "running": "0.6.0",
         "latest": "0.6.0",
         "behind": false

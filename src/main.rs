@@ -2,7 +2,6 @@
 
 mod accounting;
 mod agent_work;
-mod assetq;
 mod fleet;
 mod model_use;
 mod answer;
@@ -15,6 +14,7 @@ mod enroll;
 mod explain;
 mod export;
 mod findings;
+mod limits;
 mod link;
 mod optimization;
 mod page;
@@ -39,7 +39,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | assetq-grant WORKSPACE SUBJECT jobs|methods on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -67,12 +67,12 @@ struct Config {
     resources: bool,
     /// `agentq_configure: true` enables the guarded AgentQ review/apply routes (D16); off until AgentQ A5 qualifies.
     agentq_configure: bool,
-    /// `assetq` names the AssetQ origin and per-project credential files (D27); absent: no view, no action.
-    assetq: Option<assetq::Config>,
     /// `taskq_logs` `{host: absolute taskq.log path}`: attempt stage records for Agent work (D21); empty: not configured.
     taskq_logs: Vec<(String, String)>,
     /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
     limits: store::Limits,
+    /// `limits_push`: the public limits page (D27); without its token nothing is pushed.
+    limits_push: Option<limits::Config>,
     /// `prices`: the owner's model price table for API-equivalent estimates (D24); `null`: estimates read unknown.
     prices: Value,
 }
@@ -150,7 +150,6 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         None => false,
         Some(x) => x.as_bool().ok_or("config: bad key agentq_configure")?,
     };
-    let assetq = assetq::config(&v)?;
     let (report, host) = if v.get("serverq").is_some() {
         (s("/serverq/report", &|x| std::path::Path::new(x).is_absolute())?,
          s("/serverq/host", &|x| x.split_once('/').is_some_and(|(h, r)| data::safe_id(h) && matches!(r, "native" | "wsl")))?)
@@ -176,7 +175,9 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     }
     let prices = v.get("prices").map(model_use::prices).transpose()?.unwrap_or(Value::Null);
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
+    let limits_push = v.get("limits_push").map(limits::Config::parse).transpose()?;
     Ok(Config {
+        limits_push,
         limits,
         links,
         langfuse,
@@ -192,10 +193,43 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         pm_requests,
         resources,
         agentq_configure,
-        assetq,
         taskq_logs,
         prices,
     })
+}
+
+/// Heartbeat boards through the shared 60 s cache: the same single flight as the page's reads (D4).
+fn board_snapshots(c: &Config, cache: &source::Cache, background: bool) -> Value {
+    let Some(token) = c.github_token.as_deref() else { return json!({}) };
+    c.projects.iter().map(|r| {
+        let (repo, token) = (r.clone(), token.to_string());
+        (r.clone(), source_read(cache, background, &format!("board:{r}"), 60, move || source::board(&repo, &token)))
+    }).collect::<serde_json::Map<_, _>>().into()
+}
+
+/// A cached source read: a browser request or the public limits push never waits for one (D4/D6, #260).
+fn source_read(cache: &source::Cache, background: bool, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), source::Fail> + Send + 'static) -> Value {
+    if background { cache.revalidate(key, ttl, read) } else { cache.get(key, ttl, read) }
+}
+
+/// `dashq limits [--check]` (D27): reads only, whatever the config's token says.
+fn limits_command(t: &Tool, check: bool) -> Result<(), String> {
+    let cfg = load_config(&config_path(t))?;
+    let push = cfg.limits_push.as_ref().ok_or("config: limits_push not configured")?;
+    let boards = board_snapshots(&cfg, &source::Cache::default(), false);
+    let now = source::now();
+    for id in limits::unmapped(&boards, push, now) {
+        eprintln!("limits: unmapped account {id}");
+    }
+    let snap = limits::snapshot(&boards, push, now).ok_or("limits: no limit rows on the configured boards")?;
+    if !check {
+        println!("{snap}");
+        return Ok(());
+    }
+    let r = source::get(&push.url.replace("/push", "/u.json"), &[]).map_err(|(e, _)| format!("limits: live page read failed ({e})"))?;
+    let (lines, passed) = limits::compare(&snap, &r.body, now);
+    println!("{}", lines.join("\n"));
+    if passed { Ok(()) } else { Err("limits: check failed".into()) }
 }
 
 fn safe_host(x: &str) -> bool {
@@ -221,13 +255,16 @@ struct App {
     resources: policy::State,
     export: export::Last,
     link: link::Relay,
-    assetq: assetq::State,
 }
 
 impl App {
     /// Reads every source (cached per D4) and builds the document; `scope` selects the enrolled installations
     /// the actor may see (D11), `None` for none.
     fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
+        self.document(period, filters, scope, false)
+    }
+
+    fn document(&self, period: u64, filters: Value, scope: Option<store::Scope>, background: bool) -> Value {
         let c = &self.cfg;
         let now = source::now();
         let span = profile::current();
@@ -235,7 +272,10 @@ impl App {
             let lf = sc.spawn(|| {
                 profile::enter(span);
                 match &c.langfuse {
-                    Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
+                    Some((base, auth)) => {
+                        let (base, auth) = (base.clone(), auth.clone());
+                        source_read(&self.cache, background, &format!("langfuse:{period}"), 30, move || source::langfuse(&base, &auth, now, period))
+                    }
                     None => Value::Null,
                 }
             });
@@ -246,10 +286,16 @@ impl App {
                 .map(|(r, token)| {
                     sc.spawn(move || {
                         profile::enter(span);
-                        let b =self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
-                        let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, token));
+                        let own = || (r.clone(), token.to_string());
+                        let (repo, tok) = own();
+                        let b = source_read(&self.cache, background, &format!("board:{r}"), 60, move || source::board(&repo, &tok));
+                        let (repo, tok) = own();
+                        let l = source_read(&self.cache, background, &format!("release:{r}"), 600, move || source::release(&repo, &tok));
                         // one single flight per board: callers inside 60 s share one `taskq status --json` run
-                        let t = c.taskq_bin.as_ref().map(|bin| self.cache.get(&format!("taskq:{r}"), 60, || source::taskq_status(bin, r, token)));
+                        let t = c.taskq_bin.as_ref().map(|bin| {
+                            let (bin, (repo, tok)) = (bin.clone(), own());
+                            source_read(&self.cache, background, &format!("taskq:{r}"), 60, move || source::taskq_status(&bin, &repo, &tok))
+                        });
                         (r.clone(), b, l, t)
                     })
                 })
@@ -287,10 +333,15 @@ impl App {
         let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
         // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
         // started up to a day before the widest window share one decoded set
-        let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
-        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64));
+        let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400, background));
+        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64, background));
         let cli_releases: serde_json::Map<String, Value> = crate::runtimes::clis().map(|(cli, repo)| {
-            let snap = if c.github_token.is_some() && !c.projects.is_empty() { self.cache.get(&format!("cli-release:{cli}"), 180, || source::cli_release(repo, c.github_token.as_deref())) } else { Value::Null };
+            let snap = if c.github_token.is_some() && !c.projects.is_empty() {
+                let token = c.github_token.clone();
+                let read = move || source::cli_release(repo, token.as_deref());
+                let key = format!("cli-release:{cli}");
+                if background { self.cache.refresh(&key, 180, read) } else { self.cache.get(&key, 180, read) }
+            } else { Value::Null };
             (cli.into(), snap)
         }).collect();
         profile::step("enrollment", t0);
@@ -309,32 +360,11 @@ impl App {
         }
         // the page offers review/apply only where the route is on (D16)
         doc["controls"] = json!({"agentq_configure": c.agentq_configure});
-        self.assets(&mut doc, scope, now);
         // outbox counts span every workspace: host-local readers only (D11)
         if let (Some(store::Scope::All), Ok(e)) = (scope, &self.enroll) {
             doc["sources"]["export"] = export::status(Some(e.store()), &self.export, c.langfuse.is_some() && c.forward, now);
         }
         doc
-    }
-}
-
-impl App {
-    /// `/data.assets` (D27): only the projects of the actor's workspaces, read independently of other sources.
-    fn assets(&self, doc: &mut Value, scope: Option<store::Scope>, now: u64) {
-        let Some(c) = &self.cfg.assetq else { return };
-        let member = |ws: &str| match scope {
-            Some(store::Scope::All) => true,
-            Some(store::Scope::Subject(s)) => self.enroll.as_ref().ok().and_then(|e| e.store().workspaces(s).ok()).is_some_and(|w| w.iter().any(|(x, _)| x == ws)),
-            None => false,
-        };
-        let subject = match scope { Some(store::Scope::Subject(s)) => Some(s), _ => None };
-        let rows = c.projects.iter().filter(|p| member(&p.workspace)).map(|p| {
-            let mut row = assetq::project(p, &c.base, &assetq::cached(&self.cache, &c.base, p), now, Value::Null);
-            row["controls"] = assetq::controls(p, &self.enroll, subject, &row["source"]);
-            row
-        }).collect();
-        doc["assets"] = assetq::build(&c.base, rows, now);
-        doc["sources"]["assetq"] = doc["assets"]["source"].clone();
     }
 }
 
@@ -405,12 +435,8 @@ fn handle(app: &App, mut s: TcpStream) {
     let rctx = policy::Ctx { enroll: &app.enroll, enabled: c.resources, public_host: &c.public_host, state: &app.resources };
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
-    let actx = assetq::Ctx { enroll: &app.enroll, cfg: c.assetq.as_ref(), public_host: &c.public_host, state: &app.assetq, cache: &app.cache };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = assetq::route(&actx, &req, source::now() as i64) {
-        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
-        ("http.assetq", x.status)
-    } else if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.link", x.status)
     } else if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
@@ -438,7 +464,9 @@ fn handle(app: &App, mut s: TcpStream) {
         }, status)
     };
     // page and API latency (D20): a 5xx is a failure named by its code, a 4xx is the caller's
-    profile::record(op, t0, status.starts_with('5').then(|| status.split(' ').next().unwrap_or("5xx")));
+    let (code, _) = status.split_once(' ').expect("static HTTP status line");
+    let status_code: u16 = code.parse().expect("static HTTP status code");
+    profile::record(op, t0, (500..600).contains(&status_code).then_some(code));
 }
 
 /// Whose installations a page request sees (D11): a request through the public name only its verified subject's
@@ -466,7 +494,7 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
             };
-            let doc = app.doc(period, filters, scope);
+            let doc = app.document(period, filters, scope, true);
             if path != "/data" {
                 return ("200 OK", HTML, page::render_view(&doc, &app.cfg.links, path).into_bytes());
             }
@@ -506,7 +534,19 @@ fn serve(t: &Tool, service: bool) -> ! {
     if let Err(e) = &enroll {
         eprintln!("enrollment: {e}");
     }
-    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() });
+    let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() });
+    // D21: decode the stored stage window once, off the page path; pages read it as unknown until it is done (#260)
+    if let Ok(e) = &app.enroll { e.warm_stages(true); }
+    let warm = app.clone();
+    std::thread::spawn(move || {
+        let now = source::now();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(p) = enroll::projection(&warm.enroll, Some(store::Scope::All), None, now) {
+                enroll::stage_records(&warm.enroll, &p["rows"], now as i64 - 2 * 86400, false);
+            }
+        }));
+        if let Ok(e) = &warm.enroll { e.warm_stages(false); }
+    });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -517,6 +557,19 @@ fn serve(t: &Tool, service: bool) -> ! {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+    // the public limits page (D27): its own thread, so a slow Worker never holds a page or a board read
+    if app.cfg.limits_push.as_ref().is_some_and(|p| p.token.is_some()) {
+        let a = app.clone();
+        std::thread::spawn(move || {
+            let mut pusher = limits::Pusher::default();
+            while let Some(push) = &a.cfg.limits_push {
+                if let Err(e) = pusher.pass(push, &board_snapshots(&a.cfg, &a.cache, true), source::now()) {
+                    eprintln!("limits push: {e}");
+                }
+                std::thread::sleep(Duration::from_secs(limits::PERIOD));
+            }
+        });
+    }
     // forwarding and retention run apart from ingestion and projection: an outage only delays export (C5)
     let fwd = app.clone();
     std::thread::spawn(move || {
@@ -559,7 +612,7 @@ fn serve(t: &Tool, service: bool) -> ! {
 }
 
 fn app_js() -> String {
-    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/taskq/task-workspace.js"), include_str!("../assets/taskq/pm-composer.js"), include_str!("../assets/workspace.js"), include_str!("../assets/assetq.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
+    [include_str!("../assets/taskq/resource-controls.js"), include_str!("../assets/resources.js"), include_str!("../assets/taskq/project-blocks.js"), include_str!("../assets/taskq/answer-card.js"), include_str!("../assets/taskq/task-controls.js"), include_str!("../assets/taskq/task-workspace.js"), include_str!("../assets/taskq/pm-composer.js"), include_str!("../assets/workspace.js"), include_str!("../assets/boards.js"), include_str!("../assets/app.js")].join("\n")
 }
 
 fn style_css() -> String {
@@ -655,16 +708,11 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = selftest_read(cfg);
+    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(1800, json!({}), None);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
     Ok(())
-}
-
-/// One read of each configured source (D2), in the host-local scope. No store and no actor, so it holds no action.
-fn selftest_read(cfg: Config) -> Value {
-    App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(1800, json!({}), Some(store::Scope::All))
 }
 
 /// The release the coreq launcher rolled back: newer than `running`, never healthy, three starts of `project` (D2).
@@ -743,7 +791,7 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             profile::open(&dir);
             let enroll = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
-            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() }.doc(period, filters, Some(store::Scope::All)));
+            println!("{}", App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(period, filters, Some(store::Scope::All)));
         }
         ["admin", workspace, subject] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -761,13 +809,6 @@ fn main() {
             let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
             e.store().pm_requester(workspace, subject, *op == "on").unwrap_or_else(|e| t.die(&format!("PM grant: {e:?}")));
             println!("PM actor: {} · {op} in {workspace}", pm::actor(subject));
-        }
-        ["assetq-grant", workspace, subject, grant @ ("jobs" | "methods"), op @ ("on" | "off")] => {
-            if !enroll::id(workspace, 64) || !enroll::valid_subject(subject) { t.die("assetq-grant: bad workspace or subject"); }
-            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
-            let e = enroll::Enroll::open(&dir, "").unwrap_or_else(|e| t.die(&e));
-            e.store().assetq_grant(workspace, subject, grant, *op == "on").unwrap_or_else(|e| t.die(&format!("AssetQ grant: {e:?}")));
-            println!("AssetQ {grant} grant: {subject} {op} in {workspace}");
         }
         ["controller", workspace, subject, op @ ("on" | "off")] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -809,6 +850,8 @@ fn main() {
             println!("{}", profile::report(text.as_deref(), source::now(), window));
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
+        ["limits"] => limits_command(&t, false).unwrap_or_else(|e| t.die(&e)),
+        ["limits", "--check"] => limits_command(&t, true).unwrap_or_else(|e| t.die(&e)),
         ["doctor"] => {
             let lines = doctor_lines(&t);
             for (_, l) in &lines {
@@ -851,7 +894,12 @@ fn main() {
             let root = std::env::current_dir().unwrap_or_else(|e| t.die(&e.to_string()));
             let u = coreq::service::unit(&t, &root, "dashq");
             let r = if *op == "install" {
-                coreq::update::install_self(&t).and_then(|_| coreq::service::run_all(&u.unload, true)).and_then(|_| coreq::service::write_unit(&u)).and_then(|_| coreq::service::run_all(&u.load, false))
+                std::env::current_exe().and_then(std::fs::read).map_err(|e| e.to_string())
+                    .and_then(|bytes| coreq::update::prepare_install(&t, &bytes))
+                    .and_then(|_| coreq::update::activate_install(&t))
+                    .and_then(|_| coreq::service::run_all(&u.unload, true))
+                    .and_then(|_| coreq::service::write_unit(&u))
+                    .and_then(|_| coreq::service::run_all(&u.load, false))
             } else {
                 coreq::service::run_all(&u.unload, true).and_then(|_| std::fs::remove_file(&u.path).map_err(|e| e.to_string()))
             };
@@ -934,56 +982,6 @@ mod tests {
         assert!(out.status.success(), "{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     }
 
-    /// D2: selftest reads each source once, AssetQ included. Defect guarded: a selftest that printed an empty AssetQ
-    /// scope and never touched the configured service.
-    #[test]
-    fn selftest_reads_each_assetq_project() {
-        let mut cfg = load_config_fixture();
-        let read = std::env::temp_dir().join(format!("dashq-selftest-read-{}", std::process::id()));
-        std::fs::write(&read, "invented-read-token").unwrap();
-        cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: read.clone(), control_token: None }] });
-        let doc = selftest_read(cfg);
-        let _ = std::fs::remove_file(&read);
-        assert_eq!(doc["assets"]["projects"].as_array().map(Vec::len), Some(1), "{}", doc["assets"]);
-        assert!(doc["sources"]["assetq"]["reason"].as_str().unwrap().contains("read failed"), "{}", doc["sources"]["assetq"]);
-        assert_eq!(doc["assets"]["projects"][0]["controls"]["jobs"], false, "selftest holds no action");
-    }
-
-    /// D27/D11: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok, and an
-    /// unconfigured product adds no key, view link or panel (D10).
-    #[test]
-    fn assetq_view_is_scoped_and_absent_without_config() {
-        let dir = std::env::temp_dir().join(format!("dashq-assetq-scope-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("read"), "invented-read-token").unwrap();
-        enroll::Enroll::admin(&dir, "invented-workspace", "github|member").unwrap();
-        let e = enroll::Enroll::open(&dir, "dash.example.com");
-        e.as_ref().unwrap().store().assetq_grant("invented-workspace", "github|member", "jobs", true).unwrap();
-        let mut cfg = load_config_fixture();
-        let plain = App { cfg: load_config_fixture(), cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
-        let doc = plain.doc(1800, json!({}), Some(store::Scope::All));
-        assert!(doc.get("assets").is_none() && doc["sources"].get("assetq").is_none());
-        assert!(!page::render_view(&doc, &json!({}), "/").contains("id=\"view-assets\""));
-        cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: dir.join("read"), control_token: Some(dir.join("read")) }] });
-        let app = App { cfg, cache: Default::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
-        let host = app.doc(1800, json!({}), Some(store::Scope::All));
-        assert_eq!(host["assets"]["projects"][0]["source"]["state"], "unknown");
-        assert_eq!(host["sources"]["assetq"]["state"], "unknown");
-        assert!(host["assets"]["projects"][0]["source"]["reason"].as_str().unwrap().contains("read failed"));
-        assert!(!host.to_string().contains("invented-read-token"), "R7");
-        assert_eq!(host["assets"]["projects"][0]["controls"]["jobs"], false, "a host-local reader holds no action");
-        let html = page::render_view(&host, &json!({}), "/assets");
-        assert!(html.contains("id=\"view-assets\"") && html.contains("No AssetQ observation yet"));
-        let mine = app.doc(1800, json!({}), Some(store::Scope::Subject("github|member")));
-        assert_eq!(mine["assets"]["projects"].as_array().unwrap().len(), 1);
-        let foreign = app.doc(1800, json!({}), Some(store::Scope::Subject("github|other")));
-        assert_eq!(foreign["assets"]["projects"], json!([]));
-        assert_eq!(foreign["assets"]["source"]["state"], "unknown");
-        assert_eq!(app.doc(1800, json!({}), None)["assets"]["projects"], json!([]));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
     #[test]
     fn fixture_rendering_is_pinned() {
         let html = fixture_html();
@@ -1015,7 +1013,7 @@ mod tests {
 
     #[test]
     fn routes_and_headers() {
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         assert_eq!(route(&app, "GET", "/nope", "", None).0, "404 Not Found");
         let missing = route(&app, "GET", "/nope", "", None);
         assert!(String::from_utf8(missing.2).unwrap().contains("Return to overview"));
@@ -1046,7 +1044,7 @@ mod tests {
         s.grant(&store::Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" }, "ws", "github|1", r#"["taskq-telemetry/1"]"#, b"v1", now).unwrap();
         let payload = r#"{"schema":1,"first":{"seq":1,"id":"a"},"last":{"seq":2,"id":"b"},"rows":2,"bytes":1,"gzip":"x"}"#;
         s.accept(b"v1", &[store::Event { id: "t-1", schema: "taskq-telemetry/1", observed: now, kind: store::Kind::Telemetry, payload }], now).unwrap();
-        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let app = App { cfg: load_config_fixture(), cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "block=t-1", Some(store::Scope::All));
         let data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--block=t-1"]).unwrap();
@@ -1116,7 +1114,7 @@ mod tests {
         let mut cfg = load_config_fixture();
         cfg.projects = vec!["taskqorg/dashq".into()];
         cfg.taskq_logs = vec![("mac".into(), log.to_string_lossy().into())];
-        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=7200", Some(store::Scope::All));
         let mut data: Value = serde_json::from_slice(&body).unwrap();
         let (period, filters) = report_query(&["--period=7200"]).unwrap();
@@ -1161,7 +1159,7 @@ mod tests {
         let p = PathBuf::from(std::env::var("DASHQ_LIVE_CONFIG").expect("DASHQ_LIVE_CONFIG"));
         let cfg = load_config(&p).unwrap();
         let enroll = enroll::Enroll::open_with(p.parent().unwrap(), &cfg.public_host, cfg.limits);
-        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let app = App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let (_, _, body) = route(&app, "GET", "/data", "period=86400&cursor=0", Some(store::Scope::All));
         let (period, filters) = report_query(&["--period=86400", "--cursor=0"]).unwrap();
         fn calm(v: &mut Value) {
@@ -1185,7 +1183,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { assetq: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -1200,7 +1198,7 @@ mod tests {
         std::fs::write(&path, report.to_string()).unwrap();
         let mut cfg = load_config_fixture();
         cfg.serverq_report = path.to_string_lossy().into();
-        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default(), assetq: Default::default() };
+        let app = App { cfg, cache: Default::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
         let good = app.doc(1800, json!({}), None);
         assert_eq!(good["sources"]["serverq"]["state"], "ok");
         std::fs::write(&path, "invalid").unwrap();

@@ -28,7 +28,7 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
    await page.goto('http://fixture/');await page.waitForFunction(()=>!busy);
    await page.addStyleTag({content:`html{font-size:${size}px}`});
    assert.equal(await page.locator('#host-grid .overview-host').count(),3,'A1: minimal host cards replace the #170 seven-column layout');
-   assert.deepEqual(await page.locator('.overview-name').allTextContents(),await ref.locator('.ds-name').allTextContents(),'identical host scenarios');
+   assert.deepEqual(await page.locator('.overview-name').allTextContents(),(await ref.locator('.ds-name').allTextContents()).map(n=>n==='FRA'?'Host':n),'same scenarios with a neutral host label');
    const measures=async(p,card,name,metric,chart)=>p.evaluate(({card,name,metric,chart})=>{
     const cards=[...document.querySelectorAll(card)],r=cards[1].getBoundingClientRect(),m=document.querySelector(metric)?.getBoundingClientRect(),c=document.querySelector(chart)?.getBoundingClientRect();
     const style=getComputedStyle(cards[1]);
@@ -37,7 +37,7 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
     return {width:r.width,padding:parseFloat(style.paddingLeft),radius:parseFloat(style.borderRadius),name:parseFloat(getComputedStyle(document.querySelector(name)).fontSize),metricWidth:m?.width,chartWidth:c?.width,chartHeight:c?.height,chartRight:m?.right-c?.right,columns:new Set(cards.map(e=>Math.round(e.getBoundingClientRect().x))).size,order,chartAfterNumber:c.left>=number.right};
    },{card,name,metric,chart});
    const expected=await measures(ref,'[data-cards]>article','.ds-name','[data-scenario="warning"] .ds-metric','.ds-spark');
-   const actual=await measures(page,'#host-grid .overview-host','.overview-name','#host-FRA .overview-metric','#host-FRA .overview-metric svg.trend');
+   const actual=await measures(page,'#host-grid .overview-host','.overview-name','#host-Host .overview-metric','#host-Host .overview-metric svg.trend');
    for(const key of ['width','padding','radius','name','metricWidth','chartWidth','chartHeight','chartRight','columns'])assert(Math.abs(actual[key]-expected[key])<=1,`${width}/${size}/${theme} reference ${key}: ${JSON.stringify({actual,expected})}`);
    for(const measured of [expected,actual]) {
     assert(measured.order.every((top,i)=>i===0||top>measured.order[i-1]),'identity → scoped state → facts → action');
@@ -46,30 +46,30 @@ const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resou
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'ordinary text reflows');
    assert.equal(await page.locator('#host-grid .products:visible').count(),0,'versions stay in detail');
    assert.equal(await page.locator('#host-grid .overview-summary').evaluateAll(es=>es.some(e=>e.textContent.includes('?'))),false,'no repeated question-mark cells');
-   assert.equal(await page.locator('#host-FRA .overview-metric svg.trend').count(),3);
-   assert(await page.locator('#host-FRA .overview-metric svg.trend').evaluateAll(es=>es.every(e=>e.checkVisibility())),'trends are visible');
-   assert((await page.locator('#host-FRA .overview-number').allTextContents()).join(' ').includes('6.2 / 16.0 GB'),'real current values with units');
+   assert.equal(await page.locator('#host-Host .overview-metric svg.trend').count(),3);
+   assert(await page.locator('#host-Host .overview-metric svg.trend').evaluateAll(es=>es.every(e=>e.checkVisibility())),'trends are visible');
+   assert((await page.locator('#host-Host .overview-number').allTextContents()).join(' ').includes('6.2 / 16.0 GB'),'real current values with units');
    assert.equal(await page.locator('#host-Mac .overview-summary polyline,#host-Desktop .overview-summary polyline').count(),0,'unavailable has no invented history');
    assert((await page.locator('#host-grid').innerText()).includes('Last 30 minutes · 0–100%'));
    assert((await page.locator('#host-Desktop .overview-summary').innerText()).includes('No recent data'));
-   const details=page.locator('#host-FRA > details');await details.locator(':scope > summary').click();await details.locator(':scope > summary').focus();
+   const details=page.locator('#host-Host > details');await details.locator(':scope > summary').click();await details.locator(':scope > summary').focus();
    offline=true;await page.evaluate(()=>refresh());
-   assert((await page.locator('#host-FRA .overview-state').innerText()).includes('Unconfirmed resource data'),'outage marks retained resources: '+await page.locator('#host-FRA .overview-state').innerText());
-   assert.equal(await page.locator('#host-FRA .overview-metrics').getAttribute('data-state'),'unconfirmed');
+   assert((await page.locator('#host-Host .overview-state').innerText()).includes('Unconfirmed resource data'),'outage marks retained resources: '+await page.locator('#host-Host .overview-state').innerText());
+   assert.equal(await page.locator('#host-Host .overview-metrics').getAttribute('data-state'),'unconfirmed');
    assert(await details.evaluate(e=>e.open),'failed refresh retains disclosure');
    assert(await details.locator(':scope > summary').evaluate(e=>e===document.activeElement),'failed refresh retains focus');
-   await page.evaluate(()=>document.querySelector('#host-FRA .overview-summary').dataset.resourceValidFor='1');
+   await page.evaluate(()=>document.querySelector('#host-Host .overview-summary').dataset.resourceValidFor='1');
    await page.clock.fastForward(2000);
-   assert((await page.locator('#host-FRA .overview-state').innerText()).includes('Stale resource data'),'sample expires during outage without a fetch');
+   assert((await page.locator('#host-Host .overview-state').innerText()).includes('Stale resource data'),'sample expires during outage without a fetch');
    offline=false;await page.evaluate(()=>refresh());
-   assert(await page.locator('#host-FRA > details').evaluate(e=>e.open),'successful refresh retains disclosure');
-   await page.locator('#host-FRA .overview-open').click();await page.waitForFunction(()=>!busy);
+   assert(await page.locator('#host-Host > details').evaluate(e=>e.open),'successful refresh retains disclosure');
+   await page.locator('#host-Host .overview-open').click();await page.waitForFunction(()=>!busy);
    assert.equal(new URL(page.url()).pathname,'/checks','producer finding opens its action');
    await page.goBack();assert(await page.locator('#host-grid').isVisible(),'Back restores Overview');
    assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);
    report.cells.push({width,size,theme,result:'PASS',actual,expected});
    if(process.argv.includes('--capture')&&width===1280&&size===16&&theme==='light') {
-    await page.locator('#host-FRA > details > summary').click();
+    await page.locator('#host-Host > details > summary').click();
     await page.screenshot({path:path.join(dir,'overview.png'),fullPage:true});
    }
    await page.close();await ref.close();

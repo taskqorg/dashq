@@ -6,8 +6,8 @@ const dir = process.env.DASHQ_HOST_FIRST_EVIDENCE, capture = process.argv.includ
 const html = fs.readFileSync(path.join(dir, 'page.html'), 'utf8');
 const jsFiles = ['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js', 'assets/assetq.js','assets/boards.js','assets/app.js'];
 const cssFiles = ['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css'];
-const out = 'docs/design/evidence/host-first-runtime';
-const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','specq F1–F7'],reference:'docs/design/evidence/host-first/manifest.json',
+const out = process.env.DASHQ_HOST_FIRST_SHOTS || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'dashq-host-first-'));
+const report = {kind:'runtime-fixture-evidence',rules:['D8/D10/D22','R12/R13','specq F1–F7'],reference:'https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/manifest.json',
   before:'host_first_actions_and_unknowns FAIL: hosts must precede Attention',after:'PASS: real renderer hosts precede human actions; history and shared controls retain their chains',
   matrix:[],screens:[],hashes:{},notTested:['production deployment','live host/login/assigned-queue probes','unreleased full TaskQ workspace API','owner acceptance']};
 (async () => {

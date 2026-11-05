@@ -53,7 +53,7 @@ Current section inventory checked against src/page.rs, resource.rs, clients.rs, 
 
 ## Published reference
 
-Approved editable [prototype](host-first-preview.html), [fixtures](host-first-fixture.json), [capture/check recipe](host-first-check.cjs) and [manifest](evidence/host-first/manifest.json). All hosts, versions, capacities, login/queue probes and findings are invented. Navigation covers Hosts, one detail and Tasks; auxiliary destinations explain the preview gap. No writes, live API or simulated success receipt.
+Approved editable [prototype](host-first-preview.html), [fixtures](host-first-fixture.json), [capture/check recipe](host-first-check.cjs) and [manifest](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/manifest.json). All hosts, versions, capacities, login/queue probes and findings are invented. Navigation covers Hosts, one detail and Tasks; auxiliary destinations explain the preview gap. No writes, live API or simulated success receipt.
 
 TaskQ project/answer assets are consumed unchanged from [release provenance](../../assets/taskq/provenance.json), with [design-source hashes](../../assets/taskq/project-blocks.sources.json). Parent-to-child map: TaskqProjectBlocks.summary/task/handle → Tasks; TaskqAnswerCard.render → selected read-only question. Only outer placement/width differ. [Resource assets](../../assets/taskq/sources.json) remain pinned; no editor is redrawn. [Boards](boards.md#release-and-adapter-gaps) names missing full-workspace/control/source contracts. These captures do not prove B4 native/browser conformance.
 
@@ -65,11 +65,11 @@ Five requested review captures (at most ten): Hosts 1280 light/dark, Hosts 360 d
 
 | Screen | Review question |
 |---|---|
-| [Hosts · 1280 light](evidence/host-first/hosts-1280-light.png) | Are host state, versions, sign-in, resources and counts readable together? |
-| [Hosts · 1280 dark](evidence/host-first/hosts-1280-dark.png) | Are warning and unknown meanings legible in dark theme? |
-| [Hosts · 360 dark](evidence/host-first/hosts-360-dark.png) | Does one host remain usable as labelled groups? |
-| [Host detail](evidence/host-first/host-detail.png) | Are trends, actions and evidence available without crowding the overview? |
-| [Tasks](evidence/host-first/tasks.png) | Are shared rows/answers and the full-workspace release gap explicit? |
+| [Hosts · 1280 light](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/hosts-1280-light.png) | Are host state, versions, sign-in, resources and counts readable together? |
+| [Hosts · 1280 dark](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/hosts-1280-dark.png) | Are warning and unknown meanings legible in dark theme? |
+| [Hosts · 360 dark](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/hosts-360-dark.png) | Does one host remain usable as labelled groups? |
+| [Host detail](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/host-detail.png) | Are trends, actions and evidence available without crowding the overview? |
+| [Tasks](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first/tasks.png) | Are shared rows/answers and the full-workspace release gap explicit? |
 
 Run `node docs/design/host-first-check.cjs` with Playwright on NODE_PATH and Chromium installed (or DASHQ_CHROME); add --capture to regenerate images. It checks routes/Back/reload, shared rendering, no writes, overflow and fixture meaning; manifest records hashes, environment and geometry. Documentation checks cover shrinkage/preservation/links/no Rust diff. No production gate changes.
 

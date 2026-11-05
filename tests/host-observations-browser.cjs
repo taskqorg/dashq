@@ -2,6 +2,7 @@
 const {chromium} = require('playwright');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
 const input = process.env.DASHQ_HOST_OBSERVATIONS_EVIDENCE;
+const out = process.env.DASHQ_HOST_OBSERVATIONS_SHOTS || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'dashq-observations-'));
 const html = fs.readFileSync(path.join(input, 'page.html'), 'utf8');
 const js = ['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js', 'assets/assetq.js','assets/boards.js','assets/app.js'].map(f=>fs.readFileSync(f,'utf8')).join('\n');
 const css = ['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css'].map(f=>fs.readFileSync(f,'utf8')).join('\n');
@@ -33,8 +34,8 @@ const css = ['assets/style.css','assets/taskq/resource-controls.css','assets/res
       assert((await evidence.innerText()).includes('valid until'));
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'no horizontal overflow');
       if(process.argv.includes('--capture')&&width===1280&&size===16) {
-        fs.mkdirSync('docs/design/evidence/host-observations',{recursive:true});
-        await page.screenshot({path:`docs/design/evidence/host-observations/stored-${theme}.png`,fullPage:true});
+        fs.mkdirSync(out,{recursive:true});
+        await page.screenshot({path:path.join(out,`stored-${theme}.png`),fullPage:true});
       }
       await evidence.locator('summary').focus();
       await page.evaluate(()=>{const e=document.querySelector('#host-win .host-observation');e.dataset.validFor='1';});

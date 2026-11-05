@@ -185,16 +185,14 @@ fn target(t: &Value) -> bool {
         && (t["runtime_id"].is_null() || t["runtime_id"].as_str().is_some_and(runtime_id) && !t["project_id"].is_null())
 }
 
-/// Typed changes for one target under `schema`: `invalid` for a malformed value or a field at the wrong scope,
-/// `unsupported` for a field the legacy capacity schema lacks.
-fn changes(c: &Value, schema: &str, t: &Value) -> Result<(), &'static str> {
+/// Typed admission changes: malformed values and fields at the wrong scope are invalid.
+fn changes(c: &Value, t: &Value) -> Result<(), &'static str> {
     let Some(o) = c.as_object().filter(|o| !o.is_empty()) else { return Err("invalid") };
     let scope = match (t["project_id"].is_null(), t["runtime_id"].is_null()) {
         (true, _) => "host",
         (false, true) => "project",
         _ => "runtime",
     };
-    let admission = schema == "taskq.admission/1";
     let gate = |g: &Value| {
         keys(g, &["enabled", "cpu_max", "memory_min"])
             && g["enabled"].is_boolean()
@@ -202,19 +200,15 @@ fn changes(c: &Value, schema: &str, t: &Value) -> Result<(), &'static str> {
             && int(&g["memory_min"]).is_some_and(|n| (1..=95).contains(&n))
     };
     for (k, x) in o {
-        let (ok, at, needs_admission) = match k.as_str() {
-            "mode" => (matches!(x.as_str(), Some("auto" | "fixed")), scope != "runtime", true),
-            "maximum" => (x.is_null() || u32_(x), scope != "runtime", true),
-            // legacy limits have no null: an absent runtime limit stays disabled
-            "runtime_limit" => (u32_(x) || (admission && x.is_null()), scope == "runtime", false),
-            "load_gate" => (gate(x), scope == "project", false),
+        let (ok, at) = match k.as_str() {
+            "mode" => (matches!(x.as_str(), Some("auto" | "fixed")), scope != "runtime"),
+            "maximum" => (x.is_null() || u32_(x), scope != "runtime"),
+            "runtime_limit" => (u32_(x) || x.is_null(), scope == "runtime"),
+            "load_gate" => (gate(x), scope == "project"),
             _ => return Err("invalid"),
         };
         if !ok || !at {
             return Err("invalid");
-        }
-        if needs_admission && !admission {
-            return Err("unsupported");
         }
     }
     // Auto cannot disable the gate
@@ -246,10 +240,10 @@ fn check_submit(v: &Value) -> Result<(), &'static str> {
         let one = keys(&v["changes"], &["runtime_limit"]) && (v["changes"]["runtime_limit"].is_null() || u32_(&v["changes"]["runtime_limit"]));
         return if one && !t["project_id"].is_null() && !t["runtime_id"].is_null() { Ok(()) } else { Err("invalid") };
     }
-    if !["taskq.capacity/1", "taskq.admission/1"].contains(&schema) {
+    if schema != "taskq.admission/1" {
         return Err("unsupported");
     }
-    changes(&v["changes"], schema, &v["target"])
+    changes(&v["changes"], &v["target"])
 }
 
 /// A resource grant with what makes it usable now: not revoked or expired, its subject still a workspace member,
@@ -911,7 +905,7 @@ mod tests {
         assert_eq!(t.post("github|1", &ops, &with("command", json!("rm -rf /")), 100).0, 400);
         assert_eq!(t.post("github|1", &ops, &with("changes", json!({"path": "/etc/taskq.json"})), 100).0, 400);
         assert_eq!(t.post("github|1", &ops, &with("changes", json!({"mode": "auto"})), 100).0, 400, "mode is not a runtime field");
-        assert_eq!(t.post("github|1", &ops, &with2(("policy_schema", json!("taskq.capacity/1")), ("changes", json!({"runtime_limit": null}))), 100).0, 400, "legacy has no null limit");
+        assert_eq!(t.post("github|1", &ops, &with2(("policy_schema", json!("taskq.capacity/1")), ("changes", json!({"runtime_limit": null}))), 100).0, 422, "retired capacity schema is unsupported");
         assert_eq!(t.post("github|1", &ops, &with("policy_schema", json!("taskq.other/9")), 100).0, 422);
         for raw in f["regressions"]["duplicate_json"].as_array().unwrap() {
             let csrf = t.e.as_ref().unwrap().token_for(&purpose("github|1", 0));
@@ -922,7 +916,7 @@ mod tests {
             let mut tg = s["target"].clone();
             tg["project_id"] = case["project_id"].clone();
             tg["runtime_id"] = case["runtime_id"].clone();
-            let (st, v) = t.post("github|1", &ops, &with2(("policy_schema", json!("taskq.capacity/1")), ("target", tg)), 100);
+            let (st, v) = t.post("github|1", &ops, &with2(("policy_schema", json!("taskq.admission/1")), ("target", tg)), 100);
             assert_eq!(outcome(&v), case["expect"].as_str().unwrap(), "{case} ({st})");
         }
         // lifetime: 1..300 s, issued at most 30 s ahead, never accepted at or after its deadline

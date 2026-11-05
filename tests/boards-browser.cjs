@@ -4,7 +4,7 @@
 // Attention cannot reach the card, or long text overflows. Run: PLAYWRIGHT_MODULE=<path>/playwright node tests/boards-browser.cjs
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const fs = require('fs'), http = require('http'), assert = require('assert');
-const out = process.env.DASHQ_BOARDS_EVIDENCE || 'docs/design/evidence/boards';
+const out = process.env.DASHQ_BOARDS_EVIDENCE || fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'dashq-boards-'));
 const read = f => fs.readFileSync(f, 'utf8');
 // Same concatenation as src/main.rs app_js()/style_css().
 const js = ['assets/taskq/resource-controls.js', 'assets/resources.js', 'assets/taskq/project-blocks.js', 'assets/taskq/answer-card.js', 'assets/taskq/task-controls.js', 'assets/assetq.js','assets/boards.js', 'assets/app.js'].map(read).join('\n');
@@ -52,7 +52,7 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     const at = `${width}/${font}/${colorScheme}`;
     // counters: TaskQ order, zero hidden, unknown `?`, Closed on board
     const labels = await page.$$eval('[id="board-taskqorg%2Ftaskq"] .tqp-counts button', bs => bs.map(b => b.getAttribute('aria-label').split(' · ')[1]));
-    assert.deepEqual(labels, ['Doing: 1', 'Review: 1', 'Ask: 1', 'Failed: 1', 'Ready: 1'], at);
+    assert.deepEqual(labels, ['Doing: 1', 'Review: 1', 'Ask: 1', 'Failed: 1', 'Ready: 1', 'Blocked: 1'], at);
     assert.equal(await page.locator('[id="board-taskqorg%2Ftaskq"] a:has-text("Closed on board")').count(), 1);
     assert.equal(await page.$$eval('[id="board-taskqorg%2Fagentq"] .tqp-counts button', bs => bs.filter(b => b.textContent.trim() === '?').length), 8, at + ' unread board unknown');
     // provider icon and counter text readable against the page (the #1041 dark-theme defect)
@@ -111,7 +111,7 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     const board = 'board-taskqorg%2Ftaskq';
     // Doing 1 -> 0 (hidden), Ready 1 -> 2, Later 0 -> 1; Review, Ask, Failed unchanged
     snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: [...b.tasks.filter(t => t.state !== 'doing'),
-      {...b.tasks.find(t => t.state === 'ready'), n: 15}, {...b.tasks.find(t => t.state === 'ready'), n: 16, state: 'later'}]});
+      {...b.tasks.find(t => t.state === 'ready'), n: 1501}, {...b.tasks.find(t => t.state === 'ready'), n: 1601, state: 'later'}]});
     await page.evaluate(() => refresh());
     assert.deepEqual(await tinted(), [[board, 'ready', 'tint'], [board, 'later', 'tint']], 'changed and newly nonzero counters tint');
     await page.evaluate(() => refresh());
@@ -133,6 +133,8 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     await page.goto(url);
     const q = '[id="board-taskqorg%2Ftaskq-q-12"]';
     await page.waitForSelector(q + ' button[data-choice="1"]:not([disabled])');
+    // The answer probe can finish before the initial refresh; wait so the explicit refresh is not skipped as busy.
+    await page.waitForFunction(() => !busy);
     // D6/D13: route access must not enable a retained or incomplete board observation after refresh.
     for (const source of [{state: 'stale', incomplete: false}, {state: 'ok', incomplete: true}]) {
       snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, source: {...b.source, ...source}});
@@ -151,8 +153,8 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     // the next question (new revision) answered with free text; the reply is lost
     snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: b.tasks.map(t => t.n === 12 ? {...t, revision: t.revision + 1} : t)});
     await page.evaluate(() => refresh());
-    // the answered card stays bound to its old question until the owner reads the new one
-    await page.locator(q + ' button[data-qac="review"]').click();
+    // The pinned card exposes the new revision; sending still needs explicit input and submit.
+    await page.waitForSelector(q + ' textarea:not([readonly])', {state:'attached'});
     await page.$eval(q + ' details.qac-other', d => { d.open = true; });
     await page.locator(q + ' textarea').fill('Use SQLite with WAL');
     await page.locator(q + ' button[type=submit]').click();
@@ -165,8 +167,8 @@ const lum = c => { const [r, g, b] = c.match(/[\d.]+/g).map(Number); return (0.2
     // stale: the server re-read a moved revision; the draft stays for review
     snapshot = boards => boards.map(b => b.project !== 'taskqorg/taskq' ? b : {...b, tasks: b.tasks.map(t => t.n === 12 ? {...t, revision: t.revision + 2} : t)});
     await page.evaluate(() => refresh());
-    // the answered card stays bound to its old question until the owner reads the new one
-    await page.locator(q + ' button[data-qac="review"]').click();
+    // The pinned card exposes the new revision; sending still needs explicit input and submit.
+    await page.waitForSelector(q + ' textarea:not([readonly])', {state:'attached'});
     await page.$eval(q + ' details.qac-other', d => { d.open = true; });
     await page.locator(q + ' textarea').fill('Files after all');
     await page.locator(q + ' button[type=submit]').click();

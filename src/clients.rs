@@ -63,7 +63,7 @@ pub fn build(cx: &Ctx, fleet: &[Value], activity: &[Value], enrolled: &Value, cu
     let at = |r: &Value| row_at(r).filter(|a| *a >= since && *a <= cx.now + 60);
     let mut newest: BTreeMap<String, (u64, &Value)> = BTreeMap::new();
     for r in &cx.heartbeats {
-        if let (Some((inst, _)), Some(t)) = (aq_identity(r), row_at(r).filter(|a| *a <= cx.now + 60))
+        if let (Some(inst), Some(t)) = (aq_identity(r), row_at(r).filter(|a| *a <= cx.now + 60))
             && newest.get(&inst).is_none_or(|(n, _)| t >= *n)
         {
             newest.insert(inst, (t, r));
@@ -72,7 +72,7 @@ pub fn build(cx: &Ctx, fleet: &[Value], activity: &[Value], enrolled: &Value, cu
     // (installation, client or "unknown") -> [records, hook records, hook compressed, bytes saved, bytes samples]
     let mut used: BTreeMap<(String, &str), [u64; 5]> = BTreeMap::new();
     for r in cx.compress.iter().filter(|r| at(r).is_some()) {
-        let Some((inst, _)) = aq_identity(r) else { continue };
+        let Some(inst) = aq_identity(r) else { continue };
         let c = aq(r, "agentq.agent").as_str().and_then(client).unwrap_or("unknown");
         let u = used.entry((inst, c)).or_default();
         u[0] += 1;
@@ -91,7 +91,7 @@ pub fn build(cx: &Ctx, fleet: &[Value], activity: &[Value], enrolled: &Value, cu
     }
     let mut retrievals: BTreeMap<String, u64> = BTreeMap::new();
     for r in cx.retrieval.iter().filter(|r| at(r).is_some()) {
-        if let Some((inst, _)) = aq_identity(r) {
+        if let Some(inst) = aq_identity(r) {
             *retrievals.entry(inst).or_default() += 1;
         }
     }
@@ -268,7 +268,7 @@ mod tests {
             ("Codex", "Codex: hooks configured, no compress records in 24 h"),
         ]));
         let codex_item = doc["attention"]["current"].as_array().unwrap().iter().find(|i| i["what"] == "Codex: hooks configured, no compress records in 24 h").unwrap().clone();
-        assert_eq!(codex_item["detail"], "a hook ran in 24 h, but installation inst-mac sent no agentq.compress record for this client in 24h.");
+        assert_eq!(codex_item["detail"], "a hook ran in 24 h, but installation inst-mac sent no agentq.compress record for this client in 1d.");
 
         // D6: a capped 24 h read never asserts absence; it is one gap per affected client
         let mut capped = inp.clone();
