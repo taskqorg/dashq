@@ -3,243 +3,155 @@
 [Owner request and acceptance](https://github.com/taskqorg/dashq/issues/260):
 "Dashboard page must answer within seconds."
 
-## Failure and cause
+## Result
 
-The task reports `http.page` up to **287929 ms** and `http.data` up to
-**88515 ms** in the production 0.18.1 `profile.jsonl`. These are task-supplied
-observations; this worker has not read that production file.
+| Item | State | Evidence |
+|---|---|---|
+| A1 root cause | named | [Root cause](#a1-root-cause) |
+| A2 Fleet never holds the page | verified in tests and live | [A2](#a2-fleet) |
+| A3 ten public tries under 5 s | passed on the installed candidate | [A3](#a3-install-and-probes) |
 
-At base `bfe39ebfdab6559d0d0922d6e8545c93bf883138`, both HTML and `/data`
-call `App::doc`, which synchronously calls `enroll::fleet_records`.
-`Cache::get` holds the Fleet slot mutex throughout the read. On expiry, Fleet
-calls `Store::telemetry_since(..., |_| true)`: it lists every retained block ID
-and fetches every payload separately while holding the connection used by
-ingestion and projection. Fleet then parses and decompresses every block before
-keeping the newest 10,000 relevant rows. The row cap does not cap that work.
-Other page requests queue behind the same slot; their earlier projection can
-also queue behind the shared database connection. Fleet's two CLI release reads
-are also synchronous and can consume two sequential 10 s HTTP timeouts.
+Source of the running service: `b3d7259bac8f3bc6a3fc47c29aa682058771bc09`, a
+development activation before merge. Later commits on the branch change evidence only.
 
-This establishes a blocking mechanism, not historical attribution of those two
-maxima. Production profile/trace correlation for **A1 remains open**.
+## A1 root cause
 
-An authenticated `GET https://dash.ufobe.com/` from the Windows worker timed out
-after **15.015078 s**, curl exit **28**, with no HTTP status. Credentials stayed
-in curl stdin and were not recorded. SSH to the production name failed with
-`Host key verification failed.` No host key or authentication setting changed
-(R5, R7).
+The profile on pds18 at 0.18.1 held 39164 rows, 2026-11-04 07:48 UTC to 2026-11-05
+11:25 UTC. Both named maxima are retained: `http.page` 287929 ms finished at
+1793873309 and `http.data` 88515 ms finished at 1793872631.
 
-## Change and regression evidence
+| Operation | Rows | p50 ms | p95 ms | Max ms | Over 5 s |
+|---|---:|---:|---:|---:|---:|
+| `http.page` | 310 | 5470 | 200501 | 759354 | 212 |
+| `http.data` | 302 | 9562 | 88078 | 634887 | 301 |
+| `read.fleet` | 643 | 29415 | 71494 | 157263 | 480 |
+| `http.enroll` | 11021 | 524 | 2666 | 27198 | 68 |
 
-- **D4 / A2:** browser HTML and `/data` use a single background Fleet refresh per
-  installation/workspace. Fleet CLI release reads use the same background cache
-  mechanism. `dashq report` retains synchronous source reads.
-- **D6 / R2:** pending/failed refreshes retain the prior value, incompleteness
-  and time. A pending first read has null data/time and a reason. Existing Fleet
-  rendering shows producer age and an unconfirmed/unknown state.
-- **D11 / R9:** Fleet opens a read-only connection to the same WAL database; it
-  neither holds the ingestion/projection connection nor creates another store.
-  Its query retrieves payloads in one ordered scan rather than one query per ID.
-- **D11:** actor-scoped rows are checked before each cache lookup. Tests retain
-  denied, anonymous and revoked-cache protections. No raw telemetry is added to
-  browser output (R1).
+Three causes combined. The first explains the size of the maxima; the second and
+third set the floor under every page.
 
-Before the implementation, `cargo test --locked fleet_refresh_does_not_hold_callers -- --nocapture`
-failed: `Fleet held the caller behind its read: Timeout`. The reproduction used
-the original synchronous cache through a forwarding `refresh` entry point.
-After the implementation, `cargo test --locked fleet_ -- --nocapture` passed
-**9 checks**. The retained checks cover blocked and failing reads, shared
-single-flight reads, cold unknown-to-success, last-good time, the independent
-SQLite reader, all ten HTML view routes and `/data`, producer age, and scope.
-The route check releases its deliberately blocked reader only after receiving
-all eleven responses. This is deterministic regression evidence, not production
-performance qualification.
+1. **Page requests read Fleet synchronously, one read after another.** `App::doc`
+   called `fleet_records`, whose `Cache::get` held the slot lock during the read.
+   At base, `get` set `next = now + ttl` from a `now` taken before the read. A read
+   of 30 s or more had already expired when it finished, so each caller queued on
+   the slot repeated the read. 299 of 643 reads took 30 s or more; 154 failed with
+   `stored block invalid`.
+   - `http.data` 88515 ms (1793872543 to 1793872631): three `read.fleet` of 6971,
+     35534 and 33545 ms ran back to back from 1793872552 to 1793872628. They account
+     for 76 s of the 88.5 s, and the request finished 3 s after the last one.
+   - `http.page` 287929 ms (1793873021 to 1793873309): ten `read.fleet` finished in
+     the window, four of them 121593 to 134557 ms. The request finished within 6 s of
+     the last long pair.
+   - Limit: a profile row has a completion time and no request ID. This correlation
+     is by interval, supported by the code path and the blocked-read reproduction.
+2. **Each projection walked 2.6 GB of old receipts under the store lock.**
+   `Store::project` runs in a write transaction every 2 s and on every page. Its
+   `MAX(at)` per grant reads the `at` column of `receipts`, which is stored after
+   `content`. Receipts written before #242 hold the full record (135242 rows, 2.6 GB
+   of the 3.4 GB file, average 19 KB), so SQLite walks each row's overflow pages.
+   Read-only timing on the live file, warm cache:
 
-## Remaining acceptance and rollback
+   | Query, per grant | Time |
+   |---|---:|
+   | `SELECT MAX(at) FROM receipts` | 1.41 to 1.50 s |
+   | `SELECT COUNT(*) FROM receipts` (primary key only) | 0.017 s |
+   | `SELECT COUNT(*) FROM history` | 0.44 to 0.51 s |
+   | Telemetry coverage with `length(payload)` | 0.43 to 0.45 s |
+   | Telemetry coverage with `octet_length(payload)` | 0.18 to 0.22 s |
 
-**A2 is locally verified. A1 production correlation and A3 are unverified.**
-No candidate was installed by this worker and no post-install ten-request result is
-claimed. Other source reads remain synchronous; their contribution needs the
-production profile. Windows checks do not establish Linux or proxy behavior.
+   The projection thread used 54% of uptime. `perf` on it over 20 s: 57% in `pread64`
+   and 33% copying pages, against 5.8% in `lengthFunc`.
+3. **Cold and expiring reads stayed on the page path.** The first page after a
+   restart took 34459 ms while it decoded the two-day stage window behind the memo
+   lock. A source read at cache expiry raised a 1.4 s page to 4.3 to 4.7 s.
 
-The PM handoff below inspects the same profile report
-before and after installing the exact checked candidate. Record its SHA/artifact
-digest and the running executable; run ten authenticated public `GET /` probes,
-requiring HTTP 200 and less than 5 s each (A3). Retain source states and producer
-age while Fleet refresh is slow or fails. Preserve the previous executable for
-rollback. This change has no schema migration, configuration or grant change;
-rollback restores the prior executable against the same database.
+The review's attribution of the projection to `length(payload)` is partly confirmed.
+That call does read the overflow pages, but it is the smaller part: 0.2 s of the
+pass, against 1.4 s for receipts. `http.enroll` shared the same lock and also summed
+`length(payload)` on each telemetry accept.
 
-## PM handoff after the accepted access answer
+## Change
 
-The accepted answer on #260 assigns the pds18 work to the PM. The worker must
-not change SSH key permissions or work around access. A1 and A3 remain pending
-the PM's receipts; returning this PR for review does not waive either item.
-The accepted answer reports that the host key is now trusted and private-key
-permissions block the worker. No SSH attempt was made in this continuation.
+- **A2:** browser Fleet reads run in one background flight per stream on a read-only
+  connection (D4, D6, D11).
+- **Projection:** covering indexes `receipts_by_time` and `history_by_scope` answer
+  receipt time and sample count. Block size and the telemetry budget use
+  `octet_length`, which reads no payload page and counts bytes. The indexes are
+  additive, the store version is unchanged, and an older binary still opens the file.
+- **Sources:** browser requests and the limits push start Langfuse, board, release and
+  TaskQ reads in the background. The last value keeps its time, so D6 decides its
+  state. `dashq report` and `dashq limits` still wait for their reads.
+- **Restart:** the service decodes the stage window at start. Pages read `agent_work`
+  as unknown with `refresh in progress` until it is done.
 
-The worker ran ten more authenticated public `GET /` probes on 2026-11-05,
-10:59:19-11:00:04 UTC, before any candidate installation. **0/10 passed**:
-every call reached its 5 s client deadline with curl exit 28 and HTTP status
-`000` (no response), taking 5.002271-5.017402 s. This proves that the current
-public path still misses the target from this worker. It does not identify
-which proxy/backend stage timed out or establish post-install A3 performance.
-Per-try metadata is in [dashboard-latency-260-probes.json](dashboard-latency-260-probes.json).
+Authentication, grants and configuration are unchanged (R5, R7).
 
-The commands below are for the PM, not executed host changes. Run the pds18
-blocks as the existing service owner, from a trusted DashQ checkout, only after
-the candidate's required merge-result CI and deployment authorization. Use the
-existing `dashq-dashq.service` user unit (README D3). Privately set/export
-`DASHQ_CONFIG` to that service's existing config file; do not print or copy its
-contents. The same source code remains at immutable implementation commit
-`e012543112ef8899d7a875e28a8c66f9fc014345`; later handoff edits change evidence only.
+## Regression checks
 
-### A1: preserve and inspect the production profile before activation
+Each check failed before its fix and passes after it.
 
-```bash
-set -euo pipefail
-umask 077
-: "${DASHQ_CONFIG:?Use the existing private service config}"
-test -r "$DASHQ_CONFIG"
-repo=$(git rev-parse --show-toplevel)
-receipts="$repo/.taskq/acceptance-260"
-mkdir -p "$receipts"
-unit=dashq-dashq.service
-pid=$(systemctl --user show "$unit" -p MainPID --value)
-test "$pid" -gt 0
-running=$(readlink -f "/proc/$pid/exe")
-printf 'before binary sha256: '
-sha256sum < "$running"
-test ! -e "$receipts/profile.before.json"
-test ! -e "$receipts/profile.before.jsonl"
-"$running" profile --window=86400 > "$receipts/profile.before.json"
-cp -- "$(dirname -- "$DASHQ_CONFIG")/profile.jsonl" "$receipts/profile.before.jsonl"
-python3 - "$receipts/profile.before.jsonl" <<'PY'
-import json, sys
-rows = []
-for line in open(sys.argv[1], encoding="utf-8"):
-    try:
-        row = json.loads(line)
-    except ValueError:
-        continue
-    if isinstance(row, dict) and isinstance(row.get("at"), int) and isinstance(row.get("ms"), int):
-        rows.append(row)
-for op in ("http.page", "http.data", "read.fleet", "read.langfuse", "read.board", "read.taskq"):
-    selected = [r for r in rows if r.get("op") == op]
-    if not selected:
-        print(json.dumps({"op": op, "state": "unknown", "reason": "no retained samples"}))
-        continue
-    slow = sorted(selected, key=lambda r: r["ms"], reverse=True)[:5]
-    print(json.dumps({"op": op, "count": len(selected), "slowest": [
-        {k: r.get(k) for k in ("at", "ms", "outcome", "error")} for r in slow]}))
-PY
-```
+| Check | Failure before | Protects |
+|---|---|---|
+| `fleet_refresh_does_not_hold_callers`, `fleet_pending_read_keeps_routes_and_scope_available` | `Fleet held the caller behind its read: Timeout` | A2: last data, age, single flight, actor scope |
+| `projection_reads_times_and_counts_without_payload_pages` | Plan `SEARCH r USING INDEX sqlite_autoindex_receipts_1`; bytes `2`, expected `4` | The projection reads no payload to reach another column |
+| `browser_routes_do_not_wait_for_a_hung_source_read` | `the source read held the routes: Timeout`, with the background read reverted | A page and `/data` answer during a hung read; a first read is not "all sources failed" |
+| `revalidate_keeps_the_last_value_unmarked_during_one_read` | New method | Last value keeps its time, one read runs, the result replaces it |
+| `taskq_stage_replay_through_ingest`, added case | New case | During the start decode a browser read reads unknown, then returns the same records |
 
-Return the operation counts, maxima, UTC completion times and the profile
-report's retention/unknown states. Relate `read.fleet` to the blocking code
-path described above and name any other material slow source. The records
-contain completion time but no request ID: overlapping intervals alone do not
-prove which source belongs to a particular request. If the historical maxima
-were pruned or the evidence cannot distinguish causes, keep that part of A1
-unknown rather than inventing attribution. Preserve the original receipts;
-publish only metadata summaries, never config, environment or raw service logs.
+## A2 Fleet
 
-### A3: build and activate the checked implementation on the existing service
+A2 regression checks are above. On the installed candidate, public `/data` showed
+Fleet streams `unconfirmed`, `refresh in progress`, with source ages of 195 s and
+5788 s while their reads ran. It showed `unknown`, `stored block invalid` for the
+one host whose block does not decode (see [Open](#open)).
 
-This is a scoped development installation, not a new release or a replacement
-of immutable 0.18.1 files. The runtime override below keeps the existing unit's
-config, database, user, working directory and authentication. A binary outside
-the coreq release layout does not auto-update (Process detail); the PM must
-later remove this override for the normal released-service update path.
-Continue in the same pds18 shell after A1:
+## A3 install and probes
 
-```bash
-candidate=e012543112ef8899d7a875e28a8c66f9fc014345
-git fetch origin "$candidate"
-test "$(git rev-parse FETCH_HEAD)" = "$candidate"
-stage="$receipts/$candidate"
-mkdir "$stage"
-git archive "$candidate" | tar -x -C "$stage"
-(
-    cd "$stage"
-    cargo test --locked fleet_
-    cargo build --locked --release
-)
-bin="$stage/target/release/dashq"
-DASHQ_SELFTEST_OFFLINE=1 "$bin" selftest
-digest=$(sha256sum < "$bin" | cut -d ' ' -f 1)
-printf 'candidate source: %s\ncandidate sha256: %s\n' "$candidate" "$digest"
-: "${XDG_RUNTIME_DIR:?Use the existing service owner runtime}"
-dropdir="$XDG_RUNTIME_DIR/systemd/user/$unit.d"
-override="$dropdir/90-task260.conf"
-test ! -e "$override"
-mkdir -p "$dropdir"
-printf '[Service]\nExecStart=\nExecStart="%s" service run\n' "$bin" > "$override"
-rollback260() {
-    rm -f -- "$override"
-    systemctl --user daemon-reload
-    systemctl --user restart "$unit"
-}
-trap rollback260 ERR
-systemctl --user daemon-reload
-systemctl --user restart "$unit"
-systemctl --user is-active --quiet "$unit"
-pid=$(systemctl --user show "$unit" -p MainPID --value)
-test "$pid" -gt 0
-test "$(readlink -f "/proc/$pid/exe")" = "$bin"
-test "$(sha256sum < "/proc/$pid/exe" | cut -d ' ' -f 1)" = "$digest"
-printf 'running source: %s\nrunning sha256: %s\n' "$candidate" "$digest"
-activated_at=$(date -u +%s)
-printf 'activation UTC epoch: %s\n' "$activated_at"
-trap - ERR
-```
+Built on pds18 from the exact commit with `cargo build --locked --release`, and
+activated through a runtime drop-in on the existing `dashq-dashq.service`:
 
-Return the source SHA, built/running digest match, native focused test and
-offline selftest results, activation time and service active state. These prove
-process identity, not A3 latency. No native build, restart, override, database
-or configuration command above has been executed by this worker. On a failed
-post-install check, run `rollback260` in this same shell and verify that the
-running executable again equals `$running`; do not touch existing drop-ins.
+- Source `b3d7259bac8f3bc6a3fc47c29aa682058771bc09`.
+- Built and running SHA-256 match:
+  `94e85b4faa6adb96114df693c11003eb9493ba18ac68defd0baa27139d2e1562`.
+- Replaced release 0.18.1, SHA-256
+  `d93df6bd34cfc36783e813290f4f4c73d6c2e24ba8bda6efd5f6678bb4bb4774`.
+- Activated at 1793879146. The listener answered 4 s after the restart.
 
-### A3: ten authenticated public probes after that install
+Public `GET /` with the agent site credentials, from the Windows worker:
 
-Run from an authorized client, with its own site credentials loaded privately
-following the site's agent-access README. Export the two existing credential
-variables for this command; do not copy credentials between hosts. This sends
-headers through curl stdin, discards response bodies and prints metadata only
-(R1/R5/R7). It adds no authentication route or exception. The same recipe can
-also record a baseline; only a run after the matched activation proves A3.
+| Run | Under 5 s, HTTP 200 | Slowest |
+|---|---:|---:|
+| Before, on 0.18.1 ([receipts](dashboard-latency-260-probes.json)) | 0/10 | 5 s client timeout |
+| First run, from the cold restart | 9/10 | 9.39 s |
+| 24 tries with first-byte timing | 24/24 | 3.78 s |
+| **Acceptance run, 5 s client limit** ([receipts](dashboard-latency-260-after.json)) | **10/10** | 3.97 s |
+| Soak, 30 tries | 30/30 | 4.44 s |
 
-```bash
-python3 - <<'PY'
-import json, os, subprocess, sys
-fields = (("CF-Access-Client-Id", "CF_ACCESS_CLIENT_ID"),
-          ("CF-Access-Client-Secret", "CF_ACCESS_CLIENT_SECRET"))
-cfg = 'url = "https://dash.ufobe.com/"\n'
-for header, key in fields:
-    value = os.environ[key]
-    if not value or any(c in value for c in '\r\n"\\'):
-        raise SystemExit("missing or invalid site credential field")
-    cfg += f'header = "{header}: {value}"\n'
-passed = 0
-for attempt in range(1, 11):
-    r = subprocess.run(["curl", "-sS", "-o", os.devnull, "--max-time", "5",
-        "-w", "%{http_code} %{time_total}", "-K", "-"],
-        input=cfg, text=True, capture_output=True)
-    status, seconds = r.stdout.split()
-    ok = r.returncode == 0 and status == "200" and float(seconds) < 5
-    passed += ok
-    print(json.dumps({"try": attempt, "http_status": status,
-        "seconds": float(seconds), "curl_exit": r.returncode, "pass": ok}), flush=True)
-print(json.dumps({"passed": passed, "tries": 10}), flush=True)
-sys.exit(0 if passed == 10 else 1)
-PY
-```
+The first request after the restart took 4.26 s. The one miss, 9.39 s at 1793879185,
+is outside DashQ: its `http.page` row is 1316 ms, finished at 1793879187. No later try
+reproduced it, and its cause is unknown. A public `/style.css` takes about 1.2 to
+1.9 s, which is the guard and proxy cost of any request. `/data` took 2.9 to 3.3 s.
 
-The PM's A3 receipt must pair all ten HTTP 200 results below 5 s with the
-source/digest activation receipt. A login redirect, error status, timeout,
-pre-install success or average below 5 s is not a pass. After these requests,
-run `"$bin" profile --window=86400 > "$receipts/profile.after.json"` on pds18
-and compare the same operations with `profile.before.json`, separating samples
-before/after activation and any pruned window. D6 last-good/age behavior remains
-covered by the regression checks; native/production evidence stays separate.
+Profile since activation against the 0.18.1 table above:
+
+| Operation | Rows | p50 ms | p95 ms | Max ms | Over 5 s |
+|---|---:|---:|---:|---:|---:|
+| `http.page` | 74 | 1498 | 1927 | 2854 | 0 |
+| `http.data` | 3 | 1467 | 1863 | 1863 | 0 |
+| `http.enroll` | 75 | 8 | 430 | 541 | 0 |
+| `read.fleet`, off the page path | 59 | 5620 | 27350 | 28782 | 36 |
+
+## Open
+
+- **Normal auto-update stays off** until the drop-in `90-task260.conf` of
+  `dashq-dashq.service` is removed and a release with this change is installed. A
+  binary outside the release layout does not update itself. The drop-in is a runtime
+  file, so a reboot also removes it and returns the service to 0.18.1.
+- **Rollback:** remove that drop-in, reload the user units and restart the service.
+  The indexes stay and are harmless.
+- **Invalid stored block:** one stream's window contains a block that no longer
+  decodes, so `read.fleet` fails for it. After a restart that stream has no last data
+  and reads unknown until the block ages out. This is filed as a follow-up task.
+- **`read.fleet` still takes about 25 s per stream** in the background while pages are
+  being requested. It no longer holds a request.
+- **Merge-result CI** is separate required evidence.
