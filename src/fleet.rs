@@ -149,7 +149,9 @@ fn window(stream: &Value, now: u64, seconds: u64) -> Value {
     // The transport certifies retained rows, not a whole-window producer baseline. Never claim a complete census.
     let t = &stream["telemetry"];
     let dropped = if stream["capped"] == true { Some(stream["dropped_newest_ms"].as_u64().unwrap_or(u64::MAX)) } else { None };
+    let loss_reason = stream["known_loss"].as_array().into_iter().flatten().filter_map(|b| b["reason"].as_str()).collect::<Vec<_>>().join("; ");
     let reason = if stream["error"].is_string() { stream["error"].as_str().unwrap() }
+        else if !loss_reason.is_empty() { &loss_reason }
         else if stream["capped"] == true { "Fleet row cap reached" }
         else if unidentified > 0 { "observations have no stable identity" }
         else if untimed > 0 { "observations have unknown time" }
@@ -158,18 +160,20 @@ fn window(stream: &Value, now: u64, seconds: u64) -> Value {
         else { "observed only; full-window producer coverage not established" };
     let mut source = unknown(reason);
     let any = !turns.is_empty() || !completed.is_empty() || !workers.is_empty();
-    source["state"] = json!(if any && stream["error"].is_string() { "unconfirmed" } else if any { "incomplete" } else { "unknown" });
+    source["state"] = json!(if any && stream["error"].is_string() { "unconfirmed" } else if any && loss_reason.is_empty() { "incomplete" } else { "unknown" });
     source["incomplete"] = json!(any);
     source["at"] = json!(newest);
     source["age_s"] = json!(newest.map(|at| now.saturating_sub(at)));
-    if any && !stream["error"].is_string() && newest.is_some_and(|at|now.saturating_sub(at)>300) {
+    if any && !stream["error"].is_string() && loss_reason.is_empty() && newest.is_some_and(|at|now.saturating_sub(at)>300) {
         source["state"]=json!("stale"); source["reason"]=json!(format!("latest producer observation older than 300 s; {reason}"));
     }
-    json!({"seconds": seconds, "from": now.saturating_sub(seconds), "to": now, "source": source, "untimed": untimed, "capped": stream["capped"] == true, "last_received": t["last_synced"],
+    let mut out = json!({"seconds": seconds, "from": now.saturating_sub(seconds), "to": now, "source": source, "untimed": untimed, "capped": stream["capped"] == true, "last_received": t["last_synced"],
         "projects": groups(&turns,"project",now,dropped), "attempts": groups(&turns,"attempt",now,dropped), "accounts": groups(&turns,"account",now,dropped),
         "completed_observed": (!completed.is_empty()).then_some(completed.len()),
         "completions_per_hour_observed": (!completed.is_empty()).then_some(completed.len() as f64 / (seconds as f64 / 3600.0)),
-        "workers_started_observed": (!workers.is_empty()).then_some(workers.len())})
+        "workers_started_observed": (!workers.is_empty()).then_some(workers.len())});
+    if !loss_reason.is_empty() { out["known_loss"] = stream["known_loss"].clone(); }
+    out
 }
 
 pub fn build(inp: &Value, hosts: &Value) -> Value {
