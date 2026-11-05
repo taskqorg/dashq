@@ -15,7 +15,7 @@
       "state": "unknown",
       "at": 1791874800,
       "age_s": 339,
-      "reason": "taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC",
+      "reason": "taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 2026-10-13 07:00 UTC",
       "incomplete": false
     },
     "serverq": {
@@ -128,7 +128,7 @@
         "behind": false,
         "state": "stale",
         "age_s": 3900,
-        "reason": "heartbeat 65m old (ttl 5m)",
+        "reason": "heartbeat 1h old (ttl 5m)",
         "observed_running": null,
         "cli_heartbeats": [
           {
@@ -255,7 +255,7 @@
       "state": "unknown",
       "at": 1791871539,
       "age_s": 3600,
-      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout); Agent work: fra: read failed (log missing)",
+      "reason": "Langfuse: capped query; GitHub: taskqorg/agentq: read failed (timeout); taskqorg/dashq: read failed (rate limited), showing 2026-10-13 07:00 UTC; taskq: taskqorg/dashq: read failed (taskq timeout); Agent work: fra: read failed (log missing)",
       "incomplete": true
     },
     "current": [
@@ -282,7 +282,7 @@
         "client": "Codex",
         "what": "Codex: hooks configured, no compress records in 24 h",
         "since": null,
-        "detail": "2 model calls in the period, but installation inst-fra sent no agentq.compress record for this client in 24h.",
+        "detail": "2 model calls in the period, but installation inst-fra sent no agentq.compress record for this client in 1d.",
         "trace_id": null
       },
       {
@@ -1466,7 +1466,7 @@
           "state": "stale",
           "at": 1791871200,
           "age_s": 3939,
-          "reason": "heartbeat 65m old (ttl 5m)"
+          "reason": "heartbeat 1h old (ttl 5m)"
         },
         "running": {
           "version": "4.2.0",
@@ -1493,7 +1493,7 @@
         },
         "health": {
           "state": "unknown",
-          "reason": "observation stale: heartbeat 65m old (ttl 5m)"
+          "reason": "observation stale: heartbeat 1h old (ttl 5m)"
         },
         "lifecycle": {
           "state": "unknown",
@@ -1577,13 +1577,11 @@
           ]
         }
       ],
-      "read": 2,
+      "read": 0,
       "counted": 0,
       "duplicates": 0,
       "out_of_window": 0,
-      "excluded": {
-        "malformed": 2
-      },
+      "excluded": {},
       "legacy_run": 0,
       "capped": false,
       "profile_unknown": 0
@@ -1684,9 +1682,9 @@
     ],
     "source": {
       "state": "stale",
-      "at": 1791874500,
-      "age_s": 639,
-      "reason": "data is 10m old (limit 10m)",
+      "at": 1791873000,
+      "age_s": 2139,
+      "reason": "data is 35m old (limit 10m)",
       "incomplete": true
     }
   },
@@ -1708,7 +1706,7 @@
           "state": "incomplete",
           "at": 1791875119,
           "age_s": 20,
-          "reason": "log retains stages from 06:37 UTC; earlier unknown",
+          "reason": "log retains stages from 2026-10-13 06:37 UTC; earlier unknown",
           "incomplete": true
         },
         "provenance": [
@@ -1716,7 +1714,7 @@
         ],
         "records": 28,
         "retained_from": 1791873439,
-        "coverage": "log retains stages from 06:37 UTC; earlier unknown"
+        "coverage": "log retains stages from 2026-10-13 06:37 UTC; earlier unknown"
       },
       {
         "host": "fra",

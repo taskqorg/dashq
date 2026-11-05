@@ -1,6 +1,24 @@
 // dashq.md D5: fetch /data on load, every 60 s and on Refresh; a failure keeps the last page and shows the banner.
 'use strict';
 
+// D6 / specq Time: largest whole age unit, rounded down; missing stays unknown.
+function time(s) {
+  if (typeof s !== 'number' || !Number.isFinite(s)) return '? unavailable';
+  if (s < 60) return '<1m';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+}
+function exactTime(t) {
+  if (typeof t !== 'number' || !Number.isFinite(t)) return '? unavailable';
+  const d = new Date(t * 1000), now = new Date();
+  if (!Number.isFinite(d.getTime())) return '? unavailable';
+  const parts = new Intl.DateTimeFormat('en-US', {weekday:'short', month:'short', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hourCycle:'h23', ...(d.getFullYear() !== now.getFullYear() ? {year:'numeric'} : {})}).formatToParts(d);
+  const p = key => parts.find(x => x.type === key)?.value;
+  return `${p('weekday')} ${p('month')} ${p('day')}${p('year') ? ', ' + p('year') : ''}, ${p('hour')}:${p('minute')}`;
+}
+
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/fleet': ['fleet'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
@@ -186,7 +204,7 @@ async function refresh() {
     document.querySelectorAll('main [data-age-s]').forEach(e => {
       if (e.dataset.ageS === '') { e.textContent = 'age unknown'; return; }
       e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
-      e.textContent = (e.closest('.overview-age,.attempt-select') ? '' : 'Last observation ') + e.dataset.ageS + ' s old · unconfirmed';
+      e.textContent = (e.closest('.overview-age,.attempt-select') ? '' : 'Last observation ') + time(Number(e.dataset.ageS)) + ' old · unconfirmed';
     });
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');
@@ -211,7 +229,7 @@ async function refresh() {
     }
     ageUpdatedAt = Date.now();
     const at = document.querySelector('main time')?.dataset.at;
-    const age = at ? ' Last page generated ' + Math.max(0, Math.floor(Date.now() / 1000) - Number(at)) + ' s ago.' : '';
+    const age = at ? ' Last page generated ' + time(Math.floor(Date.now() / 1000) - Number(at)) + ' ago.' : '';
     const errorBanner = document.getElementById('banner') || banner;
     errorBanner.textContent = 'Refresh failed (' + e.message + '), showing last-known data from ' + shown + '. Current source state unknown; incidents are unverified.' + age;
     errorBanner.hidden = false;
@@ -251,6 +269,11 @@ function expireHostObservations(failed = false) {
   });
 }
 function bind() {
+  document.querySelectorAll('time[data-at]').forEach(e => {
+    const t = Number(e.dataset.at);
+    e.textContent = time(Math.floor(Date.now() / 1000) - t) + ' ago';
+    e.title = exactTime(t);
+  });
   expireHostObservations();
   applyView();
   document.getElementById('refresh')?.addEventListener('click', refresh);

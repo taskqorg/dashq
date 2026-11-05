@@ -8,7 +8,7 @@ const jsFiles = ['assets/taskq/resource-controls.js','assets/resources.js','asse
 const cssFiles = ['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css','assets/taskq/pm-composer.css','assets/workspace.css','assets/taskq/task-workspace.css'];
 const js = jsFiles.map(read).join('\n'), css = cssFiles.map(f=>f.endsWith('/task-workspace.css') ? `@scope (#taskq-workspace) {${read(f)}}` : read(f)).join('\n');
 const digest = s => crypto.createHash('sha256').update(s.replace(/\r\n/g,'\n')).digest('hex');
-const out = 'docs/design/evidence/telemetry';
+const out = process.env.DASHQ_TELEMETRY_SHOTS || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'dashq-telemetry-'));
 (async () => {
   const browser = await chromium.launch({headless:true, ...(process.env.DASHQ_CHROME ? {executablePath:process.env.DASHQ_CHROME} : {})});
   const report = {kind:'runtime-fixture-evidence', rules:['R12/R13','D11/D22/D23','#222 A1–A4'], browser:browser.version(), platform:process.platform,
@@ -53,7 +53,7 @@ const out = 'docs/design/evidence/telemetry';
           const value = s.state!=='known' ? '—' : s.value===true ? 'Yes' : s.value===false ? 'No' : String(s.value);
           const text = await step.innerText();
           assert(text.includes(value) && text.includes('Evidence time:'));
-          if (s.at===null) assert(text.includes('Evidence time: —'));
+          if (s.at===null) assert(text.includes('Evidence time: ? unavailable'));
           if (s.reason) assert(text.includes(s.reason));
           assert.equal(await step.locator('.ok,.good').count(),0,'no implied pass from a stage state');
         }

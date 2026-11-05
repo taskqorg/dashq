@@ -1,7 +1,7 @@
-// Pure aggregate from taskqorg/agentq@f69a781706c0d2f9d60ac456651c920d3fe1bd1a. MIT (see fixture/agentq/LICENSE-MIT).
+// Aggregate adapted from taskqorg/agentq@f69a781706c0d2f9d60ac456651c920d3fe1bd1a. MIT (see fixture/agentq/LICENSE-MIT).
 //! Optimization results (docs/spec/ACCOUNTING.md O1-O3): §3 stats records or exported `agentq.compress` spans ->
-//! one deduplicated, coverage-qualified aggregate. Pure; `agentq stats --accounting` and the consumer fixtures
-//! `docs/spec/accounting-fixtures.json` share it.
+//! one deduplicated, coverage-qualified aggregate. Pure; consumer cases live in
+//! `fixture/agentq/accounting-fixtures.json`; retired run accounting is excluded (dashq.md D17).
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -49,17 +49,12 @@ pub fn outcome_of(reason: &str) -> Option<&'static str> {
 }
 
 /// A record as is, or an exported span as its record: `agentq.` attributes unprefixed. OTLP has no null, so the
-/// producer's `"null"` string reads as null; int64 may arrive as a string. `(record, legacy run)`; None: an event
-/// that is no core optimization call.
-fn event(v: &Value) -> Option<(Value, bool)> {
+/// producer's `"null"` string reads as null; int64 may arrive as a string. Other event names are ignored.
+fn event(v: &Value) -> Option<Value> {
     let Some(attrs) = v["attributes"].as_array() else {
-        return Some((v.clone(), false));
+        return Some(v.clone());
     };
-    let legacy = match v["name"].as_str() {
-        Some("agentq.compress") => false,
-        Some("agentq.run") => true,
-        _ => return None,
-    };
+    if v["name"] != "agentq.compress" { return None; }
     let mut r = Map::new();
     for a in attrs {
         let (Some(k), x) = (a["key"].as_str().and_then(|k| k.strip_prefix("agentq.")), &a["value"]) else {
@@ -81,7 +76,7 @@ fn event(v: &Value) -> Option<(Value, bool)> {
             r.insert("time".into(), json!((ns / 1_000_000_000) as u64));
         }
     }
-    Some((Value::Object(r), legacy))
+    Some(Value::Object(r))
 }
 
 fn hex32(v: &Value) -> bool {
@@ -158,7 +153,6 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
     let mut excluded = json!({});
     let mut events = BTreeMap::<String, Value>::new();
     let mut conflicts = BTreeSet::new();
-    let mut legacy = BTreeSet::new();
     let mut found = vec![0u64; sources.len()];
     for (i, s) in sources.iter().enumerate() {
         for v in s["records"].as_array().into_iter().flatten() {
@@ -167,7 +161,7 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
                 break;
             }
             read += 1;
-            let Some((mut r, is_legacy)) = event(v) else { continue };
+            let Some(mut r) = event(v) else { continue };
             if !r.is_object() {
                 bump(&mut excluded, "malformed");
                 continue;
@@ -177,11 +171,7 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
                     r[k] = s[k].clone();
                 }
             }
-            let why = if is_legacy {
-                (!hex32(&r["event_id"]) || r["time"].as_u64().is_none()).then_some("malformed")
-            } else {
-                invalid(&r, now).or(r["time"].as_u64().is_none().then_some("malformed"))
-            };
+            let why = invalid(&r, now).or(r["time"].as_u64().is_none().then_some("malformed"));
             if let Some(why) = why {
                 bump(&mut excluded, why);
                 continue;
@@ -193,10 +183,6 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
             }
             found[i] += 1;
             let id = r["event_id"].as_str().unwrap_or_default().to_string();
-            if is_legacy {
-                legacy.insert(id);
-                continue;
-            }
             match events.get_mut(&id) {
                 None => {
                     events.insert(id, r);
@@ -225,9 +211,6 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
     if !conflicts.is_empty() {
         excluded["conflicting_duplicate"] = json!(conflicts.len());
     }
-    // A legacy run event is deduplicated only by a proven shared event ID; the rest stay a separate cohort.
-    let legacy_run = legacy.iter().filter(|id| !events.contains_key(*id)).count();
-    duplicates += legacy.len() - legacy_run;
 
     let mut covered_all = true;
     let mut out_sources = vec![];
@@ -279,7 +262,7 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
     }
     let state = if out_sources.iter().all(|s| s["state"] == "unknown") && events.is_empty() {
         "unknown"
-    } else if covered_all && excluded.as_object().is_some_and(Map::is_empty) && legacy_run == 0 && !capped {
+    } else if covered_all && excluded.as_object().is_some_and(Map::is_empty) && !capped {
         "complete"
     } else {
         "partial"
@@ -347,7 +330,7 @@ pub fn aggregate(input: &Value) -> Result<Value, String> {
         "reasons": if known { reasons } else { Value::Null },
         "volume": volume.into_values().collect::<Vec<_>>(), "cohorts": cohorts.into_values().collect::<Vec<_>>(),
         "coverage": {"sources": out_sources, "read": read, "counted": events.len(), "duplicates": duplicates,
-            "out_of_window": out_of_window, "excluded": excluded, "legacy_run": legacy_run, "capped": capped,
+            "out_of_window": out_of_window, "excluded": excluded, "legacy_run": 0, "capped": capped,
             "profile_unknown": profile_unknown},
         "observed_tokens": {"state": "unknown", "reason": "core records carry no observed model usage"},
         "task_effect": {"state": "unknown", "reason": "no paired experiment cohort"}});

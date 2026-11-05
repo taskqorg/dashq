@@ -16,13 +16,13 @@ Five runtime captures, compared with the same invented host/task/resource scenar
 
 | Runtime capture | Comparison / remaining gap |
 |---|---|
-| [Hosts, 1280 light](evidence/host-first-runtime/hosts-1280-light.png) | Same host groups, products, resources and task entry points; independent source times remain accessible. |
-| [Hosts, 1280 dark](evidence/host-first-runtime/hosts-1280-dark.png) | Shared grouping and palette; warning/unknown text remains visible. |
-| [Hosts, 360 dark](evidence/host-first-runtime/hosts-360-dark.png) | Labelled groups reflow without smaller main text or horizontal overflow. |
-| [Host detail](evidence/host-first-runtime/host-detail.png) | Real fixture sample history and existing evidence; no history from a single reading. |
-| [Tasks](evidence/host-first-runtime/tasks.png) | Pinned shared rows, counters and answer card; full tray controls remain unavailable. |
+| [Hosts, 1280 light](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/hosts-1280-light.png) | Same host groups, products, resources and task entry points; independent source times remain accessible. |
+| [Hosts, 1280 dark](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/hosts-1280-dark.png) | Shared grouping and palette; warning/unknown text remains visible. |
+| [Hosts, 360 dark](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/hosts-360-dark.png) | Labelled groups reflow without smaller main text or horizontal overflow. |
+| [Host detail](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/host-detail.png) | Real fixture sample history and existing evidence; no history from a single reading. |
+| [Tasks](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/tasks.png) | Pinned shared rows, counters and answer card; full tray controls remain unavailable. |
 
-[Manifest](evidence/host-first-runtime/manifest.json) identifies renderer/asset hashes, Chromium, platform, matrix cells and capture-time untested claims. The manifest predates the owner answer; its images and measured source hashes remain unchanged. Captures are Windows/Chromium fixture evidence, not Linux production or native-tray qualification. The linked owner answer records runtime visual acceptance (A5, TaskQ § 7).
+[Manifest](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/host-first-runtime/manifest.json) identifies renderer/asset hashes, Chromium, platform, matrix cells and capture-time untested claims. The manifest predates the owner answer; its images and measured source hashes remain unchanged. Captures are Windows/Chromium fixture evidence, not Linux production or native-tray qualification. The linked owner answer records runtime visual acceptance (A5, TaskQ § 7).
 
 ## Checks and gaps
 

@@ -12,7 +12,7 @@ pub fn build(inp: &Value) -> Value {
     let f = &inp["filters"];
     let mut sources = BTreeMap::<String, Value>::new();
     let mut latest = None;
-    for name in ["agentq.compress", "agentq.run", "agentq.installation"] {
+    for name in ["agentq.compress", "agentq.installation"] {
         for row in lf["value"][name].as_array().into_iter().flatten() {
             if row["id"].as_str().is_some_and(|s| s.starts_with("t-")) {
                 continue;
@@ -94,11 +94,6 @@ pub fn build(inp: &Value) -> Value {
             if name == "agentq.installation" {
                 continue;
             }
-            if name == "agentq.run" {
-                // Keep legacy overlap separate unless its producer supplied the same core event ID.
-                let attributes: Vec<Value> = r.as_object().unwrap().iter().map(|(k,v)| json!({"key": format!("agentq.{k}"), "value": if v.is_number() { json!({"intValue": v}) } else { json!({"stringValue": if v.is_null() { json!("null") } else { v.clone() }}) }})).collect();
-                r = json!({"name": name, "attributes": attributes});
-            }
             source["records"].as_array_mut().unwrap().push(r);
         }
     }
@@ -165,7 +160,7 @@ pub fn render(w: &mut String, doc: &Value) {
         label(&a["source"]["state"]),
         a["source"]["age_s"]
             .as_u64()
-            .map(|n| format!("{} old", crate::data::dur(n)))
+            .map(|n| format!("{} old", esc(&crate::data::dur(n))))
             .unwrap_or_else(|| "observation time unknown".into())
     );
     let _ = write!(
@@ -353,10 +348,9 @@ pub fn render(w: &mut String, doc: &Value) {
     }
     let _ = write!(
         w,
-        "<small>✓ Compressed · ↪ Passed unchanged · × Optimization failed</small></section><details id=\"results-effect\" class=\"section\"><summary id=\"results-effect-summary\">Whole-task effect · not measured</summary><p>Unknown: no identified comparable paired experiment cohort is available from this source. The selected live period is not an experiment.</p><small>A qualified comparison must identify runs, versions, sample size, quality, retries/rework, overhead, latency, separate observed usage and uncertainty. Byte reduction cannot establish task benefit.</small></details><details id=\"results-evidence\" class=\"section\"><summary id=\"results-evidence-summary\">Coverage &amp; evidence</summary><p>Schema {} · duplicates {} · unmatched legacy runs {} · excluded {}</p>",
+        "<small>✓ Compressed · ↪ Passed unchanged · × Optimization failed</small></section><details id=\"results-effect\" class=\"section\"><summary id=\"results-effect-summary\">Whole-task effect · not measured</summary><p>Unknown: no identified comparable paired experiment cohort is available from this source. The selected live period is not an experiment.</p><small>A qualified comparison must identify runs, versions, sample size, quality, retries/rework, overhead, latency, separate observed usage and uncertainty. Byte reduction cannot establish task benefit.</small></details><details id=\"results-evidence\" class=\"section\"><summary id=\"results-evidence-summary\">Coverage &amp; evidence</summary><p>Schema {} · duplicates {} · excluded {}</p>",
         label(&a["schema"]),
         val(&a["coverage"]["duplicates"]),
-        val(&a["coverage"]["legacy_run"]),
         esc(&a["coverage"]["excluded"].to_string())
     );
     for s in a["coverage"]["sources"].as_array().into_iter().flatten() {
