@@ -25,6 +25,7 @@ mod profile;
 mod resource;
 mod runtimes;
 mod source;
+mod servers;
 mod version;
 mod vocab;
 #[allow(dead_code)] // export forwarding, backup and restore use the rest
@@ -118,6 +119,9 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
             Some((base, format!("Basic {}", base64(format!("{public}:{secret}").as_bytes()))))
         }
     };
+    if v.get("pilotq_url").is_some() {
+        links["pilotq"] = json!(s("/pilotq_url", &|x| x.strip_prefix("https://").is_some_and(|rest| safe_host(rest.split('/').next().unwrap_or(""))) && !x.contains(['@','?', '#','\\','"','\'','<','>']) && !x.chars().any(char::is_whitespace))?);
+    }
     let (token, projects) = match v.get("github") {
         None => (None, vec![]),
         Some(_) => {
@@ -355,6 +359,7 @@ impl App {
         // committed snapshots never wait for or depend on the optional sources above (D11)
         let projection = enroll::projection(&self.enroll, scope, None, now);
         let enrolled = projection.as_ref().map_or(json!([]), |p| enroll::resource_samples(&self.enroll, &p["rows"], now.saturating_sub(period) as i64));
+        let server_inventory = projection.as_ref().map_or(Value::Null, |p| enroll::server_inventory(&self.enroll, &p["rows"], background));
         let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
         // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
         // started up to a day before the widest window share one decoded set
@@ -375,7 +380,7 @@ impl App {
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "fleet_records": fleet_records, "cli_releases": cli_releases, "observations": observations,
+            "fleet_records": fleet_records, "cli_releases": cli_releases, "observations": observations, "server_inventory": server_inventory, "pilotq_url": c.links["pilotq"],
             "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings, "prices": c.prices,
         }));
         profile::step("build", t0);
@@ -1241,10 +1246,10 @@ mod tests {
         assert_eq!(other["sources"]["observations"]["reason"], "no observations in window");
     }
 
-    // Defect: an inventory path reaching a browser document would break R1 even though ingestion and export are right.
-    // Protects D28 Inventory: `/data` counts these records and never projects the typed object.
+    // D28/D30, owner answer 267.1: typed inventory belongs only to scoped server rows.
+    // Protects workspace isolation and keeps raw inventory out of generic telemetry.
     #[test]
-    fn inventory_identities_stay_out_of_the_data_document() {
+    fn inventory_is_projected_only_in_scoped_server_rows() {
         let (app, _d) = enrolled_app("inventory-data", load_config_fixture());
         let now = source::now() as i64;
         let s = app.enroll.as_ref().unwrap().store();
@@ -1259,7 +1264,14 @@ mod tests {
         assert!(s.accept(b"v1", &events, now).unwrap().iter().all(|o| *o == store::Outcome::Accepted));
         let doc = app.doc(1800, json!({}), Some(store::Scope::All));
         assert_eq!(doc["observations"]["records"], rows.len(), "the records are read");
-        let text = doc.to_string();
+        assert!(doc["servers"]["rows"].as_array().is_some_and(|r| !r.is_empty()), "D30 server rows missing");
+        assert!(doc["servers"].to_string().contains("проекты"), "typed project identities must reach server detail");
+        assert!(app.doc(1800, json!({}), None)["servers"]["rows"].as_array().is_none_or(Vec::is_empty));
+        let member = app.doc(1800, json!({}), Some(store::Scope::Subject("github|1")));
+        assert!(member["servers"].to_string().contains("проекты"));
+        let outsider = app.doc(1800, json!({}), Some(store::Scope::Subject("github|outsider")));
+        assert!(!outsider["servers"].to_string().contains("проекты"));
+        let text = doc["observations"].to_string();
         for identity in ["проекты", "данные", "сервер-1", "Windows Update", "web_1", "disk_used_bytes"] {
             assert!(!text.contains(identity), "{identity}");
         }
@@ -1504,6 +1516,13 @@ mod tests {
         let c = load_config(&p).unwrap();
         assert_eq!(c.langfuse.as_ref().unwrap().1, format!("Basic {}", base64(b"pk-lf-1:sk-lf-SECRET")));
         assert_eq!(c.links["traces"], "https://lf.example.com/project/p1/traces");
+        // D30/R7: a discussion target is HTTPS metadata, never a credential-bearing or executable URL.
+        let mut target = good.clone(); target["pilotq_url"] = json!("https://pilotq.example.com/discuss");
+        write(&target); assert_eq!(load_config(&p).unwrap().links["pilotq"],target["pilotq_url"]);
+        for url in ["javascript:SECRET", "http://pilotq.example.com", "https://SECRET@pilotq.example.com", "https://pilotq.example.com/?token=SECRET", "https://pilotq.example.com/#SECRET", "https://pilotq.example.com/\nSECRET"] {
+            target["pilotq_url"] = json!(url); write(&target);
+            assert_eq!(load_config(&p).err().unwrap(),"config: bad key pilotq_url");
+        }
         let mut bad = good.clone();
         bad["langfuse"]["secret_key"] = json!("SECRET-but-wrong");
         write(&bad);

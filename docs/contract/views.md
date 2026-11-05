@@ -6,7 +6,7 @@ Linked detail of [dashq.md](../../dashq.md): the `/data` document, the source re
 
 - Top level: `schema` (2), `generated_at`, `period`, `filters`, `sources`, `hosts`, `attention`, `boards`, `resources`, `agents`, `checks`, `versions` (D18), `optimization` (D17: AgentQ accounting, event-time buckets and source freshness), `agent_work` (D21), `model_use` (D24), `runtimes` (D4.5).
 - `resources` (D4.4): `window_s`, `from`, `to`, `bucket_s`, `aggregation`, `cap`, `rows` of `{installation, host, runtime, workspace, provenance, source, current, history}`.
-- D11 adds `installations`, `sources.enrollment`, `sources.export` and `telemetry_block`; D23 adds `changes` and `query`; D28 adds `observations` and `sources.observations`; their sections state when.
+- D11 adds `installations`, `sources.enrollment`, `sources.export` and `telemetry_block`; D23 adds `changes` and `query`; D28 adds `observations` and `sources.observations`; D30 adds `servers` and, when rows exist, `sources.servers`; their sections state when.
 - Declared exceptions within `schema` 2, not additive changes:
   - removal of `boards[].tasks[].session.line` and of the `line` of `taskq-board/1` snapshot payloads (D13);
   - `agent_work.rows[].time_ms` means the sum of complete attempts' elapsed time on the row; it had summed timed stages, counting nested stages twice.
@@ -398,3 +398,18 @@ D29 detail; config, use cases and states: [AssetQ summary](../design/assetq-summ
 - Job rows drop `request` except `operation`. Method rows drop `spec` except the named summary fields. Comparison rows drop `plan` and `samples`, keeping identity, versions, `method_metrics`, totals, missing-case reasons, `winner` and `winner_reason`. Recommendation rows keep evidence key names and `observed_at`; `qualification_evidence` keeps its fixed metadata fields and https evidence links.
 - Links open the AssetQ site's published browser paths, each with `?project=P`: `/jobs/{id}`, `/assets/{id}`, `/browser/v1/objects/{id}/content`, `/methods/{id}/versions/{version}`, `/benchmarks/{id}` and `/operations`. The machine `/v1` paths take no browser session, so a link never names one. No credential or signed URL enters the page.
 - Page: `/assets` follows the D22 filter rules; host, agent and session filters do not apply. Each project keeps its own source state and age. Open disclosures survive refresh (D10).
+
+## Server table
+
+D30 owns the read-only `/hosts` table. `/data.servers` and `dashq report` share `{source, rows}`; each row keeps its `id`, `workspace`, `host`, `installations`, per-entity `source`, typed `inventory`, and `trends`. Expected installations without inventory remain unknown. Legacy rows have no inventory and never acquire it through a hostname match. Revoked and retired producers leave active rows; history stays stored.
+
+- Inventory entity identity and producer time define a series, within workspace, machine/kind and installation generation. Equal-time conflicting samples read unknown. The newest entity sample is current; missing fields never fall back to an older sample. Mounts keep separate capacities and forecasts; each mount shows its exhaustion date without summing mounts. Largest consumer means the largest measured service, container, project root or folder, not total filesystem attribution; overlapping consumers are never summed.
+- Each entity retains producer time and D6 state (7200 s); partial producer status is incomplete. CPU uses the producer's milli-cores (`cpu_used_milli / 1000` cores); RAM and disk use bytes. Inconsistent used/total values are unknown.
+- Trends are least-squares change per day over the trailing 7 days, using at least 3 distinct samples spanning 24 h. Missing values, partial status, conflicting timestamps, gaps over 7200 s, changed capacity or stale current data make that trend unknown. Disk predicts an exhaustion date only with positive growth and consistent reported free space. RAM and CPU trends describe observations, not extrapolated failure dates.
+- Stable row IDs key native disclosures through refresh. Selecting the server name opens its full-width detail below the table; existing health, resource history and checks remain linked destinations. The table scrolls horizontally on narrow screens; text size is never reduced.
+
+### PilotQ link contract
+
+`pilotq_url` is an optional HTTPS discussion entry URL without credentials, query or fragment. DashQ appends `?server=<selector>` where `selector` is percent-encoded JSON `[workspace, machine/kind]`; a legacy row has a null workspace, so PilotQ must resolve access rather than infer it. No folder path, token, request text or permission is carried. The row's `pilotq_selector` is the same opaque string in `/data` and `report`. PilotQ must authenticate the person, resolve that selector within their scope and select the server before discussing it; the link grants no access and dispatches nothing from DashQ.
+
+Without a configured target the row says `PilotQ unavailable: not configured` and retains the selector. A configured link is labelled `Discuss in PilotQ · chat selection pending` until PilotQ's integration is qualified. Live selection belongs to [PilotQ #375](https://github.com/taskqorg/pilotq/issues/375); DashQ's fixtures prove the link and selector contract only.

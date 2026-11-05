@@ -158,7 +158,7 @@ The typed exception to the [metadata allowlist](#metadata-allowlist). It applies
 - A null measure needs its reason in `unknown`, and a collected measure has none. A reason is a code keyed by one of the entity's measures. An omitted measure stays unknown, never zero.
 - This checks shape only, as CoreQ does: a secret inside a valid code or path is a collector defect, and the collector owns what it reads.
 - Receipts, replay, retention, scope and volume are the ones above; the wire schema stays `coreq-observation/1`, version 1.
-- Readers: `dashq export` keeps the object whole. `/data`, the Telemetry view and `dashq report` never project it.
+- Readers: `dashq export` keeps the object whole. The D30 server projection in `/data` and `dashq report` may carry its typed identities and measures, scoped by D11. The Telemetry view never projects the raw object.
 
 ### Retention and volume
 

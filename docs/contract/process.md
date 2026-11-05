@@ -11,6 +11,8 @@ Linked detail of [dashq.md](../../dashq.md) D2 (Process), D4.2 (snapshot adapter
 
 ## Config
 
+- Optional `pilotq_url`: HTTPS discussion entry URL without credentials, query or fragment; D30 appends the scoped server selector. No write or AI capability is enabled.
+
 - Config holds the Langfuse base URL, project id and keys, a read-only GitHub token, the project list (D4.2), the ServerQ report path and the host id its row joins, optional `taskq_logs` `{host: absolute taskq.log path}` (D21), optional `prices` (D24) and the public `dash.` host name.
 - Other optional keys belong to their sections: `taskq.binary` (D4.2), `serverq` (D4.3), `langfuse.forward` and `telemetry` (D11), `answer`, `task_controls` and `pm_requests` (D13), `resources` (D14), `agentq_configure` (D16), `limits_push` (D27), `assetq` (D29).
 

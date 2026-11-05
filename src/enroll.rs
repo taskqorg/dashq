@@ -435,7 +435,7 @@ use browser::*;
 use ingestion::*;
 pub use browser::{anchor, form};
 pub use ingestion::{RESOURCES, TELEMETRY};
-pub use projection::{SILENT_SECS, RETIRE_SECS, projection, telemetry_block, stage_records, fleet_records, finding_samples, resource_samples, observations, export_observations, parity};
+pub use projection::{SILENT_SECS, RETIRE_SECS, projection, telemetry_block, stage_records, fleet_records, finding_samples, resource_samples, observations, server_inventory, export_observations, parity};
 
 #[cfg(test)]
 mod tests;

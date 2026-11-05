@@ -222,7 +222,7 @@ body[data-view] :where(#main > section,#main > details) { display:none; }
 body[data-view="/"] #host-grid,body[data-view="/"] #attention,body[data-view="/"] #source-status,
 body[data-view] #startup,body[data-view] #more { display:block; }
 body[data-view="/projects"] #boards,
-body[data-view="/hosts"] #host-grid,body[data-view="/hosts"] #servers,body[data-view="/hosts"] #resources,body[data-view="/hosts"] #observations,
+body[data-view="/hosts"] #server-table,body[data-view="/hosts"] #servers,body[data-view="/hosts"] #resources,body[data-view="/hosts"] #observations,
 body[data-view="/agents"] #agents,body[data-view="/agents"] #agentwork,body[data-view="/agents"] #modeluse,body[data-view="/agents"] #aqresults,
 body[data-view="/services"] #qversions,body[data-view="/checks"] #checks,body[data-view="/checks"] #observations,
 body[data-view="/integrations"] #installations,body[data-view="/integrations"] #integrations { display:block; }
@@ -385,3 +385,13 @@ body[data-view="/fleet"] #fleet {display:block}
 #fleet dl {display:flex;flex-wrap:wrap;gap:.5em 1.5em}
 #fleet dd {margin:0}
 body[data-view="/fleet"] {max-width:1024px;box-sizing:border-box;padding:20px;background:light-dark(#fafbfc,#252b32);color:light-dark(#243039,#eef2f5)}
+
+/* D30: keep comparison columns readable; the table owns narrow-screen scrolling. */
+#server-table {min-width:0;max-width:100%}
+#server-table table {font-size:1rem}
+#server-table th,#server-table td {min-width:9em;max-width:26em;overflow-wrap:anywhere}
+#server-table tbody th {font-weight:normal}
+#server-table small {display:block}
+#server-table details p {font-weight:normal}
+body[data-view="/hosts"] {box-sizing:border-box;width:100%}
+#server-table .unknown:not(.s) {color:var(--muted)}
