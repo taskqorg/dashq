@@ -4,6 +4,7 @@ const dir=process.env.DASHQ_ASSETS_EVIDENCE,shots=process.env.DASHQ_ASSETS_SHOTS
 const read=f=>fs.readFileSync(f,'utf8');
 const html=read(path.join(dir,'page.html'));
 const unconfigured=read(path.join(dir,'unconfigured.html'));
+const healthy=read(path.join(dir,'page-ok.html'));
 const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=read('assets/style.css');
 (async()=>{
@@ -77,6 +78,21 @@ const css=read('assets/style.css');
    }
    await bare.close();
   }
+  // D6/R2: green needs an ok source. Defect guarded: a retained health value stayed green or read as confirmed.
+  for(const [body,green,after] of [[html,0,'healthy · source incomplete'],[healthy,5,'healthy · source unconfirmed']]){
+   const page=await browser.newPage({viewport:{width:1280,height:1000},reducedMotion:'reduce'});
+   let offline=false;
+   await page.route('http://fixture/**',route=>{const p=new URL(route.request().url()).pathname;return route.fulfill({status:offline&&p==='/data'?500:200,contentType:p.endsWith('.js')?'text/javascript':p.endsWith('.css')?'text/css':p==='/data'?'application/json':'text/html',body:p==='/app.js'?js:p==='/style.css'?css:p==='/data'?'{}':body});});
+   await page.goto('http://fixture/assets');await page.waitForFunction(()=>!busy);
+   assert.equal(await page.locator('#assets .s.ok').count(),green);
+   offline=true;
+   await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
+   assert.equal(await page.locator('#assets .s.ok').count(),0,'green after a failed refresh');
+   assert((await page.locator('#assets').innerText()).includes(after),after);
+   await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
+   assert(!(await page.locator('#assets').innerText()).includes('source unconfirmed · source unconfirmed'),'a second failure repeats the label');
+   await page.close();
+  }
   if(shots){
    fs.mkdirSync(shots,{recursive:true});
    for(const [name,width,open] of [['assets-desktop',1280,false],['assets-narrow',360,true]]){
@@ -89,6 +105,6 @@ const css=read('assets/style.css');
    }
   }
   fs.writeFileSync(path.join(dir,'browser.json'),JSON.stringify({platform:process.platform,browser:browser.version(),cells},null,2)+'\n');
-  console.log(`AssetQ browser: ${cells.length} cells passed; read-only, links, failed refresh, failed jobs, not configured`);
+  console.log(`AssetQ browser: ${cells.length} cells passed; read-only, links, failed refresh, failed jobs, not configured, no green under a non-ok source`);
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -57,8 +57,10 @@ Config errors name the bad key, never its value (D2). An unreadable credential f
 | Before the first read | Unknown with the reason `refresh in progress`; a browser request never waits for AssetQ (D4) |
 | Loading or read failure | Last values stay, labelled `unconfirmed` with their time |
 | Stale | After 180 s without a fresh read the values read `stale`, with their age |
+| Health value under a source that is not `ok` | Never green (D6): gray, with its source state beside it, for example `healthy · source stale`. This applies to providers, integrity, backup and restore, and after a failed page refresh it reads `source unconfirmed` |
 | Empty list | `No queued, active or waiting jobs`, `No failed jobs` or `No comparisons` only when the read is `ok`; otherwise unknown with the reason |
 | Capped list | Its count reads `≥N (capped)` and the source `incomplete`; a list whose read failed counts `—` with `unknown` |
+| Date-only producer time | Its exact date, for example `observed 2026-11-04`, with no relative age; invalid text reads `? unavailable` |
 | Long-running | Step, effect and last AssetQ update; no percentage or remaining time |
 | Cancelled | `requested`, `provider_confirmed`, `locally_stopped` and `uncertain` stay distinct |
 | Failed | Failed jobs, in a closed disclosure inside the jobs group: AssetQ's bounded reason and the job page, with no result link. Generation success (job phase), validation (verified manifest) and owner acceptance (retained record) stay separate |

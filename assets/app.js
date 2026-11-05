@@ -209,6 +209,7 @@ async function refresh() {
       e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
       e.textContent = (e.closest('.overview-age,.attempt-select') ? '' : 'Last observation ') + time(Number(e.dataset.ageS)) + ' old · unconfirmed';
     });
+    document.querySelectorAll('#assets .s.ok').forEach(e => { e.textContent += ' · source unconfirmed'; });
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');
       e.title = 'Last-known evidence; current source state unknown';

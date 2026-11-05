@@ -371,19 +371,34 @@ fn timestamp(v: &Value) -> Option<u64> {
     u64::try_from(i64::try_from(t).ok()? - offset).ok()
 }
 
+/// A valid `YYYY-MM-DD` producer date. It has no time of day, so it stays exact and gains no relative age.
+fn date(v: &Value) -> Option<&str> {
+    let s = v.as_str().filter(|s| s.len() == 10)?;
+    let t = source::iso_secs(&format!("{s}T00:00:00"))?;
+    (source::iso(t).get(..10)? == s).then_some(s)
+}
+
 fn stamp(v: &Value, now: u64) -> String {
-    match timestamp(v) {
-        Some(t) => format!("<time data-at=\"{t}\">{}</time>", esc(&crate::page::at(&json!(t), now))),
-        None => esc(&crate::page::at(&Value::Null, now)),
+    match (timestamp(v), date(v)) {
+        (Some(t), _) => format!("<time data-at=\"{t}\">{}</time>", esc(&crate::page::at(&json!(t), now))),
+        (None, Some(d)) => esc(d),
+        (None, None) => esc(&crate::page::at(&Value::Null, now)),
     }
 }
 
-fn state(v: &Value, now: u64) -> String {
+/// One state chip. D6: green needs a healthy value and an `ok` source; a healthy value under any other source names
+/// that source state, so the text says what the color does.
+fn state(v: &Value, source: &str, now: u64) -> String {
     let s = v["state"].as_str().unwrap_or("unknown");
-    let class = match s { "ok" | "healthy" | "observed" | "verified" => "ok", "unknown" | "stale" | "unconfirmed" | "incomplete" => "unknown", _ => "warn" };
+    let (class, suffix) = match s {
+        "ok" | "healthy" | "observed" | "verified" if source == "ok" => ("ok", String::new()),
+        "ok" | "healthy" | "observed" | "verified" => ("unknown", format!(" · source {}", esc(source))),
+        "unknown" | "stale" | "unconfirmed" | "incomplete" => ("unknown", String::new()),
+        _ => ("warn", String::new()),
+    };
     let reason = v["reason"].as_str().map_or(String::new(), |r| format!(" · {}", esc(r)));
     let at = if v["observed_at"].is_null() { String::new() } else { format!(" · observed {}", stamp(&v["observed_at"], now)) };
-    format!("<span class=\"s {class}\">{}</span>{reason}{at}", esc(s))
+    format!("<span class=\"s {class}\">{}{suffix}</span>{reason}{at}", esc(s))
 }
 
 fn link(href: &Value, label: &str) -> String {
@@ -424,11 +439,12 @@ fn storage(w: &mut String, p: &Value, now: u64) {
     let s = &p["store"];
     let f = &s["free_space"];
     let i = &s["physical_inventory"];
+    let source = p["source"]["state"].as_str().unwrap_or("unknown");
     let _ = write!(w, "<h4>Storage</h4><div class=\"asset-row\"><span>Store {} of {}{}</span><span>Inventory {}{}</span><span>Free space {} · floor {} · admission {}{}</span></div><div class=\"asset-row\"><span>Integrity {}</span><span>Backup {}</span><span>Restore {}</span></div>",
         bytes(&s["used_bytes"]), bytes(&s["quota_bytes"]), if s["full"] == true { " · full" } else { "" },
         bytes(&i["object_bytes"]), i["reason"].as_str().map_or(String::new(), |r| format!(" · unknown: {}", esc(r))),
         bytes(&f["available_bytes"]), bytes(&f["floor_bytes"]), val(&f["admission"]), f["reason"].as_str().map_or(String::new(), |r| format!(" · unknown: {}", esc(r))),
-        state(&p["integrity"], now), state(&p["backup"], now), state(&p["restore"], now));
+        state(&p["integrity"], source, now), state(&p["backup"], source, now), state(&p["restore"], source, now));
 }
 
 fn methods(w: &mut String, p: &Value, now: u64) {
@@ -501,15 +517,16 @@ pub fn render(w: &mut String, assets: &Value) {
     if projects.is_empty() { let _ = write!(w, "<p>Unknown · {}.</p>", val(&assets["source"]["reason"])); }
     for p in projects {
         let src = &p["source"];
+        let source = src["state"].as_str().unwrap_or("unknown");
         let age = src["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", esc(&crate::data::dur(a))));
-        let _ = write!(w, "<article id=\"assetq-{0}\"><h3>{0}</h3><p data-assets-state>{1} · {age} · workspace {2}</p>", val(&p["project"]), state(src, now), val(&p["workspace"]));
+        let _ = write!(w, "<article id=\"assetq-{0}\"><h3>{0}</h3><p data-assets-state>{1} · {age} · workspace {2}</p>", val(&p["project"]), state(src, source, now), val(&p["workspace"]));
         if p["revisions"].is_object() {
             let phases = p["jobs"]["by_phase"].as_object().map_or("—".to_string(), |o| ["queued", "active", "waiting", "succeeded", "failed", "cancelled"].iter().map(|k| format!("{k} {}", o.get(*k).map_or("0".into(), val))).collect::<Vec<_>>().join(" · "));
             let _ = write!(w, "<h4>Jobs</h4><p>{phases}</p><p>Uncertain submissions {} · leased {} · Active rows {}. Rows list queued, active and waiting jobs.</p>", val(&p["jobs"]["uncertain_submissions"]), val(&p["jobs"]["leased"]), count(p["jobs"]["rows"].as_array().map_or(0, Vec::len), p["coverage"]["active"].as_str().unwrap_or("unknown")));
             job_rows(w, &p, now);
             failed_rows(w, &p, now);
             let _ = write!(w, "<p>{} · {}</p>", link(&p["links"]["jobs"], "All jobs and new requests on AssetQ"), link(&p["links"]["operations"], "Operations on AssetQ"));
-            let providers: Vec<String> = p["providers"].as_array().into_iter().flatten().map(|x| format!("{} {}", val(&x["provider"]), state(x, now))).collect();
+            let providers: Vec<String> = p["providers"].as_array().into_iter().flatten().map(|x| format!("{} {}", val(&x["provider"]), state(x, source, now))).collect();
             let _ = write!(w, "<h4>Providers</h4><p>{}</p>", if providers.is_empty() { "Unknown · no provider observations.".to_string() } else { providers.join("<br>") });
             storage(w, &p, now);
             methods(w, &p, now);
@@ -695,9 +712,53 @@ pub(crate) mod tests {
         for value in [json!(epoch), json!("2026-11-05T10:05:00Z"), json!("2026-11-05 15:35:00.999+05:30"), json!("2026-11-05 06:05:00-04")] {
             assert_eq!(timestamp(&value), Some(epoch), "{value}");
         }
-        for value in [Value::Null, json!("2026-11-05"), json!("invalid"), json!("2026-02-30 10:05:00+00"), json!("2026-11-05 10:05:00"), json!("2026-11-05 10:05:00.+00"), json!("2026-11-05 10:05:00+25:00")] {
+        for value in [Value::Null, json!("invalid"), json!("2026-02-30"), json!("2026-13-01"), json!("2026-11-5"), json!("2026-02-30 10:05:00+00"), json!("2026-11-05 10:05:00"), json!("2026-11-05 10:05:00.+00"), json!("2026-11-05 10:05:00+25:00")] {
             assert_eq!(stamp(&value, NOW), "? unavailable", "{value}");
         }
+    }
+
+    /// M2: AssetQ writes a qualification `observed_at` as a date. Defect guarded: a valid date read `? unavailable`.
+    /// It has no time of day, so it keeps its exact text and gains no relative age.
+    #[test]
+    fn assetq_date_only_time_shows_its_date() {
+        assert_eq!(stamp(&json!("2026-11-05"), NOW), "2026-11-05");
+        assert!(rendered(raw()).contains("observed 2026-11-04</span>"), "real qualification record");
+    }
+
+    /// Every nested health value green and every list complete, so the source reads `ok`.
+    pub fn healthy_raw() -> Value {
+        let mut r = raw();
+        r["status"]["providers"] = json!([{"provider": "synthetic.fake", "health": "healthy"}]);
+        r["status"]["store"]["integrity"] = json!({"state": "ok"});
+        r["status"]["backup"] = json!({"state": "verified"});
+        r["status"]["restore"] = json!({"state": "observed"});
+        r["objects"]["next"] = Value::Null;
+        r["jobs"]["failed"]["next"] = Value::Null;
+        r
+    }
+
+    /// D6/R2: green needs an `ok` source and a healthy value. Defect guarded: a retained provider, integrity, backup or
+    /// restore value stayed green while its source read stale, unconfirmed or incomplete.
+    #[test]
+    fn assetq_nested_green_needs_ok_source() {
+        let page = |raw: Value, at: u64, error: Value| {
+            let snap = json!({"value": raw, "at": at, "error": error, "incomplete": false});
+            let d = build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW)], NOW);
+            let mut html = String::new();
+            render(&mut html, &d);
+            html
+        };
+        let green = "<span class=\"s ok\">";
+        assert_eq!(page(healthy_raw(), NOW - 20, Value::Null).matches(green).count(), 5, "source, provider, integrity, backup, restore");
+        let mut capped = healthy_raw();
+        capped["objects"]["next"] = json!("object-1");
+        for (name, html) in [("stale", page(healthy_raw(), NOW - 900, Value::Null)), ("unconfirmed", page(healthy_raw(), NOW - 900, json!("timeout"))), ("incomplete", page(capped, NOW - 20, Value::Null))] {
+            assert_eq!(html.matches(green).count(), 0, "{name}");
+            for value in ["healthy", "ok", "verified", "observed"] { assert!(html.contains(&format!(">{value} · source {name}</span>")), "{name}: {value}"); }
+        }
+        // `project` renders no value under an unknown source today; a missing source state also never turns green.
+        for source in ["unknown", ""] { assert!(!state(&json!({"state": "healthy"}), source, NOW).contains("s ok"), "{source}"); }
+        assert!(state(&json!({"state": "degraded"}), "ok", NOW).contains("s warn"), "a problem stays amber");
     }
 
     /// Design States, AssetQ status `states`: a failed job keeps AssetQ's bounded reason, offers no result link,
@@ -733,6 +794,9 @@ pub(crate) mod tests {
         assert!(!unconfigured.contains("id=\"view-assets\"") && !unconfigured.contains("id=\"assets\""), "no navigation entry and no panel");
         if let Ok(path) = std::env::var("DASHQ_ASSETS_EVIDENCE") {
             std::fs::create_dir_all(&path).unwrap();
+            let snap = json!({"value": healthy_raw(), "at": NOW - 20, "error": null, "incomplete": false});
+            doc_full["assets"] = build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW)], NOW);
+            std::fs::write(std::path::Path::new(&path).join("page-ok.html"), crate::page::render_view(&doc_full, &json!({}), "/assets")).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.html"), &html).unwrap();
             std::fs::write(std::path::Path::new(&path).join("unconfigured.html"), &unconfigured).unwrap();
         }
