@@ -100,6 +100,8 @@ pub struct Enroll {
     buckets: Mutex<HashMap<(String, i64), (f64, i64)>>,
     /// Stage records of each decoded telemetry block by block id (D21 #182): blocks never change.
     stages: Mutex<HashMap<i64, std::sync::Arc<Vec<Value>>>>,
+    /// The service is decoding the stored stage window: browser reads do not queue behind it (#260).
+    stages_warming: std::sync::atomic::AtomicBool,
     fleet_cache: crate::source::Cache,
     fleet_db: std::path::PathBuf,
 }
@@ -140,6 +142,7 @@ impl Enroll {
             recent: Mutex::new(HashMap::new()),
             buckets: Mutex::new(HashMap::new()),
             stages: Mutex::new(HashMap::new()),
+            stages_warming: Default::default(),
             fleet_cache: Default::default(),
             fleet_db: db,
         })
@@ -238,6 +241,10 @@ impl Enroll {
         }
         *tokens -= 1.0;
         Ok(())
+    }
+
+    pub fn warm_stages(&self, warming: bool) {
+        self.stages_warming.store(warming, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The scoped dashboard projection; also run by the service pass so receipts become `projected` (C1.5).
@@ -1004,15 +1011,15 @@ pub fn telemetry_block(e: &Result<Enroll, String>, rows: &Value, id: &str) -> Va
 /// D21 (#182): attempt stage records of each TaskQ installation in `rows` with telemetry in its grant, from its stored
 /// `taskq-telemetry/1` blocks received at or after `since`: `[{installation, workspace, label, telemetry, records, error}]`,
 /// `telemetry` the row's coverage, `records` as [`crate::agent_work::from_telemetry`] maps them, oldest block first.
-pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
+pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64, background: bool) -> Value {
     let Ok(e) = e else { return json!([]) };
+    let reporting = || rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == TELEMETRY)));
+    if background && e.stages_warming.load(std::sync::atomic::Ordering::SeqCst) {
+        return json!(reporting().map(|r| json!({"installation": r["installation"], "workspace": r["workspace"], "label": r["host_label"], "telemetry": r["telemetry"], "records": [], "error": "refresh in progress"})).collect::<Vec<_>>());
+    }
     let mut memo = e.stages.lock().unwrap_or_else(|p| p.into_inner());
     let mut oldest = i64::MAX;
-    let out: Vec<Value> = rows
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|r| r["product"] == "taskq" && r["scopes"].as_array().is_some_and(|s| s.iter().any(|x| x == TELEMETRY)))
+    let out: Vec<Value> = reporting()
         .filter_map(|r| {
             let (inst, ws) = (r["installation"].as_str()?, r["workspace"].as_str()?);
             let label = r["host_label"].as_str().unwrap_or(inst);
@@ -1791,6 +1798,28 @@ mod tests {
         }
     }
 
+    /// #260 A3. Defect: a source read at cache expiry held the page behind it. Protection: a page and `/data` answer
+    /// while a source read hangs, the source reads unknown, and a first read in progress is not "all sources failed".
+    #[test]
+    fn browser_routes_do_not_wait_for_a_hung_source_read() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        // accepts the connection and never answers: curl waits out its 10 s timeout
+        let hung = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("https://{}", hung.local_addr().unwrap());
+        let (returned, result) = channel();
+        std::thread::spawn(move || {
+            let app = app(Err("no enrollment".into()), Some((base, "invented".into())));
+            let page = crate::route(&app, "GET", "/", "", None);
+            let data = crate::route(&app, "GET", "/data", "", None);
+            returned.send((page.0, data.0, String::from_utf8(data.2).unwrap())).unwrap();
+        });
+        let (page, status, body) = result.recv_timeout(Duration::from_secs(5)).expect("the source read held the routes");
+        assert_eq!((page, status), ("200 OK", "200 OK"), "{body}");
+        let doc: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(doc["sources"]["langfuse"]["state"], "unknown", "{}", doc["sources"]);
+    }
+
     /// #260 A2 / D4,D6,D11: every HTML view and /data retains aged Fleet data during a blocked read, within actor scope.
     #[test]
     fn fleet_pending_read_keeps_routes_and_scope_available() {
@@ -1873,10 +1902,21 @@ mod tests {
         }
         let now = t0 as u64 + 60;
         let p = projection(&e, Some(Scope::All), None, now).unwrap();
-        let stages = stage_records(&e, &p["rows"], t0 - 2 * 86400);
+        let stages = stage_records(&e, &p["rows"], t0 - 2 * 86400, false);
         assert_eq!(stages.as_array().unwrap().iter().map(|s| s["records"].as_array().unwrap().len()).sum::<usize>(), 19, "18 stages and one queue transition");
         // decoded once: a second read is served from the per-block memo, identical
-        assert_eq!(stage_records(&e, &p["rows"], t0 - 2 * 86400), stages);
+        assert_eq!(stage_records(&e, &p["rows"], t0 - 2 * 86400, false), stages);
+        // #260: while the service decodes the window a browser read names that instead of queueing behind the memo,
+        // reads as unknown, and returns the records afterwards.
+        e.as_ref().unwrap().warm_stages(true);
+        let held = e.as_ref().unwrap().stages.lock().unwrap();
+        let pending = stage_records(&e, &p["rows"], t0 - 2 * 86400, true);
+        drop(held);
+        assert!(pending.as_array().unwrap().iter().all(|s| s["error"] == "refresh in progress" && s["records"] == json!([])), "{pending}");
+        let unread = crate::agent_work::build(&json!({"now": now, "period": 7200, "filters": {}, "projects": [], "agent_telemetry": pending}));
+        assert!(unread["hosts"].as_array().unwrap().iter().all(|h| h["source"]["state"] != "ok"), "{}", unread["hosts"]);
+        e.as_ref().unwrap().warm_stages(false);
+        assert_eq!(stage_records(&e, &p["rows"], t0 - 2 * 86400, true), stages);
         let log: Vec<Value> = fx["log"]["mac"].as_array().unwrap().iter().filter_map(|l| serde_json::from_str(l.as_str()?.strip_prefix("taskq-stage ")?).ok()).collect();
         let snap = json!({"value": {"records": log, "corrupt": 0}, "at": now, "error": null, "incomplete": false});
         let inp = json!({"now": now, "period": 7200, "filters": {}, "projects": ["taskqorg/dashq"], "agent_telemetry": stages, "agent_work": {"mac": snap}});

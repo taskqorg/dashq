@@ -75,6 +75,8 @@ D4.5 detail.
 D5 detail.
 
 - The server renders the page shell; D13 boards use the pinned TaskQ browser renderer.
+- Browser requests start Langfuse, board, release and TaskQ snapshot reads in one background flight per cached key when the key's cache has expired, and return at once. The last value keeps its time, so D6 freshness decides its state; no value yet is unknown. The public limits push reads boards the same way. Local `dashq report` waits for its reads.
+- After a restart the service decodes the stored D21 stage window in the background. Pages read `agent_work` as unknown with `refresh in progress` until that finishes.
 - `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
 - Target: [shared dashboard rules W4–W6](https://github.com/taskqorg/specq/blob/main/design/dashboards.md) and D10. This mechanism is the baseline, not proof of stable in-place updates.
 

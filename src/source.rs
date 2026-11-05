@@ -44,16 +44,29 @@ impl Slot {
 pub struct Cache(Mutex<HashMap<String, Arc<Mutex<Slot>>>>);
 
 impl Cache {
-    /// One background read per key; pending callers get the last-good snapshot immediately (D4/D6).
+    /// One background read per key; pending callers get the last-good snapshot, marked unconfirmed (D4/D6).
     pub fn refresh(&self, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), Fail> + Send + 'static) -> Value {
+        self.background(key, ttl, true, read)
+    }
+
+    /// The same background read for a source with its own freshness limit: its last value keeps its state and age
+    /// while the next read runs; a source with no value yet is unknown (D4/D6).
+    pub fn revalidate(&self, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), Fail> + Send + 'static) -> Value {
+        self.background(key, ttl, false, read)
+    }
+
+    fn background(&self, key: &str, ttl: u64, mark: bool, read: impl FnOnce() -> Result<(Value, bool), Fail> + Send + 'static) -> Value {
         let slot = self.0.lock().unwrap().entry(key.to_string()).or_default().clone();
         let mut s = slot.lock().unwrap();
         if s.reading || (!s.snap.is_null() && now() < s.next) { return s.snap.clone(); }
         s.reading = true;
-        if s.snap.is_null() {
+        let cold = s.snap.is_null();
+        if cold {
             s.snap = json!({"value": null, "at": null, "incomplete": false});
         }
-        s.snap["error"] = json!("refresh in progress");
+        if cold || mark {
+            s.snap["error"] = json!("refresh in progress");
+        }
         let (target, key, at) = (slot.clone(), key.to_string(), now());
         let span = crate::profile::current();
         if std::thread::Builder::new().spawn(move || {
@@ -513,6 +526,35 @@ mod tests {
     }
 
     /// #260 A2 / D4,D6: a blocked refresh must share one read without holding callers or losing the last-good time.
+    /// #260 A3. Defect: a source read at cache expiry held the page behind it, past 5 s through the public name.
+    /// Protection: last value keeps its time and no failure reason while one read runs, and its result replaces it.
+    #[test]
+    fn revalidate_keeps_the_last_value_unmarked_during_one_read() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let c = Cache::default();
+        let original = c.get("board:test", 0, || Ok((json!({"n": 1}), false)));
+        let (started, running) = channel();
+        let (release, wait) = channel::<()>();
+        let (done, finished) = channel();
+        let response = c.revalidate("board:test", 0, move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+            done.send(()).unwrap();
+            Ok((json!({"n": 2}), false))
+        });
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(response, original, "no reason is added to a value whose age speaks for it");
+        assert_eq!(c.revalidate("board:test", 0, || panic!("duplicate read")), original);
+        release.send(()).unwrap();
+        finished.recv_timeout(Duration::from_secs(5)).unwrap();
+        let replaced = (0..500).find_map(|_| {
+            let snap = c.revalidate("board:test", 60, || panic!("duplicate read"));
+            if snap["value"]["n"] == 2 { Some(snap) } else { std::thread::sleep(Duration::from_millis(10)); None }
+        });
+        assert_eq!(replaced.expect("the finished read replaced the value")["error"], Value::Null);
+    }
+
     #[test]
     fn fleet_refresh_does_not_hold_callers() {
         use std::sync::mpsc::channel;
