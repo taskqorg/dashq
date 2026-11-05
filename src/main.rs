@@ -14,6 +14,7 @@ mod enroll;
 mod explain;
 mod export;
 mod findings;
+mod limits;
 mod link;
 mod optimization;
 mod page;
@@ -38,7 +39,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -70,6 +71,8 @@ struct Config {
     taskq_logs: Vec<(String, String)>,
     /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
     limits: store::Limits,
+    /// `limits_push`: the public limits page (D27); without its token nothing is pushed.
+    limits_push: Option<limits::Config>,
     /// `prices`: the owner's model price table for API-equivalent estimates (D24); `null`: estimates read unknown.
     prices: Value,
 }
@@ -172,7 +175,9 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     }
     let prices = v.get("prices").map(model_use::prices).transpose()?.unwrap_or(Value::Null);
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
+    let limits_push = v.get("limits_push").map(limits::Config::parse).transpose()?;
     Ok(Config {
+        limits_push,
         limits,
         links,
         langfuse,
@@ -191,6 +196,32 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
         taskq_logs,
         prices,
     })
+}
+
+/// Heartbeat boards through the shared 60 s cache: the same single flight as the page's reads (D4).
+fn board_snapshots(c: &Config, cache: &source::Cache) -> Value {
+    let Some(token) = c.github_token.as_deref() else { return json!({}) };
+    c.projects.iter().map(|r| (r.clone(), cache.get(&format!("board:{r}"), 60, || source::board(r, token)))).collect::<serde_json::Map<_, _>>().into()
+}
+
+/// `dashq limits [--check]` (D27): reads only, whatever the config's token says.
+fn limits_command(t: &Tool, check: bool) -> Result<(), String> {
+    let cfg = load_config(&config_path(t))?;
+    let push = cfg.limits_push.as_ref().ok_or("config: limits_push not configured")?;
+    let boards = board_snapshots(&cfg, &source::Cache::default());
+    let now = source::now();
+    for id in limits::unmapped(&boards, push, now) {
+        eprintln!("limits: unmapped account {id}");
+    }
+    let snap = limits::snapshot(&boards, push, now).ok_or("limits: no limit rows on the configured boards")?;
+    if !check {
+        println!("{snap}");
+        return Ok(());
+    }
+    let r = source::get(&push.url.replace("/push", "/u.json"), &[]).map_err(|(e, _)| format!("limits: live page read failed ({e})"))?;
+    let (lines, passed) = limits::compare(&snap, &r.body, now);
+    println!("{}", lines.join("\n"));
+    if passed { Ok(()) } else { Err("limits: check failed".into()) }
 }
 
 fn safe_host(x: &str) -> bool {
@@ -486,6 +517,19 @@ fn serve(t: &Tool, service: bool) -> ! {
             std::thread::sleep(Duration::from_secs(2));
         }
     });
+    // the public limits page (D27): its own thread, so a slow Worker never holds a page or a board read
+    if app.cfg.limits_push.as_ref().is_some_and(|p| p.token.is_some()) {
+        let a = app.clone();
+        std::thread::spawn(move || {
+            let mut pusher = limits::Pusher::default();
+            while let Some(push) = &a.cfg.limits_push {
+                if let Err(e) = pusher.pass(push, &board_snapshots(&a.cfg, &a.cache), source::now()) {
+                    eprintln!("limits push: {e}");
+                }
+                std::thread::sleep(Duration::from_secs(limits::PERIOD));
+            }
+        });
+    }
     // forwarding and retention run apart from ingestion and projection: an outage only delays export (C5)
     let fwd = app.clone();
     std::thread::spawn(move || {
@@ -766,6 +810,8 @@ fn main() {
             println!("{}", profile::report(text.as_deref(), source::now(), window));
         }
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
+        ["limits"] => limits_command(&t, false).unwrap_or_else(|e| t.die(&e)),
+        ["limits", "--check"] => limits_command(&t, true).unwrap_or_else(|e| t.die(&e)),
         ["doctor"] => {
             let lines = doctor_lines(&t);
             for (_, l) in &lines {
@@ -1092,7 +1138,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.

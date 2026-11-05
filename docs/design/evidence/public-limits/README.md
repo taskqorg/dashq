@@ -1,0 +1,107 @@
+# Public limits cutover qualification
+
+Scope: [#255 A3](https://github.com/taskqorg/dashq/issues/255), continuing A1 and A2 in [PR #256](https://github.com/taskqorg/dashq/pull/256). Owner: "limits page stays open, it shows only limits and resets, as now, same look".
+
+## Result
+
+**The live value comparison passes; A3 remains incomplete. No cutover was performed.** After [taskq#2393](https://github.com/taskqorg/taskq/issues/2393) restored the Claude windows, [the 03:01 UTC comparison](#comparison-of-2026-11-05-0301-utc) passed all ten rows. Visual acceptance and production cutover still need an execution route with a browser and trusted production SSH access.
+
+Applied rules: [D27](../../../../dashq.md#d27-public-limits-push) requires a passing comparison before adding the push token or stopping ccusage; R2/D6 keep missing observations unknown. R5/R6 retain the guarded loopback-only DashQ surface, and R7 keeps credentials server side. No production config, publisher, Worker asset or login was changed.
+
+## Comparison of 2026-11-05 03:01 UTC
+
+Candidate implementation: `e1c9482af63898632152279b082ffb029d564f86`, unchanged at `3da225deb7593c8a6769aeeb63d676ba091f1845`. This continuation changes evidence only. TaskQ's released producer fix has been accepted in taskq#2393; fresh DashQ-board heartbeats now include Claude `seven_day` and `seven_day_fable`.
+
+A temporary config selected only `taskqorg/dashq` and mapped private fingerprints to the four existing public card ids by matching runtime and weekly reset. Every mapping was unique. It contained no push token and was deleted after the read. The rebuilt candidate's `target/debug/dashq.exe limits --check` exited **0**:
+
+```text
+ok claude 1w: dashq 45 reset 1794200400 / live 45 reset 1794200400
+ok claude Fable 1w: dashq 4 reset 1794200399 / live 4 reset 1794200400
+ok codex-1788798682 1w: dashq 39 reset 1794379777 / live 39 reset 1794379777
+ok codex-1789722405 1w: dashq 15 reset 1794382572 / live 15 reset 1794382572
+ok gemini-1793542965 1w: dashq 74 reset 1794135234 / live 74 reset 1794135234
+ok gemini-1793542965 5h: dashq 0 reset 1793865548 / live 0 reset 1793865589
+ok gemini-1793542965 Claude and GPT models 1w: dashq 0 reset 1794452348 / live 0 reset 1794452389
+ok gemini-1793542965 Claude and GPT models 5h: dashq 0 reset 1793865548 / live 0 reset 1793865589
+ok gemini-1793542965 Gemini Models 1w: dashq 74 reset 1794135234 / live 74 reset 1794135234
+ok gemini-1793542965 Gemini Models 5h: dashq 0 reset 1793865548 / live 0 reset 1793865589
+limits check: PASS (10 rows compared)
+```
+
+- This is pass-after evidence for the missing Claude/Fable failure below. All percentages are equal; resets differ by at most 41 s. The checker also required both observations of every card to be less than 900 s old. No tolerance or assertion was changed.
+- All four public ids, provider labels (`cld`, `cod`, `cod`, `agv`) and the second Codex card's `2` tag match the existing payload. Private fingerprints and credentials are excluded from this evidence (A2/R7).
+- The public root, `/u.json` and `/h.json` remain readable without login. Root HTML SHA-256 is `f37fa6b9ccdb3959500e5de25593a81349237a57bd95d85840d34adccc22c3b3`, identical to the earlier captured page. Its existing code still refreshes limits every 30 s, history every 300 s and dims accounts after 900 s. This is an asset/read check, not visual or post-cutover proof.
+- `cargo test --locked limits::tests`: **7 passed**, including identity exclusion, cross-host merge, stale/unknown display data, complete comparison and Worker push transport. These existing checks retain A1/A2 protection; no test was added, changed or removed (specq Testing, Before adding or changing a test).
+- Visual check unavailable: the computer-use inventory returned no enabled browsers or apps. No side-by-side screenshot or owner visual acceptance is claimed.
+- Production check unavailable: `ssh -o BatchMode=yes -o ConnectTimeout=10 pds18.ufobe.com 'printf ready'` exited **255**, `Host key verification failed.` No host key was accepted or validation bypassed. The existing publisher and deployment configuration were not inspected or changed.
+
+The value-comparison gate is now proved for this observation. Before cutover, use a trusted execution route to review the real replacement rendering, rerun the mutable live comparison, preserve a rollback to ccusage, configure DashQ as the sole publisher, and read back the public page after a publication/refresh cycle. Source tests and the unchanged HTML do not establish those remaining outcomes (specq Verification).
+
+## Comparison of 2026-11-04 19:57 UTC
+
+Candidate implementation: `e1c9482af63898632152279b082ffb029d564f86`, unchanged at `dbf015c95a78087c67f7927ef1cb3198dfba3eba`. [taskq#2359](https://github.com/taskqorg/taskq/issues/2359) is closed and TaskQ's latest release is [v4.6.78](https://github.com/taskqorg/taskq/releases/tag/v4.6.78).
+
+Heartbeats at 19:56 UTC: `pds18.ufobe.com` and `win` report `4.6.78`, `mac` reports `4.6.79-261104-10`. A temporary config with no `limits_push.token` mapped the private fingerprints to the existing public card ids and was removed after the read. `cargo run --locked -- limits --check` exited **1**:
+
+```text
+FAIL claude: dashq reading is stale or unknown
+FAIL claude 1w: only in the live page
+FAIL claude Fable 1w: only in the live page
+ok codex-1788798682 1w: dashq 22 reset 1794379777 / live 22 reset 1794379777
+ok codex-1789722405 1w: dashq 13 reset 1794382572 / live 13 reset 1794382572
+ok gemini-1793542965 1w: dashq 74 reset 1794135234 / live 74 reset 1794135234
+ok gemini-1793542965 5h: dashq 0 reset 1793840073 / live 0 reset 1793840145
+ok gemini-1793542965 Claude and GPT models 1w: dashq 0 reset 1794426873 / live 0 reset 1794426945
+ok gemini-1793542965 Claude and GPT models 5h: dashq 0 reset 1793840073 / live 0 reset 1793840145
+ok gemini-1793542965 Gemini Models 1w: dashq 74 reset 1794135234 / live 74 reset 1794135234
+ok gemini-1793542965 Gemini Models 5h: dashq 0 reset 1793840073 / live 0 reset 1793840145
+limits check: FAIL (8 rows compared)
+```
+
+- Fixed by taskq#2359: all Antigravity rows now match, including the Gemini windows that were missing. Both Codex cards still match.
+- New failure: `win` and `mac` publish `limit claude default id <id> unknown usage shape changed`. The earlier v4.6.74 comparison had `seven_day`. The live page reads 40% weekly and 4% Fable for this account, so the provider data exists.
+- Cause not established. The TaskQ parser from [taskq#2372](https://github.com/taskqorg/taskq/pull/2372) fails the whole poll on any field it cannot read; which field fails now needs a native read, which this attempt did not make. The DashQ reader is correct to show this account as unknown (R2).
+
+## First comparison, 2026-11-04 13:25 UTC
+
+The evidence below is the failure before taskq#2359. It no longer describes the current rows.
+
+Candidate implementation: `e1c9482af63898632152279b082ffb029d564f86`.
+
+- TaskQ's latest published release is [v4.6.74](https://github.com/taskqorg/taskq/releases/tag/v4.6.74), published at 12:26:56 UTC. The observed service heartbeats report `4.6.74` on Windows and Linux and `4.6.74-261104-3` on macOS.
+- Heartbeats now contain limit rows for Claude, both Codex accounts and Antigravity. Shared account fingerprints merge across hosts; the private fingerprints are not included here.
+- The public Worker root and `/u.json` both returned successfully without a login. Four account cards had producer observations less than 900 s old. The existing page still fetches `/u.json` every 30 s and `/h.json` every 300 s, and dims accounts after 900 s.
+- A temporary local config selected `taskqorg/dashq` as its board and mapped the four private fingerprints to the existing public card ids. It contained no `limits_push.token`, and was removed after the reads. `dashq limits --check` is read-only regardless of token configuration.
+
+The existing `dashq limits --check` command exited **1**. A subsequent `cargo run --locked -- limits --check` rebuilt/verified the candidate and reproduced the same five matching and five missing rows (exit **1**); the moving Antigravity reset times remained within tolerance. Initial output:
+
+```text
+ok claude 1w: dashq 34 reset 1794200400 / live 34 reset 1794200400
+FAIL claude Fable 1w: only in the live page
+ok codex-1788798682 1w: dashq 13 reset 1794379777 / live 13 reset 1794379777
+ok codex-1789722405 1w: dashq 8 reset 1794382572 / live 8 reset 1794382572
+FAIL gemini-1793542965 1w: only in the live page
+FAIL gemini-1793542965 5h: only in the live page
+ok gemini-1793542965 Claude and GPT models 1w: dashq 0 reset 1794403304 / live 0 reset 1794403365
+ok gemini-1793542965 Claude and GPT models 5h: dashq 0 reset 1793816504 / live 0 reset 1793816565
+FAIL gemini-1793542965 Gemini Models 1w: only in the live page
+FAIL gemini-1793542965 Gemini Models 5h: only in the live page
+limits check: FAIL (5 rows compared)
+```
+
+Five shared rows pass the existing tolerances (5 percentage points and 600 s). Five displayed rows are absent from the TaskQ payload. These are missing producer rows, not a percentage or reset-time tolerance failure:
+
+- Claude: the heartbeat has only `seven_day` (34%). The page also shows Fable weekly (2%).
+- Antigravity: the heartbeat has only `3p-weekly` and `3p-5h` (both 0%). The page also shows Gemini weekly (74%) and 5h (0%), both as the top-level windows and as the Gemini Models detail rows.
+- Codex: both weekly windows match, including resets; shared-host duplicates do not create extra cards.
+
+This is failure-before evidence only. No tests or decided assertions were changed to permit the missing rows.
+
+## Resume after the producer fix
+
+1. Verify the released service heartbeats include the missing model windows. Keep ccusage publishing throughout comparison.
+2. Run `dashq limits --check` with the existing public card mappings and no push token. Every card and row must pass; a missing value remains a failure.
+3. Complete the side-by-side visual check of the unchanged Worker page with the real replacement payload, including refresh and stale behavior. This attempt did not establish visual acceptance.
+4. Only after those checks pass, perform the D27 cutover and verify the public page continues refreshing from DashQ. Preserve a rollback to the existing publisher.
+
+A1/A2 remain recorded as completed stages. A3 remains open; the public page still uses ccusage. The latest live comparison passes, but visual acceptance and production cutover are unproved. The full implementation test suite was not rerun for these evidence-only changes (specq Testing, Run policy by stage).

@@ -69,6 +69,18 @@ pub fn get(url: &str, headers: &[String]) -> Result<Resp, Fail> {
 
 /// GET, or POST of a JSON `body` when given. HTTPS only.
 pub fn send(url: &str, headers: &[String], body: Option<&str>) -> Result<Resp, Fail> {
+    parse_response(&exchange(url, headers, body)?).ok_or_else(|| {
+        eprintln!("curl failed: unreadable response");
+        ("invalid response".into(), None)
+    })
+}
+
+/// POST to a receiver that answers in plain text: its status alone, the reply is never read.
+pub fn post_status(url: &str, headers: &[String], body: &str) -> Result<u16, Fail> {
+    response(&exchange(url, headers, Some(body))?).map(|(status, ..)| status).ok_or(("invalid response".into(), None))
+}
+
+fn exchange(url: &str, headers: &[String], body: Option<&str>) -> Result<String, Fail> {
     let q = |x: &str| format!("\"{}\"", x.replace('\\', "\\\\").replace('"', "\\\""));
     let mut cfg = format!("url = {}\nuser-agent = \"dashq\"\n", q(url));
     for h in headers {
@@ -107,13 +119,18 @@ pub fn send(url: &str, headers: &[String], body: Option<&str>) -> Result<Resp, F
         Some(28) => return Err(("timeout".into(), None)),
         c => return Err((format!("curl exit {}", c.unwrap_or(-1)), None)),
     }
-    parse_response(&String::from_utf8_lossy(&out.stdout)).ok_or_else(|| {
-        log("unreadable response");
-        ("invalid response".into(), None)
-    })
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 fn parse_response(raw: &str) -> Option<Resp> {
+    let (status, head, body) = response(raw)?;
+    let header = |name: &str| head.lines().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
+    let body = if body.trim().is_empty() { Value::Null } else { serde_json::from_str(body).ok()? };
+    Some(Resp { status, date: header("date").and_then(|d| http_date(&d)), reset: header("x-ratelimit-reset").and_then(|r| r.parse().ok()), body })
+}
+
+/// Status, headers and body of the final response in curl's `-i` output.
+fn response(raw: &str) -> Option<(u16, &str, &str)> {
     let mut rest = raw;
     loop {
         let (head, body) = rest.split_once("\r\n\r\n")?;
@@ -123,9 +140,7 @@ fn parse_response(raw: &str) -> Option<Resp> {
             rest = body;
             continue;
         }
-        let header = |name: &str| head.lines().find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
-        let body = if body.trim().is_empty() { Value::Null } else { serde_json::from_str(body).ok()? };
-        return Some(Resp { status, date: header("date").and_then(|d| http_date(&d)), reset: header("x-ratelimit-reset").and_then(|r| r.parse().ok()), body });
+        return Some((status, head, body));
     }
 }
 

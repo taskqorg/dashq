@@ -20,6 +20,8 @@ pub struct Runtime {
     pub cli: Option<(&'static str, &'static str)>,
     /// Model accounting: `{source}` when qualified, else `{reason}`; null when not listed.
     pub model: &'static Value,
+    /// The public limits page's card for this runtime (D27): `{provider, label, top?, families?}`; null: no card.
+    pub limits: &'static Value,
     descriptor: Value,
 }
 
@@ -64,6 +66,7 @@ pub fn runtimes() -> &'static [Runtime] {
                 login: r["login"].as_str(),
                 cli: r["cli"]["key"].as_str().zip(r["cli"]["releases"].as_str()),
                 model: &r["model"],
+                limits: &r["limits"],
                 descriptor: json!({"name": r["name"], "label": r["label"], "brand": r["brand"], "family": r["family"], "capabilities": r["capabilities"]}),
             })
             .collect()
@@ -86,6 +89,11 @@ fn strs_rows(v: &'static Value) -> impl Iterator<Item = &'static Value> {
 /// The runtime a TaskQ runtime code names.
 pub fn by_code(code: &str) -> Option<&'static Runtime> {
     runtimes().iter().find(|r| r.codes.contains(&code))
+}
+
+/// The table index of a runtime named by a `limit` heartbeat row, which uses the runtime name or a code (D27).
+pub fn limit_runtime(name: &str) -> Option<usize> {
+    runtimes().iter().position(|r| r.limits.is_object() && (r.name == name || r.codes.contains(&name)))
 }
 
 /// Every TaskQ runtime code of the table.
@@ -134,6 +142,9 @@ pub fn check() -> Result<(), String> {
     for r in rows("runtimes")? {
         if ["name", "label", "brand", "family"].iter().any(|k| r[*k].as_str().is_none_or(str::is_empty)) || r["codes"].as_array().is_none_or(|a| a.is_empty()) {
             return Err("runtime table: incomplete runtime".into());
+        }
+        if r["limits"].is_object() && ["provider", "label"].iter().any(|k| r["limits"][*k].as_str().is_none_or(str::is_empty)) {
+            return Err("runtime table: incomplete limits entry".into());
         }
     }
     for c in rows("clients")? {
