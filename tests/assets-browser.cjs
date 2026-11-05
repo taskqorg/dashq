@@ -27,6 +27,11 @@ const css=read('assets/style.css');
    assert.equal(await page.locator('#view-assets').getAttribute('aria-current'),'page');
    const text=await root.innerText();
    for(const s of ['invented-project','Uncertain submissions 1','job-active','— · unknown: provider did not report usage','Cancellation requested','Backup','no fresh backup or restore observation recorded','Integrity','Failed jobs · ≥1 (capped)','Retained records · ≥1 (capped)','All jobs and new requests on AssetQ','this page only reads'])assert(text.includes(s),s);
+   // D6: producer times use the shared relative/exact formatter, including without JavaScript below.
+   const updated=root.locator('time[data-at]').first();
+   assert((await updated.innerText()).endsWith(' ago'));
+   assert(await updated.getAttribute('title'),'viewer-local exact time is available on hover');
+   assert((await page.locator('[data-assets-state]').innerText()).includes('<1m old'));
    // D28: no write control, and every link opens the AssetQ site, never a machine path.
    assert.equal(await root.locator('form,button,input,select,textarea').count(),0,'the view holds a write control');
    const hrefs=await root.locator('a').evaluateAll(a=>a.map(x=>x.getAttribute('href')));
@@ -57,6 +62,7 @@ const css=read('assets/style.css');
    await staticPage.route('**/*',route=>route.abort());
    await staticPage.setContent(html.replace(/<script[^>]*>[\s\S]*?<\/script>/g,'').replace(/<link[^>]*>/g,'').replace('</head>',`<style>${css} html{font-size:${size}px}</style></head>`));
    assert(await staticPage.locator('#assets').count(),'server-rendered AssetQ missing without JavaScript');
+   assert((await staticPage.locator('#assets time[data-at]').first().innerText()).includes('ago (2026-11-05 10:05 UTC)'));
    await staticPage.close();
    // Not configured: no navigation entry and no panel; /assets names the missing configuration, also after a refresh.
    const bare=await browser.newPage({viewport:{width,height:1000},colorScheme:theme,reducedMotion:'reduce'});

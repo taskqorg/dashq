@@ -27,7 +27,7 @@ Off by default: without the `assetq` key there is no read, navigation entry or p
 Add this key to `<install>/config.json`, with the service user as the only reader of each named file (mode 0600):
 
 ```json
-{"assetq": {"base_url": "https://assets.ufobe.com",
+{"assetq": {"base_url": "https://pipe.ufobe.com",
   "access_client_id": "<install>/assetq/access-client-id",
   "access_client_secret": "<install>/assetq/access-client-secret",
   "projects": {"<AssetQ project id>": {"workspace": "<D11 workspace>",
@@ -37,7 +37,7 @@ Add this key to `<install>/config.json`, with the service user as the only reade
 | File or key | Holds | Source |
 |---|---|---|
 | `access_client_id`, `access_client_secret` | One Cloudflare Access service token for the AssetQ site: its client ID and client secret, one value per file | A new service token, allowed by a Service Auth policy on the Access application of `base_url` |
-| `read_token`, one per project | One AssetQ `member` Bearer token for that project | `assetq token <project> --role member` |
+| `read_token`, one per project | One Pipe `member` Bearer token for that project | `pipe token <project> --role member` |
 | `workspace` | The D11 workspace whose members may see that project | The existing workspace |
 | `base_url` | The AssetQ origin, `https://` with no path; every read and link derives from it | The origin that answers at provisioning; the read follows no redirect |
 
@@ -45,7 +45,7 @@ The two Access keys come together or not at all; one alone refuses the config. W
 
 AssetQ has no read-only role, so `member` is the smallest grant it offers. DashQ's GET-only read adapter keeps reading from mutating: it has no code path that sends another method to AssetQ. Access decides whether a request reaches AssetQ; the Bearer token decides what AssetQ returns. Neither value reaches the browser, `/data`, logs, URLs or `report` (R7): the headers go to `curl` on stdin.
 
-[assetq#51](https://github.com/taskqorg/assetq/issues/51) moves the service to `https://pipe.ufobe.com`, and Pipe's contract then refuses requests that name `assets.ufobe.com`. When that move happens, change `base_url` and allow the service token on the new origin's Access application; the Bearer tokens stay valid.
+[assetq#51](https://github.com/taskqorg/assetq/issues/51) moves the service to `https://pipe.ufobe.com`; Pipe's contract refuses requests that name `assets.ufobe.com`. Configure `base_url` for the provisioned origin and allow the service token on that origin's Access application; the Bearer tokens stay valid. No origin is hardcoded in the adapter.
 
 Config errors name the bad key, never its value (D2). An unreadable credential file reads `credential unreadable`.
 

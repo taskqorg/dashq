@@ -41,7 +41,7 @@ pub(crate) fn badge(state: &str, label: &str) -> String {
     format!("<span class=\"s {class}\">{}</span>", esc(label))
 }
 
-fn at(v: &Value, now: u64) -> String {
+pub(crate) fn at(v: &Value, now: u64) -> String {
     crate::findings::time(v).map_or("? unavailable".into(), |a| format!("{} ago ({})", dur(now.saturating_sub(a)), clock(a, now)))
 }
 

@@ -344,11 +344,45 @@ fn bytes(v: &Value) -> String {
     })
 }
 
-fn state(v: &Value) -> String {
+/// AssetQ sends PostgreSQL timestamptz text; keep its offset and discard only fractional seconds.
+fn timestamp(v: &Value) -> Option<u64> {
+    if let Some(t) = crate::findings::time(v) { return Some(t) }
+    let s = v.as_str()?;
+    let head = s.get(..19)?.replace(' ', "T");
+    let t = source::iso_secs(&head)?;
+    if source::iso(t).get(..19)? != head { return None }
+    let mut tail = s.get(19..)?;
+    if let Some(fraction) = tail.strip_prefix('.') {
+        let n = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if n == 0 { return None }
+        tail = &fraction[n..];
+    }
+    let offset = if tail == "Z" { 0 } else {
+        if !matches!(tail.len(), 3 | 6) || !matches!(tail.get(..1)?, "+" | "-") { return None }
+        if !tail[1..].bytes().all(|b| b.is_ascii_digit() || b == b':') { return None }
+        let h = tail.get(1..3)?.parse::<i64>().ok()?;
+        let m = if tail.len() == 6 {
+            if tail.get(3..4)? != ":" { return None }
+            tail.get(4..6)?.parse::<i64>().ok()?
+        } else { 0 };
+        if !(0..=23).contains(&h) || !(0..=59).contains(&m) { return None }
+        (h * 3600 + m * 60) * if tail.starts_with('-') { -1 } else { 1 }
+    };
+    u64::try_from(i64::try_from(t).ok()? - offset).ok()
+}
+
+fn stamp(v: &Value, now: u64) -> String {
+    match timestamp(v) {
+        Some(t) => format!("<time data-at=\"{t}\">{}</time>", esc(&crate::page::at(&json!(t), now))),
+        None => esc(&crate::page::at(&Value::Null, now)),
+    }
+}
+
+fn state(v: &Value, now: u64) -> String {
     let s = v["state"].as_str().unwrap_or("unknown");
     let class = match s { "ok" | "healthy" | "observed" | "verified" => "ok", "unknown" | "stale" | "unconfirmed" | "incomplete" => "unknown", _ => "warn" };
     let reason = v["reason"].as_str().map_or(String::new(), |r| format!(" · {}", esc(r)));
-    let at = v["observed_at"].as_str().map_or(String::new(), |t| format!(" · observed {}", esc(t)));
+    let at = if v["observed_at"].is_null() { String::new() } else { format!(" · observed {}", stamp(&v["observed_at"], now)) };
     format!("<span class=\"s {class}\">{}</span>{reason}{at}", esc(s))
 }
 
@@ -356,37 +390,37 @@ fn link(href: &Value, label: &str) -> String {
     href.as_str().filter(|h| h.starts_with("https://")).map_or(String::new(), |h| format!("<a href=\"{}\" rel=\"noreferrer\">{label}</a>", esc(h)))
 }
 
-fn job_rows(w: &mut String, p: &Value) {
+fn job_rows(w: &mut String, p: &Value, now: u64) {
     let rows = p["jobs"]["rows"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {
         let text = if p["source"]["state"] == "ok" { "No queued, active or waiting jobs." } else { "Active jobs unknown · see the source state above." };
         let _ = write!(w, "<p>{text}</p>");
     }
-    for j in &rows { job_row(w, j); }
+    for j in &rows { job_row(w, j, now); }
 }
 
-fn job_row(w: &mut String, j: &Value) {
+fn job_row(w: &mut String, j: &Value, now: u64) {
     let steps = j["steps"].as_array().map_or(0, Vec::len);
     let step = j["step"].as_u64().map_or_else(|| "—".to_string(), |s| format!("{} of {steps}", s + 1));
     let usage = if j["usage"]["credits"].is_null() { format!("— · unknown: {}", j["usage"]["unknown_reason"].as_str().map_or("not reported".into(), esc)) } else { val(&j["usage"]["credits"]) };
-    let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>{}</span><span>Phase {}</span><span>Step {step}</span><span>Effect {}</span><span>Cancellation {}</span><span>Credits {usage} · reserved {}</span><span>Updated {}</span>", val(&j["id"]), val(&j["method"]), val(&j["phase"]), val(&j["effect"]), val(&j["cancel"]), val(&j["reserved_credits"]), val(&j["updated_at"]));
+    let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>{}</span><span>Phase {}</span><span>Step {step}</span><span>Effect {}</span><span>Cancellation {}</span><span>Credits {usage} · reserved {}</span><span>Updated {}</span>", val(&j["id"]), val(&j["method"]), val(&j["phase"]), val(&j["effect"]), val(&j["cancel"]), val(&j["reserved_credits"]), stamp(&j["updated_at"], now));
     if !j["reason"].is_null() { let _ = write!(w, "<span>{}</span>", val(&j["reason"])); }
     let _ = write!(w, "<span>{}</span>", link(&j["links"]["record"], "Job on AssetQ"));
     w.push_str("</div>");
 }
 
 /// Failed work with AssetQ's bounded reason; generation, validation and owner acceptance stay separate (AssetQ status `states`).
-fn failed_rows(w: &mut String, p: &Value) {
+fn failed_rows(w: &mut String, p: &Value, now: u64) {
     let rows = p["jobs"]["failed"].as_array().cloned().unwrap_or_default();
     let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-failed\"><summary id=\"assetq-{0}-failed-summary\">Failed jobs · {1}</summary><p class=\"note\">Phase reports generation; a verified manifest reports validation; each retained record reports owner acceptance.</p>", val(&p["project"]), count(rows.len(), p["coverage"]["failed"].as_str().unwrap_or("unknown")));
     if rows.is_empty() {
         let _ = write!(w, "<p>{}</p>", if p["source"]["state"] == "ok" { "No failed jobs." } else { "Failed jobs unknown · see the source state above." });
     }
-    for j in &rows { job_row(w, j); }
+    for j in &rows { job_row(w, j, now); }
     w.push_str("</details>");
 }
 
-fn storage(w: &mut String, p: &Value) {
+fn storage(w: &mut String, p: &Value, now: u64) {
     let s = &p["store"];
     let f = &s["free_space"];
     let i = &s["physical_inventory"];
@@ -394,10 +428,10 @@ fn storage(w: &mut String, p: &Value) {
         bytes(&s["used_bytes"]), bytes(&s["quota_bytes"]), if s["full"] == true { " · full" } else { "" },
         bytes(&i["object_bytes"]), i["reason"].as_str().map_or(String::new(), |r| format!(" · unknown: {}", esc(r))),
         bytes(&f["available_bytes"]), bytes(&f["floor_bytes"]), val(&f["admission"]), f["reason"].as_str().map_or(String::new(), |r| format!(" · unknown: {}", esc(r))),
-        state(&p["integrity"]), state(&p["backup"]), state(&p["restore"]));
+        state(&p["integrity"], now), state(&p["backup"], now), state(&p["restore"], now));
 }
 
-fn methods(w: &mut String, p: &Value) {
+fn methods(w: &mut String, p: &Value, now: u64) {
     let rows = p["methods"].as_array().cloned().unwrap_or_default();
     let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-methods\"><summary id=\"assetq-{0}-methods-summary\">Methods · {1}{2}</summary>", val(&p["project"]), count(rows.len(), p["coverage"]["methods"].as_str().unwrap_or("unknown")), if p["coverage"]["methods"] == "unknown" { "" } else { " versions" });
     w.push_str("<p class=\"note\">Registry status, qualification records and provider health are separate. A record names what it proves; it never enables dispatch.</p>");
@@ -407,7 +441,7 @@ fn methods(w: &mut String, p: &Value) {
         let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Status {}</span><span>{}</span><span>Provider {}</span><span>Model {}</span><span>Maximum credits {}</span><span>Outcomes {}</span>", val(&m["name"]), val(&m["status"]), val(&m["operation"]), val(&m["provider"]), val(&m["model"]), val(&m["max_credits"]), if outcomes.is_empty() { "—".into() } else { outcomes.join(" · ") });
         if m["qualification"].is_object() {
             let q = &m["qualification"];
-            let _ = write!(w, "<span>Qualification {} · general dispatch {} · {} · observed {}</span>", val(&q["scope"]), val(&q["general_dispatch"]), val(&q["reason"]), val(&q["observed_at"]));
+            let _ = write!(w, "<span>Qualification {} · general dispatch {} · {} · observed {}</span>", val(&q["scope"]), val(&q["general_dispatch"]), val(&q["reason"]), stamp(&q["observed_at"], now));
         } else {
             w.push_str("<span>Qualification — · no retained receipt for this version</span>");
         }
@@ -416,16 +450,17 @@ fn methods(w: &mut String, p: &Value) {
     w.push_str("</details>");
 }
 
-fn comparisons(w: &mut String, p: &Value) {
+fn comparisons(w: &mut String, p: &Value, now: u64) {
     let rows = p["comparisons"].as_array().cloned().unwrap_or_default();
     let scopes = p["recommendations"].as_array().cloned().unwrap_or_default();
-    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-comparisons\"><summary id=\"assetq-{0}-comparisons-summary\">Comparisons · {1} · recommendation scopes · {2}</summary>", val(&p["project"]), count(rows.len(), p["coverage"]["comparisons"].as_str().unwrap_or("unknown")), scopes.len());
+    let coverage = p["coverage"]["comparisons"].as_str().unwrap_or("unknown");
+    let _ = write!(w, "<details class=\"asset-group\" id=\"assetq-{0}-comparisons\"><summary id=\"assetq-{0}-comparisons-summary\">Comparisons · {1} · recommendation scopes · {2}</summary>", val(&p["project"]), count(rows.len(), coverage), count(scopes.len(), coverage));
     let _ = write!(w, "<p>{}</p>", link(&p["links"]["benchmarks"], "Benchmarks on AssetQ"));
     if rows.is_empty() { let _ = write!(w, "<p>{}</p>", if p["source"]["state"] == "ok" { "No comparisons." } else { "Comparisons unknown · see the source state above." }); }
     for c in &rows {
         let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Use case {}</span><span>{}</span><span>Dataset {} · evaluator {}</span><span>State {}{}</span><span>Failure rate {} · credits {} · judgments {}</span><span>{}</span></div>", val(&c["id"]), val(&c["use_case"]), val(&c["operation"]), val(&c["dataset_version"]), val(&c["evaluator_version"]), val(&c["state"]), c["reason"].as_str().map_or(String::new(), |r| format!(" · {}", esc(r))), val(&c["failure_rate"]), val(&c["credits"]), val(&c["human_judgments"]), link(&c["link"], "Record"));
         for m in c["method_metrics"].as_array().into_iter().flatten() {
-            let _ = write!(w, "<div class=\"asset-row asset-sub\"><strong>{}</strong><span>Samples {} · terminal {} · failures {}</span><span>Failure rate {}</span><span>Credits {} · unknown {}</span><span>Duration {} ms</span><span>Human mean {} · missing {}</span></div>", val(&m["method"]), val(&m["samples"]), val(&m["terminal"]), val(&m["failures"]), val(&m["failure_rate"]), val(&m["credits"]), val(&m["usage_unknown"]), val(&m["duration_ms"]), val(&m["human_score_mean"]), val(&m["human_judgments_missing"]));
+            let _ = write!(w, "<div class=\"asset-row asset-sub\"><strong>{}</strong><span>Samples {} · terminal {} · failures {}</span><span>Failure rate {}</span><span>Credits {} · unknown {}</span><span>Duration {}</span><span>Human mean {} · missing {}</span></div>", val(&m["method"]), val(&m["samples"]), val(&m["terminal"]), val(&m["failures"]), val(&m["failure_rate"]), val(&m["credits"]), val(&m["usage_unknown"]), m["duration_ms"].as_u64().map_or("? unavailable".into(), |ms| esc(&crate::data::dur(ms / 1000))), val(&m["human_score_mean"]), val(&m["human_judgments_missing"]));
         }
         let missing: Vec<String> = c["missing_cases"].as_array().into_iter().flatten().map(|m| format!("{}: {}", val(&m["sample"]), val(&m["reason"]))).collect();
         if !missing.is_empty() { let _ = write!(w, "<p class=\"note\">Missing · {}</p>", missing.join(" · ")); }
@@ -436,10 +471,10 @@ fn comparisons(w: &mut String, p: &Value) {
         let current = if s["recommended"].is_object() { format!("Recommended {}", val(&s["recommended"]["method"])) } else { format!("None · {}", s["none_reason"].as_str().or(s["reason"].as_str()).map_or("unknown".into(), esc)) };
         let records = s["records"].as_array().map_or(0, Vec::len);
         let shown = count(records, if s["state"] != "ok" { "unknown" } else if s["records_truncated"] == true { "capped" } else { "complete" });
-        let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Constraints {}</span><span>{current}</span><span>Records {shown}</span><span>Observed {}</span></div>", val(&s["use_case"]), val(&s["constraints"]), val(&s["observed_at"]));
+        let _ = write!(w, "<div class=\"asset-row\"><strong>{}</strong><span>Constraints {}</span><span>{current}</span><span>Records {shown}</span><span>Observed {}</span></div>", val(&s["use_case"]), val(&s["constraints"]), stamp(&s["observed_at"], now));
         for r in s["records"].as_array().into_iter().flatten() {
             let keys: Vec<String> = r["evidence_keys"].as_array().into_iter().flatten().map(val).collect();
-            let _ = write!(w, "<div class=\"asset-row asset-sub\"><strong>{}</strong><span>{} · {}</span><span>Method status {}</span><span>Evidence {} · observed {}</span>", val(&r["id"]), val(&r["method"]), val(&r["state"]), val(&r["method_status"]), if keys.is_empty() { "—".into() } else { keys.join(", ") }, val(&r["observed_at"]));
+            let _ = write!(w, "<div class=\"asset-row asset-sub\"><strong>{}</strong><span>{} · {}</span><span>Method status {}</span><span>Evidence {} · observed {}</span>", val(&r["id"]), val(&r["method"]), val(&r["state"]), val(&r["method_status"]), if keys.is_empty() { "—".into() } else { keys.join(", ") }, stamp(&r["observed_at"], now));
             w.push_str("</div>");
         }
     }
@@ -459,25 +494,26 @@ fn records(w: &mut String, p: &Value) {
 
 pub fn render(w: &mut String, assets: &Value) {
     if !assets.is_object() { return }
+    let now = assets["generated_at"].as_u64().unwrap_or(0);
     let origin = &assets["origin"];
     let _ = write!(w, "<section id=\"assets\"><h2>AssetQ</h2><p>AssetQ owns this state; each value keeps its source and time. People act on <a href=\"{}\" rel=\"noreferrer\">the AssetQ site</a>; this page only reads.</p>", val(origin));
     let projects = assets["projects"].as_array().cloned().unwrap_or_default();
     if projects.is_empty() { let _ = write!(w, "<p>Unknown · {}.</p>", val(&assets["source"]["reason"])); }
     for p in projects {
         let src = &p["source"];
-        let age = src["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{a} s old"));
-        let _ = write!(w, "<article id=\"assetq-{0}\"><h3>{0}</h3><p data-assets-state>{1} · {age} · workspace {2}</p>", val(&p["project"]), state(src), val(&p["workspace"]));
+        let age = src["age_s"].as_u64().map_or("age unknown".into(), |a| format!("{} old", esc(&crate::data::dur(a))));
+        let _ = write!(w, "<article id=\"assetq-{0}\"><h3>{0}</h3><p data-assets-state>{1} · {age} · workspace {2}</p>", val(&p["project"]), state(src, now), val(&p["workspace"]));
         if p["revisions"].is_object() {
             let phases = p["jobs"]["by_phase"].as_object().map_or("—".to_string(), |o| ["queued", "active", "waiting", "succeeded", "failed", "cancelled"].iter().map(|k| format!("{k} {}", o.get(*k).map_or("0".into(), val))).collect::<Vec<_>>().join(" · "));
             let _ = write!(w, "<h4>Jobs</h4><p>{phases}</p><p>Uncertain submissions {} · leased {} · Active rows {}. Rows list queued, active and waiting jobs.</p>", val(&p["jobs"]["uncertain_submissions"]), val(&p["jobs"]["leased"]), count(p["jobs"]["rows"].as_array().map_or(0, Vec::len), p["coverage"]["active"].as_str().unwrap_or("unknown")));
-            job_rows(w, &p);
-            failed_rows(w, &p);
+            job_rows(w, &p, now);
+            failed_rows(w, &p, now);
             let _ = write!(w, "<p>{} · {}</p>", link(&p["links"]["jobs"], "All jobs and new requests on AssetQ"), link(&p["links"]["operations"], "Operations on AssetQ"));
-            let providers: Vec<String> = p["providers"].as_array().into_iter().flatten().map(|x| format!("{} {}", val(&x["provider"]), state(x))).collect();
+            let providers: Vec<String> = p["providers"].as_array().into_iter().flatten().map(|x| format!("{} {}", val(&x["provider"]), state(x, now))).collect();
             let _ = write!(w, "<h4>Providers</h4><p>{}</p>", if providers.is_empty() { "Unknown · no provider observations.".to_string() } else { providers.join("<br>") });
-            storage(w, &p);
-            methods(w, &p);
-            comparisons(w, &p);
+            storage(w, &p, now);
+            methods(w, &p, now);
+            comparisons(w, &p, now);
             records(w, &p);
         } else {
             w.push_str("<p>No AssetQ observation yet.</p>");
@@ -608,17 +644,25 @@ pub(crate) mod tests {
         let html = rendered(raw());
         assert!(html.contains("Retained records · ≥1 (capped)"), "objects has a next page");
         assert!(html.contains("Methods · 3 versions"), "a complete list stays exact");
+        assert!(html.contains("recommendation scopes · 1</summary>"));
         assert!(html.contains("Failed jobs · ≥1 (capped)"), "failed has a next page");
         let mut r = raw();
         r["methods"] = json!({"error": "HTTP 500"});
         r["comparisons"] = json!({"error": "timeout"});
+        r["recommendations"] = json!([]);
         let html = rendered(r);
         assert!(html.contains("Methods · — · unknown"), "a failed read is no zero");
         assert!(html.contains("Comparisons · — · unknown"));
+        assert!(html.contains("recommendation scopes · — · unknown"), "unread comparison scopes are unknown");
         // details read for only part of the list: the shown count is a lower bound
         let mut r = raw();
         r["details_skipped"] = json!(true);
-        assert!(rendered(r).contains("Comparisons · ≥1 (capped)"));
+        let html = rendered(r);
+        assert!(html.contains("Comparisons · ≥1 (capped)"));
+        assert!(html.contains("recommendation scopes · ≥1 (capped)"), "skipped comparisons can name more scopes");
+        let mut r = raw();
+        r["comparisons"]["next"] = json!("comparison-1");
+        assert!(rendered(r).contains("recommendation scopes · ≥1 (capped)"));
         // a recommendation scope with truncated records
         let mut r = raw();
         r["recommendations"][0]["records_truncated"] = json!(true);
@@ -627,6 +671,33 @@ pub(crate) mod tests {
         let mut r = raw();
         r["jobs"]["active"]["next"] = json!("job-active");
         assert!(rendered(r).contains("Active rows ≥2 (capped)"));
+    }
+
+    /// D6/specq Time: producer timestamps use the shared relative/exact format on every rendered path.
+    #[test]
+    fn assetq_times_use_shared_format() {
+        let mut r = raw();
+        let producer_time = "2026-11-05 10:05:00.123456+00";
+        let epoch = source::iso_secs("2026-11-05T10:05:00Z").unwrap();
+        r["status"]["providers"][1]["observed_at"] = json!(producer_time);
+        r["methods"]["items"][1]["qualification"]["observed_at"] = json!(producer_time);
+        r["recommendations"][0]["observed_at"] = json!(producer_time);
+        r["recommendations"][0]["records"][0]["observed_at"] = json!(producer_time);
+        r["jobs"]["active"]["items"][0]["updated_at"] = json!(producer_time);
+        for key in ["backup", "restore"] { r["status"][key]["observed_at"] = json!(producer_time); }
+        r["status"]["store"]["integrity"]["observed_at"] = json!(producer_time);
+        let html = rendered(r);
+        assert_eq!(html.matches(&format!("data-at=\"{epoch}\"")).count(), 9, "active/waiting jobs, provider, integrity/backup/restore, qualification, scope and record timestamps");
+        assert!(html.contains("&lt;1m old"), "source age uses the shared duration");
+        assert!(!html.contains(producer_time), "raw PostgreSQL time reached the page");
+        assert!(html.contains("Updated <time") && html.contains("ago (2026-11-05 10:05 UTC)"));
+        assert!(html.contains("Duration &lt;1m"));
+        for value in [json!(epoch), json!("2026-11-05T10:05:00Z"), json!("2026-11-05 15:35:00.999+05:30"), json!("2026-11-05 06:05:00-04")] {
+            assert_eq!(timestamp(&value), Some(epoch), "{value}");
+        }
+        for value in [Value::Null, json!("2026-11-05"), json!("invalid"), json!("2026-02-30 10:05:00+00"), json!("2026-11-05 10:05:00"), json!("2026-11-05 10:05:00.+00"), json!("2026-11-05 10:05:00+25:00")] {
+            assert_eq!(stamp(&value, NOW), "? unavailable", "{value}");
+        }
     }
 
     /// Design States, AssetQ status `states`: a failed job keeps AssetQ's bounded reason, offers no result link,

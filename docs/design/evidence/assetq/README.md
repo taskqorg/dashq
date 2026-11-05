@@ -11,7 +11,7 @@ The owner withdrew A8 and the four write actions, so A6 needs no AssetQ R9 amend
 | A1 | D28 and the design package precede the code in history. The owner approved the layout and then removed its actions. | None |
 | A2 | `assetq_reads_carry_both_credentials_and_only_get` reads status, jobs, methods, objects, a comparison and its recommendations from an in-process service over real HTTP. An earlier adapter ran against a real local AssetQ, below. | The deployed service |
 | A3 | Superseded by the owner's decision: DashQ has no write. `assetq_reads_carry_both_credentials_and_only_get` sees only GET, `assetq_page_evidence` finds no write control and `tests/assets-browser.cjs` sees no non-GET request. | None |
-| A4 | `assetq_projection_drops_content`, `assetq_unknowns_stay_explicit`, `assetq_capped_counts_read_at_least`, `assetq_failed_jobs_keep_their_reason`, `assetq_read_failures_name_their_reason`, `assetq_view_is_scoped_and_absent_without_config`. | The viewer's own session on the linked pages |
+| A4 | `assetq_projection_drops_content`, `assetq_unknowns_stay_explicit`, `assetq_capped_counts_read_at_least`, `assetq_times_use_shared_format`, `assetq_failed_jobs_keep_their_reason`, `assetq_read_failures_name_their_reason`, `assetq_view_is_scoped_and_absent_without_config`. | The viewer's own session on the linked pages |
 | A5 | `tests/assets-browser.cjs` and the other CI browser suites, restored to `main`'s versions. | `real configured service`: see [PM live readback](#pm-live-readback) |
 | A6 | [Read-back](#read-back-for-a6) below. | Config and credential files on the target |
 | A7 | `selftest_reads_each_assetq_project` proves that selftest reads the configured project. | The run on the target: see [PM live readback](#pm-live-readback) |
@@ -19,7 +19,7 @@ The owner withdrew A8 and the four write actions, so A6 needs no AssetQ R9 amend
 
 ## Read-back for A6
 
-Read from the Windows worker through the public origin, with the agent's Access credential where named. No credential, grant or configuration was created or changed.
+The following table records the earlier Windows worker readback through the public origin, with the agent's Access credential where named. The fresh Pipe readback below supersedes its origin-move observation. No credential, grant or configuration was created or changed.
 
 | Input | Observed | State |
 |---|---|---|
@@ -30,6 +30,13 @@ Read from the Windows worker through the public origin, with the agent's Access 
 | `assetq` config, credential files | The Windows worker has no SSH access to the target. `https://dash.ufobe.com` runs a release without this feature: `/assets` reads 404 and `/data` has no `assets` key. | Unknown: the PM provisions them |
 | Origin move | `pipe.ufobe.com` does not answer yet; `assets.ufobe.com` does. [assetq#51](https://github.com/taskqorg/assetq/issues/51) holds the move. | See the [design](../../assetq-summary.md#provisioning) |
 
+### Pipe readback, 2026-11-05 17:01 UTC
+
+- `assetq#7` and `assetq#25` are closed. `assetq#51` remains open, but `GET https://pipe.ufobe.com/v1/health` through Access returned 200 with `service: up`, `database: ok`, version `0.1.0`.
+- Pipe's current R9 and `docs/method-evaluation.md` allow DashQ summary metadata and links, with no generation authority. The compatibility `assetq.md` points to `pipe.md`; the PM's token command is now `pipe token <project> --role member`.
+- `GET https://dash.ufobe.com/assets` through Access returned 404. A5 real configured service and A7 remain unverified: this feature needs the merged release and PM-provisioned project Bearer/config files. The worker created no configuration, credential or grant and made no write request.
+- Every adapter URL and browser link derives from `assetq.base_url`. The configured-origin fixture uses an invented host, independent of either production host name.
+
 ## Real local service
 
 An earlier revision of this adapter ran against AssetQ source `47f2cbd18c94bdbc6070696f767e6c66d8601640`, built unchanged, with a disposable PostgreSQL 18 cluster on loopback and the synthetic provider. It read real registry rows, `general dispatch refused` qualification records, unknown backup and restore, and an `incomplete` comparison with `job not terminal`, `usage unknown`, null credits and no winner. Neither prompt nor dataset case text reached `/data` or the page.
@@ -38,6 +45,8 @@ That run predates the failed-jobs read and the Access headers, and it used the s
 
 ## Defects found by these checks
 
+- R2/D6, review of `ac4bddb`: recommendation scopes showed an exact count after a failed or capped comparisons read. Before: `assetq_capped_counts_read_at_least` failed on the unknown-scopes assertion. After: scope counts use comparison coverage, retaining exact counts only for complete reads and lower bounds for pagination or skipped details; the same check passes.
+- D6/specq Time, review of `ac4bddb`: producer times and source ages bypassed the shared format. Before: `assetq_times_use_shared_format` failed because none of the producer times used the common timestamp markup. After: jobs, provider/integrity/backup/restore observations, qualifications, recommendation scopes and records use shared relative/exact time, including PostgreSQL fractions and offsets; invalid times remain `? unavailable`. Durations and source ages use the shared duration formatter. The same check passes; browser checks cover JavaScript and server-only output.
 - Before: a deployed read could not pass Access; the live origin answered a Bearer-only request with 302. After: `assetq_reads_carry_both_credentials_and_only_get` sends both credentials on every read, and without the token the reason is `redirected to a sign-in`. Protection kept: `assetq_read_failures_name_their_reason`.
 - Before: page links named the machine `/v1` paths, which AssetQ's service page says take no browser session, so a person following one would read a refusal. After: links open the site's published browser paths, and `assetq_projection_drops_content` and `tests/assets-browser.cjs` fail on a machine path.
 - Before: on `main`'s D4 rule, the view's read would have made a browser request wait for AssetQ. After: the read uses the background refresh, and `assetq_view_is_scoped_and_absent_without_config` reads `refresh in progress` on a cold cache.
@@ -47,7 +56,9 @@ That run predates the failed-jobs read and the Access headers, and it used the s
 
 `tests/assets-browser.cjs` covers eight cells (1280/360 px, light/dark, 16/24 px) on the actual Rust HTML. It checks visibility, selected navigation, unknown text, no content leak, no overflow, no write control, no non-GET request, links only to the AssetQ site and never a machine path, an open disclosure across refresh, failed-refresh retention, failed-job rows, the page without JavaScript and the not-configured page across a refresh.
 
-The forward-auth guard was not exercised here.
+The browser fixture does not exercise the forward-auth guard. The fresh origin probe above passed Access for the health route, but it does not qualify the deployed `/assets` view.
+
+Review correction checks on Windows: `cargo test --locked assetq_` passed 11 tests with the live read ignored; `node tests/assets-browser.cjs` passed all eight cells, including relative time and exact-time hover text with JavaScript and relative/exact output without JavaScript. The two existing layout images were refreshed and inspected; the approved structure is unchanged. The task result records the final candidate SHA and full project checks.
 
 ## PM live readback
 

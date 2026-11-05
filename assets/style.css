@@ -378,7 +378,6 @@ body[data-view="/assets"] {max-width:1024px;box-sizing:border-box;padding:20px;b
 #assets .asset-sub {padding-left:1em}
 #assets .asset-group {margin:.75em 0}
 #assets summary {cursor:pointer;min-height:24px}
-#assets .asset-receipt:empty {display:none}
 body[data-view="/fleet"] #fleet {display:block}
 #fleet {overflow-wrap:anywhere}
 #fleet .fleet-row {display:flex;flex-wrap:wrap;gap:.4em 1.2em;padding:.5em 0;border-bottom:1px solid light-dark(#ccd1d5,#555e66);font-variant-numeric:tabular-nums}
