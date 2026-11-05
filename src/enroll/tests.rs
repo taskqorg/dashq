@@ -1911,7 +1911,8 @@ lines", "recommended": true}]}])),
         use std::sync::mpsc::channel;
         use std::time::Duration;
         let (_d, e) = setup("fleet-pending");
-        let now = crate::source::now();
+        // Cross a second boundary without sleeping: route reads must retain the advancing producer age.
+        let now = crate::source::now() - 1;
         let installation = "invented-fleet";
         let enrollment = e.as_ref().unwrap();
         enrollment.store.grant(&store::Installation { id: installation, product: "taskq", runtime: "native", label: "invented-host" }, "ws-1", "github|1", r#"["taskq-telemetry/1"]"#, b"invented-verifier", now as i64).unwrap();
@@ -1949,7 +1950,9 @@ lines", "recommended": true}]}])),
             assert!(source["age_s"].as_u64().unwrap() >= 120);
             assert_eq!(window["accounts"][0]["tokens"]["input_tokens"]["observed"], 100);
             let fleet = String::from_utf8(pages.iter().find(|p| String::from_utf8_lossy(&p.2).contains("data-view=\"/fleet\"")).unwrap().2.clone()).unwrap();
-            assert!(fleet.contains("source age 120 s") && fleet.contains("refresh in progress"));
+            let age = fleet.split_once("source age ").unwrap().1.split_once(" s").unwrap().0.parse::<u64>().unwrap();
+            assert!((120..=120 + crate::source::now().saturating_sub(now)).contains(&age), "unexpected producer age: {age}");
+            assert!(fleet.contains("refresh in progress"));
         });
         let (_, denied) = data(&app, "", Some(Scope::Subject("github|other")));
         let (_, anonymous) = data(&app, "", None);
