@@ -199,16 +199,24 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
 }
 
 /// Heartbeat boards through the shared 60 s cache: the same single flight as the page's reads (D4).
-fn board_snapshots(c: &Config, cache: &source::Cache) -> Value {
+fn board_snapshots(c: &Config, cache: &source::Cache, background: bool) -> Value {
     let Some(token) = c.github_token.as_deref() else { return json!({}) };
-    c.projects.iter().map(|r| (r.clone(), cache.get(&format!("board:{r}"), 60, || source::board(r, token)))).collect::<serde_json::Map<_, _>>().into()
+    c.projects.iter().map(|r| {
+        let (repo, token) = (r.clone(), token.to_string());
+        (r.clone(), source_read(cache, background, &format!("board:{r}"), 60, move || source::board(&repo, &token)))
+    }).collect::<serde_json::Map<_, _>>().into()
+}
+
+/// A cached source read: a browser request or the public limits push never waits for one (D4/D6, #260).
+fn source_read(cache: &source::Cache, background: bool, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), source::Fail> + Send + 'static) -> Value {
+    if background { cache.revalidate(key, ttl, read) } else { cache.get(key, ttl, read) }
 }
 
 /// `dashq limits [--check]` (D27): reads only, whatever the config's token says.
 fn limits_command(t: &Tool, check: bool) -> Result<(), String> {
     let cfg = load_config(&config_path(t))?;
     let push = cfg.limits_push.as_ref().ok_or("config: limits_push not configured")?;
-    let boards = board_snapshots(&cfg, &source::Cache::default());
+    let boards = board_snapshots(&cfg, &source::Cache::default(), false);
     let now = source::now();
     for id in limits::unmapped(&boards, push, now) {
         eprintln!("limits: unmapped account {id}");
@@ -253,6 +261,10 @@ impl App {
     /// Reads every source (cached per D4) and builds the document; `scope` selects the enrolled installations
     /// the actor may see (D11), `None` for none.
     fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
+        self.document(period, filters, scope, false)
+    }
+
+    fn document(&self, period: u64, filters: Value, scope: Option<store::Scope>, background: bool) -> Value {
         let c = &self.cfg;
         let now = source::now();
         let span = profile::current();
@@ -260,7 +272,10 @@ impl App {
             let lf = sc.spawn(|| {
                 profile::enter(span);
                 match &c.langfuse {
-                    Some((base, auth)) => self.cache.get(&format!("langfuse:{period}"), 30, || source::langfuse(base, auth, now, period)),
+                    Some((base, auth)) => {
+                        let (base, auth) = (base.clone(), auth.clone());
+                        source_read(&self.cache, background, &format!("langfuse:{period}"), 30, move || source::langfuse(&base, &auth, now, period))
+                    }
                     None => Value::Null,
                 }
             });
@@ -271,10 +286,16 @@ impl App {
                 .map(|(r, token)| {
                     sc.spawn(move || {
                         profile::enter(span);
-                        let b =self.cache.get(&format!("board:{r}"), 60, || source::board(r, token));
-                        let l = self.cache.get(&format!("release:{r}"), 600, || source::release(r, token));
+                        let own = || (r.clone(), token.to_string());
+                        let (repo, tok) = own();
+                        let b = source_read(&self.cache, background, &format!("board:{r}"), 60, move || source::board(&repo, &tok));
+                        let (repo, tok) = own();
+                        let l = source_read(&self.cache, background, &format!("release:{r}"), 600, move || source::release(&repo, &tok));
                         // one single flight per board: callers inside 60 s share one `taskq status --json` run
-                        let t = c.taskq_bin.as_ref().map(|bin| self.cache.get(&format!("taskq:{r}"), 60, || source::taskq_status(bin, r, token)));
+                        let t = c.taskq_bin.as_ref().map(|bin| {
+                            let (bin, (repo, tok)) = (bin.clone(), own());
+                            source_read(&self.cache, background, &format!("taskq:{r}"), 60, move || source::taskq_status(&bin, &repo, &tok))
+                        });
                         (r.clone(), b, l, t)
                     })
                 })
@@ -312,10 +333,15 @@ impl App {
         let findings = projection.as_ref().map_or(json!([]), |p| enroll::finding_samples(&self.enroll, &p["rows"]));
         // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
         // started up to a day before the widest window share one decoded set
-        let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
-        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64));
+        let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400, background));
+        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64, background));
         let cli_releases: serde_json::Map<String, Value> = crate::runtimes::clis().map(|(cli, repo)| {
-            let snap = if c.github_token.is_some() && !c.projects.is_empty() { self.cache.get(&format!("cli-release:{cli}"), 180, || source::cli_release(repo, c.github_token.as_deref())) } else { Value::Null };
+            let snap = if c.github_token.is_some() && !c.projects.is_empty() {
+                let token = c.github_token.clone();
+                let read = move || source::cli_release(repo, token.as_deref());
+                let key = format!("cli-release:{cli}");
+                if background { self.cache.refresh(&key, 180, read) } else { self.cache.get(&key, 180, read) }
+            } else { Value::Null };
             (cli.into(), snap)
         }).collect();
         profile::step("enrollment", t0);
@@ -466,7 +492,7 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
             };
-            let doc = app.doc(period, filters, scope);
+            let doc = app.document(period, filters, scope, true);
             if path != "/data" {
                 return ("200 OK", HTML, page::render_view(&doc, &app.cfg.links, path).into_bytes());
             }
@@ -507,6 +533,18 @@ fn serve(t: &Tool, service: bool) -> ! {
         eprintln!("enrollment: {e}");
     }
     let app = Arc::new(App { cfg, cache: source::Cache::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() });
+    // D21: decode the stored stage window once, off the page path; pages read it as unknown until it is done (#260)
+    if let Ok(e) = &app.enroll { e.warm_stages(true); }
+    let warm = app.clone();
+    std::thread::spawn(move || {
+        let now = source::now();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(p) = enroll::projection(&warm.enroll, Some(store::Scope::All), None, now) {
+                enroll::stage_records(&warm.enroll, &p["rows"], now as i64 - 2 * 86400, false);
+            }
+        }));
+        if let Ok(e) = &warm.enroll { e.warm_stages(false); }
+    });
     // the projection pass: committed snapshots become `projected` without waiting for a page view (C1.5, C5 2 s)
     let pass = app.clone();
     std::thread::spawn(move || {
@@ -523,7 +561,7 @@ fn serve(t: &Tool, service: bool) -> ! {
         std::thread::spawn(move || {
             let mut pusher = limits::Pusher::default();
             while let Some(push) = &a.cfg.limits_push {
-                if let Err(e) = pusher.pass(push, &board_snapshots(&a.cfg, &a.cache), source::now()) {
+                if let Err(e) = pusher.pass(push, &board_snapshots(&a.cfg, &a.cache, true), source::now()) {
                     eprintln!("limits push: {e}");
                 }
                 std::thread::sleep(Duration::from_secs(limits::PERIOD));

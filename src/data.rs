@@ -1056,7 +1056,7 @@ fn question(t: &Value) -> Value {
 pub fn all_failed(doc: &Value) -> bool {
     let sources: Vec<&Value> = doc["sources"].as_object().into_iter().flatten()
         .filter(|(name, x)| name.as_str() != "export" && x["reason"] != "not configured").map(|(_, x)| x).collect();
-    !sources.is_empty() && sources.iter().all(|x| x["state"] == "unknown" && x["reason"].as_str().is_some_and(|r| r.contains("read failed")))
+    !sources.is_empty() && sources.iter().all(|x| x["state"] == "unknown" && x["reason"].as_str().is_some_and(|r| r.contains("read failed") && !r.contains("refresh in progress")))
 }
 
 #[cfg(test)]

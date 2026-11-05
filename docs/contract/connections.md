@@ -74,6 +74,7 @@ Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Indepe
 - `observation` comes from producer time: stale after 180 s (`serverq-report/1` after 7200 s); a future time is unknown (`clock uncertain`); none is `no snapshot yet`.
 - `activity` `{state, last_report, age_s, reason}`: `last_report` is the newer of the last durable receipt and a trusted producer time; without either, age counts from the grant. `state` is `revoked` for a revoked connection, else `retired` past 30 days (`no report for <age>; retired from active views, history kept`), `silent` past 3600 s (`no report for <age>`, or `no report since approval <age> ago`), else `reporting`.
 - A retired row stays in `installations` with its grant, snapshot and history; it feeds no hosts, checks, versions, agents or Attention item.
+- The projection runs under the store lock, every 2 s and on every page, so it never reads a stored payload to reach another column: receipt time and sample count come from covering indexes, and a block's size is its byte length.
 
 ## Lifecycle UI
 

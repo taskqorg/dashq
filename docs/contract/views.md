@@ -75,6 +75,8 @@ D4.5 detail.
 D5 detail.
 
 - The server renders the page shell; D13 boards use the pinned TaskQ browser renderer.
+- Browser requests start Langfuse, board, release and TaskQ snapshot reads in one background flight per cached key when the key's cache has expired, and return at once. The last value keeps its time, so D6 freshness decides its state; no value yet is unknown. The public limits push reads boards the same way. Local `dashq report` waits for its reads.
+- After a restart the service decodes the stored D21 stage window in the background. Pages read `agent_work` as unknown with `refresh in progress` until that finishes.
 - `GET /` renders the sections from the same document as `/data`; after a good `/data` fetch the page reloads its sections from `/` with the same query.
 - Target: [shared dashboard rules W4–W6](https://github.com/taskqorg/specq/blob/main/design/dashboards.md) and D10. This mechanism is the baseline, not proof of stable in-place updates.
 
@@ -359,6 +361,8 @@ D19 detail.
 ## Fleet
 
 D26 adds guarded `GET /fleet` and additive `/data.fleet`, also available through `dashq report`. Fixed UTC windows are independent of the model activity period; host filters apply, agent/session filters do not. Project/account/attempt rows keep workspace and installation identity. A partial window reports observed counts, never a complete total. Empty history is unknown. Account labels are producer codes, not inferred identities. CLI comparisons keep heartbeat and release states/times separately.
+
+Browser Fleet reads refresh in one background flight per installation/workspace every 30 s when requested, using a read-only connection to the same D11 database so a scan cannot hold ingestion or page projection. Fleet CLI release reads also refresh in the background, with their existing 180 s cache. Pending and failed reads retain the last data and producer time with an unconfirmed reason; without a value they are unknown. Local `dashq report` waits for its source read.
 
 Fleet reads at most 10,000 relevant rows per installation from the retained seven-day receipt window, keeping the newest received rows; a cut or failed decode is explicit. After a cut, an account whose newest kept turn is not newer than every dropped turn shows its limit as unknown, never an older limit as current. A host with Fleet rows but no TaskQ heartbeat shows both CLI versions as unknown. Producer times select the two display windows; future and untimed records never enter a timed count. An empty window stays unknown without a producer baseline. Task completions are TaskQ `transition` rows to `closed` with a project/task identity; successful starts are `worker` rows with operation `spawn` and outcome `ok`, following the released [TaskQ v4.6.65 schema](../research/247.md). Stable universal observation IDs deduplicate replay within each installation/workspace. Separate grants remain separate coverage streams even when visually grouped under one host. Host codes on observations take precedence over the installation label; missing host codes retain the label fallback provenance.
 

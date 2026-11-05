@@ -39,6 +39,7 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - A Source status summary lists every source that is not `ok`, with its reason; D10 sets its placement. `/data` sections carry `source: {state, at, age_s, reason, incomplete}`; unknown numbers are `null`, never `0`.
 ## D4. Sources
 Each source has its own cache, single flight (one read in progress, callers share it) and a 10 s timeout per HTTP call.
+A browser request never waits for a source read: Fleet, Langfuse, board, release and TaskQ snapshot reads refresh in the background. Pages and `/data` show the last data with its age and D6 state, or unknown until the first read completes.
 ### D4.1 Langfuse API
 - Public API with the project keys, server side only. Model activity is every `GENERATION` observation (a Langfuse type, not an event name), whatever its producer. AgentQ event spans and attributes: [views detail](docs/contract/views.md#langfuse-reads).
 - Periods: 30 min, 2 h, 24 h (1800, 7200, 86400 s; default 1800). Health and incident history always read 24 h.
