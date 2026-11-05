@@ -23,8 +23,8 @@ function exactTime(t) {
 const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
-// D27: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
-const viewMissing = {'/assets': 'AssetQ is not configured: the config has no assetq key, so nothing is read and no action exists. '};
+// D28: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
+const viewMissing = {'/assets': 'AssetQ is not configured: the config has no assetq key, so nothing is read. '};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
@@ -282,7 +282,6 @@ function bind() {
   document.getElementById('refresh')?.addEventListener('click', refresh);
   document.querySelectorAll('.aq-edit').forEach(box => { aqRender(box); aqLoad(box); });
   DashqResources.bind();
-  DashqAssetq.bind();
 }
 // agentq-settings.md G1–G3 (#63): the host plans the draft, review shows its exact diff, apply confirms that plan,
 // results come from the host and its readback. Per installation: CSRF, operations, the reviewed plan, a pending apply ID.

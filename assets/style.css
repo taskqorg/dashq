@@ -376,16 +376,8 @@ body[data-view="/assets"] {max-width:1024px;box-sizing:border-box;padding:20px;b
 #assets .asset-row {display:flex;flex-wrap:wrap;gap:.4em 1.2em;padding:.5em 0;border-bottom:1px solid light-dark(#ccd1d5,#555e66);font-variant-numeric:tabular-nums}
 #assets .asset-row > strong {flex-basis:100%}
 #assets .asset-sub {padding-left:1em}
-#assets .asset-group,#assets .asset-action {margin:.75em 0}
-#assets .asset-action {flex-basis:100%}
+#assets .asset-group {margin:.75em 0}
 #assets summary {cursor:pointer;min-height:24px}
-#assets .asset-gate {border:0;margin:0;padding:0;min-width:0}
-#assets .asset-form {flex-basis:100%;max-width:40em}
-#assets .asset-form label {display:block;margin:.5em 0}
-#assets .asset-form input:not([type=hidden]),#assets .asset-form select,#assets .asset-form textarea {display:block;box-sizing:border-box;width:100%;font:inherit;min-height:32px;margin-top:.2em}
-#assets .asset-form textarea {font-family:ui-monospace,Menlo,Consolas,monospace}
-#assets .asset-form button {font:inherit;min-height:32px}
-#assets .asset-receipt {display:block;margin-top:.3em}
 #assets .asset-receipt:empty {display:none}
 body[data-view="/fleet"] #fleet {display:block}
 #fleet {overflow-wrap:anywhere}

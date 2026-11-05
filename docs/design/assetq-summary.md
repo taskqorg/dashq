@@ -36,14 +36,16 @@ Add this key to `<install>/config.json`, with the service user as the only reade
 
 | File or key | Holds | Source |
 |---|---|---|
-| `access_client_id`, `access_client_secret` | One Cloudflare Access service token for the AssetQ site: its client ID and client secret, one value per file | A new service token, allowed by a Service Auth policy on the `assets.ufobe.com` Access application |
+| `access_client_id`, `access_client_secret` | One Cloudflare Access service token for the AssetQ site: its client ID and client secret, one value per file | A new service token, allowed by a Service Auth policy on the Access application of `base_url` |
 | `read_token`, one per project | One AssetQ `member` Bearer token for that project | `assetq token <project> --role member` |
 | `workspace` | The D11 workspace whose members may see that project | The existing workspace |
-| `base_url` | The AssetQ origin, `https://` with no path | The final origin; the read follows no redirect |
+| `base_url` | The AssetQ origin, `https://` with no path; every read and link derives from it | The origin that answers at provisioning; the read follows no redirect |
 
 The two Access keys come together or not at all; one alone refuses the config. Without them a read of an origin behind Access reads unknown with the reason `redirected to a sign-in`.
 
 AssetQ has no read-only role, so `member` is the smallest grant it offers. DashQ's GET-only read adapter keeps reading from mutating: it has no code path that sends another method to AssetQ. Access decides whether a request reaches AssetQ; the Bearer token decides what AssetQ returns. Neither value reaches the browser, `/data`, logs, URLs or `report` (R7): the headers go to `curl` on stdin.
+
+[assetq#51](https://github.com/taskqorg/assetq/issues/51) moves the service to `https://pipe.ufobe.com`, and Pipe's contract then refuses requests that name `assets.ufobe.com`. When that move happens, change `base_url` and allow the service token on the new origin's Access application; the Bearer tokens stay valid.
 
 Config errors name the bad key, never its value (D2). An unreadable credential file reads `credential unreadable`.
 

@@ -3,7 +3,7 @@ const {chromium}=require('playwright'),fs=require('node:fs'),path=require('node:
 const dir=process.env.DASHQ_FLEET_EVIDENCE;
 const read=f=>fs.readFileSync(f,'utf8');
 const html=read(path.join(dir,'page.html'));
-const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/assetq.js','assets/boards.js','assets/app.js'].map(read).join('\n');
+const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=read('assets/style.css');
 (async()=>{
  const browser=await chromium.launch({headless:true});

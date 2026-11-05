@@ -5,7 +5,7 @@ const html=read(process.env.DASHQ_REPORTS_PAGE||path.join(dir,'page.html'));
 assert(html.includes('id="reports"'),'#221: scoped Reports view missing');
 const doc=JSON.parse(read(path.join(dir,'page.json'))),page2=read(path.join(dir,'page2.html')),empty=read(path.join(dir,'empty.html'));
 const retained=Object.fromEntries(['incomplete','stale','unconfirmed'].map(state=>[state,read(path.join(dir,state+'.html'))]));
-const jsFiles=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/assetq.js','assets/boards.js','assets/app.js'];
+const jsFiles=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'];
 const cssFiles=['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css','assets/taskq/pm-composer.css','assets/workspace.css','assets/taskq/task-workspace.css'];
 const js=jsFiles.map(read).join('\n'),css=cssFiles.map(f=>f.endsWith('/task-workspace.css')?`@scope (#taskq-workspace){${read(f)}}`:read(f)).join('\n');
 const digest=s=>crypto.createHash('sha256').update(s.replace(/\r\n/g,'\n')).digest('hex');
