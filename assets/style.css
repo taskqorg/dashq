@@ -394,4 +394,4 @@ body[data-view="/fleet"] {max-width:1024px;box-sizing:border-box;padding:20px;ba
 #server-table small {display:block}
 #server-table details p {font-weight:normal}
 body[data-view="/hosts"] {box-sizing:border-box;width:100%}
-#server-table .unknown {color:var(--muted)}
+#server-table .unknown:not(.s) {color:var(--muted)}
