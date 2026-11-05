@@ -1,5 +1,6 @@
 // #186 A2-A6: the exact shipped bundles and DashQ adapter; lost replies, local state and navigation.
 const fs=require('node:fs'),assert=require('node:assert/strict'),{chromium}=require('playwright');
+const out=fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'dashq-workspace-'));
 const read=f=>fs.readFileSync(f,'utf8');
 const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/taskq/project-blocks.js','assets/taskq/answer-card.js','assets/taskq/task-controls.js','assets/taskq/task-workspace.js','assets/taskq/pm-composer.js','assets/workspace.js','assets/boards.js','assets/app.js'].map(read).join('\n');
 const css=['assets/style.css','assets/taskq/resource-controls.css','assets/resources.css','assets/taskq/project-blocks.css','assets/taskq/answer-card.css','assets/taskq/pm-composer.css','assets/workspace.css'].map(read).join('\n')+'\n@scope (#taskq-workspace) {'+read('assets/taskq/task-workspace.css')+'}';
@@ -98,8 +99,8 @@ const escape=s=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':
     await page.evaluate(path=>navigateView(path),path);assert.equal(new URL(page.url()).pathname,path);
     assert(await page.evaluate(prior=>prior===taskWorkspace,instance),'navigation keeps the workspace instance');
    }
-   assert.deepEqual(errors,[]);if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.error('overflow',await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth&&e.getBoundingClientRect().width>0).slice(0,15).map(e=>({tag:e.tagName,id:e.id,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right,text:e.textContent.slice(0,100)}))));fs.mkdirSync('/tmp/dashq-186-evidence',{recursive:true});await page.screenshot({path:'/tmp/dashq-186-evidence/overflow.png',fullPage:true});}assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'DashQ horizontal fit');
-   if(process.argv.includes('--capture')&&theme==='light'){fs.mkdirSync('/tmp/dashq-186-evidence',{recursive:true});await page.screenshot({path:'/tmp/dashq-186-evidence/workspace.png',fullPage:true});}
+   assert.deepEqual(errors,[]);if(!await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)){console.error('overflow',await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth&&e.getBoundingClientRect().width>0).slice(0,15).map(e=>({tag:e.tagName,id:e.id,cls:e.className,width:e.getBoundingClientRect().width,right:e.getBoundingClientRect().right,text:e.textContent.slice(0,100)}))));fs.mkdirSync(out,{recursive:true});await page.screenshot({path:require('node:path').join(out,'overflow.png'),fullPage:true});}assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'DashQ horizontal fit');
+   if(process.argv.includes('--capture')&&theme==='light'){fs.mkdirSync(out,{recursive:true});await page.screenshot({path:require('node:path').join(out,'workspace.png'),fullPage:true});}
    await page.close();console.log('PASS DashQ adapter',width,font,theme);
   }
  } finally {await browser.close();}

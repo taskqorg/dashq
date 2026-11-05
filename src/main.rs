@@ -464,7 +464,9 @@ fn handle(app: &App, mut s: TcpStream) {
         }, status)
     };
     // page and API latency (D20): a 5xx is a failure named by its code, a 4xx is the caller's
-    profile::record(op, t0, status.starts_with('5').then(|| status.split(' ').next().unwrap_or("5xx")));
+    let (code, _) = status.split_once(' ').expect("static HTTP status line");
+    let status_code: u16 = code.parse().expect("static HTTP status code");
+    profile::record(op, t0, (500..600).contains(&status_code).then_some(code));
 }
 
 /// Whose installations a page request sees (D11): a request through the public name only its verified subject's
@@ -892,7 +894,12 @@ fn main() {
             let root = std::env::current_dir().unwrap_or_else(|e| t.die(&e.to_string()));
             let u = coreq::service::unit(&t, &root, "dashq");
             let r = if *op == "install" {
-                coreq::update::install_self(&t).and_then(|_| coreq::service::run_all(&u.unload, true)).and_then(|_| coreq::service::write_unit(&u)).and_then(|_| coreq::service::run_all(&u.load, false))
+                std::env::current_exe().and_then(std::fs::read).map_err(|e| e.to_string())
+                    .and_then(|bytes| coreq::update::prepare_install(&t, &bytes))
+                    .and_then(|_| coreq::update::activate_install(&t))
+                    .and_then(|_| coreq::service::run_all(&u.unload, true))
+                    .and_then(|_| coreq::service::write_unit(&u))
+                    .and_then(|_| coreq::service::run_all(&u.load, false))
             } else {
                 coreq::service::run_all(&u.unload, true).and_then(|_| std::fs::remove_file(&u.path).map_err(|e| e.to_string()))
             };

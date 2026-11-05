@@ -14,7 +14,7 @@
     "now": "observation time; a record later than now + 300 s is future_time and never enters totals",
     "cap": "optional records read per query (default 100000); reaching it sets coverage.capped",
     "bucket": "optional seconds; adds buckets[] with each sub-window's own state, calls and outcomes",
-    "sources": "[{installation, runtime, observed: [[from, to]..], dropped, resets: count | [reset unix times], capped, unknown: why the source has no coverage, records: [§3 record | agentq.compress span | agentq.run span | other]}]"
+    "sources": "[{installation, runtime, observed: [[from, to]..], dropped, resets: count | [reset unix times], capped, unknown: why the source has no coverage, records: [§3 record | agentq.compress span | other]}]"
   },
   "producer": {
     "journal": "data/stats/coverage.json {schema: 1, since, resets: [unix], gaps: [[from, to]..], counts: {\"YYYY-MM-DD\": records}}, written by the § 3 core with each record; a save failing before or at its journal write (lock timeout, unreadable store, failed write) leaves its own data/coverage.failed.* marker (outside data/stats, so an unwritable stats folder still leaves it) until a later written journal resets coverage and removes the markers it saw",
@@ -25,7 +25,7 @@
     "exported source": "observed [] and unknown \"exported events carry no coverage\"; a queue folder adds its dropped count"
   },
   "output": {
-    "state": "complete: every source covers the window, nothing excluded, no legacy cohort, not capped; unknown: no coverage and no events; else partial",
+    "state": "complete: every source covers the window, nothing excluded, not capped; unknown: no coverage and no events; else partial",
     "lower_bound": "true when partial: totals are observed counts, never a complete-period rate",
     "calls, outcomes, reasons": "distinct event IDs in the window; null when unknown",
     "volume": "per adapter and engine, compressed calls only: compressed, paired, bytes_in, bytes_out (unit byte; MiB = 2^20 bytes), reduction = 1 - sum(out)/sum(in), excluded {unmeasured, invalid}, estimated_tokens {kind: estimate}",
@@ -235,7 +235,7 @@
         "observed_tokens": {"state": "unknown"}, "task_effect": {"state": "unknown", "reason": "no paired experiment cohort"}}
     },
     {
-      "name": "exported_spans_and_legacy_run",
+      "name": "exported_spans_ignore_retired_run",
       "input": {"window": {"start": 1000, "end": 2000}, "now": 3000, "sources": [{"installation": null, "runtime": null, "observed": [[1000, 2000]], "records": [
         {"traceId": "000000000000000000000000000000a1", "name": "agentq.compress", "startTimeUnixNano": "1500000000000", "attributes": [
           {"key": "agentq.schema", "value": {"intValue": 1}}, {"key": "agentq.event_id", "value": {"stringValue": "000000000000000000000000000000a1"}},
@@ -256,7 +256,7 @@
         ]},
         {"traceId": "000000000000000000000000000000c9", "name": "agentq.resource", "startTimeUnixNano": "1600000000000", "attributes": []}
       ]}]},
-      "expect": {"state": "partial", "calls": 1, "coverage": {"read": 4, "duplicates": 1, "legacy_run": 1, "profile_unknown": 1},
+      "expect": {"state": "complete", "calls": 1, "coverage": {"read": 4, "duplicates": 1, "legacy_run": 0, "profile_unknown": 1},
         "cohorts": [{"installation": "inst-export", "runtime": "windows", "version": "0.6.0", "engine_version": "0.51.0", "profile": null, "calls": 1}]}
     },
     {

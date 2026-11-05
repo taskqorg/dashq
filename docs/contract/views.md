@@ -321,9 +321,9 @@ D17 detail.
 
 - [Optimization results P1–P3](../design/optimization-results.md) refine D8.4 with AgentQ-owned accounting definitions and a separate paired-experiment view. Metadata/privacy and source-failure rules apply.
 - Exported events carry no interval coverage; event-time buckets never invent missing samples.
-- `/data.optimization` consumes `agentq.compress` and identity-matched legacy run observations through `agentq.accounting/1`, pinned with its 29 conformance cases.
+- `/data.optimization` consumes `agentq.compress` through `agentq.accounting/1`; consumer cases retain exported-span, deduplication and coverage protection and reject retired run accounting (D17).
 - Results inherit period/agent/host/session filters; disclosures, focus and selection survive refresh.
-- Only the macOS run adapter is live-qualified ([evidence](../design/evidence/optimization-results-live.md)); other adapters and runtimes remain unqualified.
+- Only the macOS run adapter is live-qualified ([evidence](https://github.com/taskqorg/dashq/blob/bfe39ebfdab6559d0d0922d6e8545c93bf883138/docs/design/evidence/optimization-results-live.md)); other adapters and runtimes remain unqualified.
 
 ## Service versions
 

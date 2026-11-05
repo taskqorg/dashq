@@ -4,10 +4,10 @@ const fs = require('node:fs'), path = require('node:path'), crypto = require('no
 const assert = require('node:assert/strict');
 const {chromium} = require('playwright');
 const root = path.resolve(__dirname, '../..'), capture = process.argv.includes('--capture');
-const out = path.join(__dirname, 'evidence/host-first');
+const out = process.env.DASHQ_HOST_FIRST_SHOTS || fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'dashq-host-first-'));
 const htmlPath = 'docs/design/host-first-preview.html';
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'host-first-fixture.json')));
-const hash = p => crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p))).digest('hex');
+const hash = p => crypto.createHash('sha256').update(fs.readFileSync(path.resolve(root,p))).digest('hex');
 const canonicalHash = p => crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p),'utf8').replace(/\r\n/g,'\n')).digest('hex');
 const manifest = {schema:1,kind:'accepted-design-fixture-evidence',base:'e7d0fe8f7c001a2f641604859a22a0617da8b9e9',hashEncoding:'Source: UTF-8 LF (checkout CRLF normalized); PNG: raw bytes',
   rules:['TaskQ R12/R13, § 7','DashQ D6/D8–D22','specq W1–W15/F1–F7'],
@@ -123,9 +123,9 @@ const shots=[['hosts',1280,'light','hosts-1280-light.png'],['hosts',1280,'dark',
     assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);assert.deepEqual(external,[]);
     manifest.interaction={routesBackReload:'PASS',scopedCounters:'PASS',directQuestion:'PASS',separateFieldTimes:'PASS',unknownRoute:'PASS',consoleErrors:errors,writes,externalRequests:external};
     if(!capture&&fs.existsSync(path.join(out,'manifest.json')))manifest.screens=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'))).screens;
-    for(const s of manifest.screens)s.sha256=hash('docs/design/evidence/host-first/'+s.file);
+    for(const s of manifest.screens)s.sha256=hash(path.join(out,s.file));
     if(capture)fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
-    assert.ok(fs.existsSync(path.join(out,'manifest.json')),'Generated evidence link resolves');
+    if(capture)assert.ok(fs.existsSync(path.join(out,'manifest.json')),'Generated evidence link resolves');
     console.log(JSON.stringify({matrix:manifest.matrix.length,result:'PASS',screens:manifest.screens.length,documentation:manifest.documentation,interaction:manifest.interaction,notTested:manifest.notTested},null,2));
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

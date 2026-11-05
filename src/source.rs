@@ -260,11 +260,10 @@ fn http_date(s: &str) -> Option<u64> {
     iso_secs(&format!("{}-{m:02}-{:0>2}T{}Z", p.get(3)?, p.get(1)?, p.get(4)?))
 }
 
-/// `14:02 UTC`; a time on another day also names the date.
-pub fn clock(t: u64, now: u64) -> String {
-    let (_, m, d, s) = civil(t);
-    let hm = format!("{:02}:{:02} UTC", s / 3600, s / 60 % 60);
-    if t / 86400 == now / 86400 { hm } else { format!("{m:02}-{d:02} {hm}") }
+/// Exact cross-host time (specq Time); display forms are never parsed back.
+pub fn clock(t: u64, _now: u64) -> String {
+    let (y, m, d, s) = civil(t);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC", s / 3600, s / 60 % 60)
 }
 
 // ---- Langfuse (D4.1)
@@ -501,7 +500,9 @@ mod tests {
         assert_eq!(iso_secs("2026-10-13T07:05:39.120Z"), Some(1_791_875_139));
         assert_eq!(iso(1_791_875_139), "2026-10-13T07:05:39Z");
         assert_eq!(http_date("Tue, 13 Oct 2026 07:05:39 GMT"), Some(1_791_875_139));
-        assert_eq!(clock(1_791_875_139, 1_791_875_139), "07:05 UTC");
+        assert_eq!(clock(1_791_875_139, 1_791_875_139), "2026-10-13 07:05 UTC");
+        assert_eq!(clock(iso_secs("2025-12-31T23:59:59Z").unwrap(), 1_791_875_139), "2025-12-31 23:59 UTC");
+        assert_eq!(clock(iso_secs("2026-01-01T00:00:00Z").unwrap(), 1_791_875_139), "2026-01-01 00:00 UTC");
         let r = parse_response("HTTP/1.1 100 Continue\r\n\r\nHTTP/2 200\r\ndate: Tue, 13 Oct 2026 07:05:39 GMT\r\n\r\n{\"a\":1}").unwrap();
         assert_eq!((r.status, r.date, r.body["a"].as_i64()), (200, Some(1_791_875_139), Some(1)));
         assert_eq!(dec("fra%2Fnative").as_deref(), Some("fra/native"));

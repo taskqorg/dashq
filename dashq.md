@@ -16,7 +16,7 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - **R8 Pull by default.** dashq pulls the D4 sources. Hosts push only through the R3 machine routes; any other host push is a later task (#4).
 - **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database.
 ## D2. Process
-- One Rust binary `dashq` on the shared `taskqorg/coreq` crate (release, update, launcher, service). `dashq serve` serves the page (R6).
+- One Rust binary `dashq` on the shared `taskqorg/coreq` crate v0.19.2 (release, update, launcher, service). Installation prepares and activates the release before reloading the service; a refusal leaves the running unit alone. `dashq serve` serves the page (R6).
 - `dashq report [--period=S] [--host=H] [--agent=A] [--session=ID] [--cursor=N] [--block=ID]` prints the `/data` JSON once (D7) for agents on the host without a browser login. `dashq admin WORKSPACE SUBJECT` binds a workspace administrator for enrollment (D11). `dashq limits [--check]` prints the D27 payload, or compares it with the live page.
 - `dashq selftest` loads config, renders the fixture snapshot and reads each source once; no writes. Without any config file it skips the source reads and says so.
 - `dashq service install|uninstall|run` and `dashq update [--check]` are the coreq commands; `service run` is `serve` and marks the release healthy after 60 s. `profile`, `doctor`, `--snapshot`, update, rollback and release: [process detail](docs/contract/process.md).
@@ -35,6 +35,7 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - Source states: `ok` (fresh read), `stale` (read succeeded but data is older than its limit), `unconfirmed` (this read failed; the previous value is shown with its time), `unknown` (no value yet, unsupported schema or not configured), `incomplete` (capped query). Each non-ok state has a one-line reason, for example `Langfuse: read failed (timeout), showing 14:02`.
 - Freshness limits: Langfuse read 600 s; TaskQ heartbeat its `ttl` (300 s default); ServerQ report 7200 s; GitHub read 180 s.
 - Display: green only for `ok` and a healthy value. `stale`, `unconfirmed` and `unknown` are gray or amber with the reason and age, never green. A missing number shows `—` with `unknown: <reason>`, never `0`. Capped counts show `≥N (capped)`.
+- Time follows [specq Time](https://github.com/taskqorg/specq/blob/71fcb39ca9aafa868a57a6f6f5a13845cccec747/caveman/rules/indicators.md#time).
 - Counters that reset with a process restart say so; a reset is not shown as a drop. Historical incidents are deduplicated and never shown as current failures.
 - A Source status summary lists every source that is not `ok`, with its reason; D10 sets its placement. `/data` sections carry `source: {state, at, age_s, reason, incomplete}`; unknown numbers are `null`, never `0`.
 ## D4. Sources
@@ -116,6 +117,7 @@ TaskQ owns the components, renderer, commands and receipts; DashQ pins released 
 ## D14. TaskQ resource controls
 [Resource controls](docs/design/resource-controls.md) reuse TaskQ-owned node/runtime, capacity and Work mode components as a separately authorized typed host-policy capability; it does not extend `/answer` or observation credentials.
 - TaskQ's host authority owns limits, Auto admission and effective readback. No remote shell or second scheduler. A deployment sets `resources` only after the target-host adapter ships and live qualification passes; route and project limits: [views detail](docs/contract/views.md#resource-controls).
+- Resource operations accept `taskq.admission/1` and `taskq.project-limits/1`; retired `taskq.capacity/1` is unsupported.
 ## D15. ServerQ finding handoff
 [Finding tasks H1–H5](docs/design/finding-tasks.md): an explicitly authorized TaskQ create/optional-start adapter and the shared TaskQ composer. Observation credentials and `/answer` gain no authority. Task creation and live qualification remain pending.
 - TaskQ owns board mutation and readback; ServerQ owns incident verification. A closed task alone never removes a problem from Attention. Identity, episodes and catalog: [views detail](docs/contract/views.md#serverq-findings).
@@ -133,6 +135,7 @@ Read-only: no billing source, credential or new authority. Actual expenses are a
 - Every estimate is labelled `API-equivalent estimate`, never spending. An estimate needs the model, all four token counts and a price for every non-zero count; else that call is unknown with its reason. Currencies stay separate subtotals; no FX.
 ## D17. AgentQ optimization results
 - [Optimization results P1–P3](docs/design/optimization-results.md): read-only AgentQ accounting with honest coverage; no configuration authority, optimizer or experiment runner. Empty reads are unknown and observed counts partial; whole-task effect is unknown without a qualified experiment source. Detail: [views detail](docs/contract/views.md#optimization-results).
+- Compression accounting reads `agentq.compress` only; `agentq.run` remains RTK usage evidence, never compression evidence. The schema-2 `coverage.legacy_run` field stays zero. Host identity uses producer machine/kind; no unused legacy host ID is derived from an AgentQ installation.
 ## D23. Waiting work, changes and route
 Read-only, no new authority. One projection serves `/data`, the page and `dashq report`. Detail: [views detail](docs/contract/views.md#waiting-work-changes-and-route).
 - DashQ never infers a stall or another reason; an admission code outside TaskQ's pinned vocabulary reads `unknown`. Changes classify conditions only from producer times and never say "nothing changed"; an unknown route stage is never passed.
