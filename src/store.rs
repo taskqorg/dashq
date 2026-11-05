@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS receipts(installation TEXT NOT NULL, generation INTEG
 CREATE TABLE IF NOT EXISTS snapshots(installation TEXT NOT NULL, workspace TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, schema TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (installation, workspace));
 CREATE TABLE IF NOT EXISTS history(installation TEXT NOT NULL, workspace TEXT NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, clock_uncertain INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS history_by_time ON history(installation, observed);
+CREATE INDEX IF NOT EXISTS history_by_scope ON history(installation, workspace, clock_uncertain);
+CREATE INDEX IF NOT EXISTS receipts_by_time ON receipts(installation, generation, at);
 CREATE TABLE IF NOT EXISTS outbox(id INTEGER PRIMARY KEY, installation TEXT NOT NULL, generation INTEGER NOT NULL, event_id TEXT NOT NULL, observed INTEGER NOT NULL, queued INTEGER NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS export_gaps(installation TEXT NOT NULL, events INTEGER NOT NULL, first_observed INTEGER NOT NULL, last_observed INTEGER NOT NULL, at INTEGER NOT NULL, workspace TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS pairings(device BLOB PRIMARY KEY, user_code TEXT NOT NULL UNIQUE, product TEXT NOT NULL, installation TEXT NOT NULL, runtime TEXT NOT NULL, label TEXT NOT NULL, schemas TEXT NOT NULL, expires INTEGER NOT NULL, interval INTEGER NOT NULL, polled INTEGER NOT NULL, failures INTEGER NOT NULL, state TEXT NOT NULL CHECK (state IN ('pending', 'approved', 'denied', 'invalid', 'acked')), workspace TEXT, generation INTEGER, sealed BLOB);
@@ -471,13 +473,29 @@ fn drop_blocks(tx: &Transaction, ids: &[i64], cause: &str, now: i64) -> Result<(
     Ok(())
 }
 
+/// One row per expected installation and workspace; `?1` is the subject, null for all (D11).
+const PROJECTION: &str = "SELECT i.id, i.product, i.runtime, i.label, g.workspace, g.generation,
+       EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation),
+       EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation),
+       s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation,
+       (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
+       (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
+       (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
+       (SELECT generation FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace),
+       (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace), g.created
+     FROM grants g JOIN installations i ON i.id = g.installation
+     LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
+     WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
+       AND (?1 IS NULL OR EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?1 AND (m.role = 'admin' OR g.account = ?1)))
+     ORDER BY i.label, i.id, g.workspace";
+
 /// Seq ranges listed per installation; the rest are counted.
 const HOLES: usize = 32;
 
 /// What DashQ holds of one installation's telemetry and what it knows is missing (#181 A3).
 fn coverage(c: &Connection, installation: &str, workspace: &str) -> Result<Telemetry, Error> {
     let mut t = Telemetry::default();
-    let mut q = c.prepare_cached("SELECT first_seq, last_seq, rows, length(payload), received, status FROM telemetry WHERE installation = ?1 AND workspace = ?2 ORDER BY id")?;
+    let mut q = c.prepare_cached("SELECT first_seq, last_seq, rows, octet_length(payload), received, status FROM telemetry WHERE installation = ?1 AND workspace = ?2 ORDER BY id")?;
     let mut rows = q.query(params![installation, workspace])?;
     let mut prev: Option<i64> = None;
     while let Some(r) = rows.next()? {
@@ -1086,7 +1104,7 @@ impl Store {
                             // one budget per installation and workspace: a busy host never evicts another's blocks;
                             // the oldest leave first and their loss stays counted
                             let over: Vec<i64> = tx
-                                .prepare("SELECT id FROM (SELECT id, SUM(length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry WHERE installation = ?1 AND workspace = ?2) WHERE total > ?3")?
+                                .prepare("SELECT id FROM (SELECT id, SUM(octet_length(payload)) OVER (ORDER BY id DESC) AS total FROM telemetry WHERE installation = ?1 AND workspace = ?2) WHERE total > ?3")?
                                 .query_map(params![g.installation, g.workspace, l.telemetry_bytes as i64], |r| r.get(0))?
                                 .collect::<Result<_, _>>()?;
                             drop_blocks(tx, &over, "capacity", now)?;
@@ -1206,22 +1224,7 @@ impl Store {
             Scope::Subject(s) => Some(s),
         };
         self.write(|tx| {
-            let mut q = tx.prepare(
-                "SELECT i.id, i.product, i.runtime, i.label, g.workspace, g.generation,
-                   EXISTS (SELECT 1 FROM revocations r WHERE r.installation = g.installation AND r.generation = g.generation),
-                   EXISTS (SELECT 1 FROM activations a WHERE a.installation = g.installation AND a.generation = g.generation),
-                   s.event_id, s.schema, s.observed, s.clock_uncertain, s.payload, s.generation,
-                   (SELECT COUNT(*) FROM history h WHERE h.installation = g.installation AND h.workspace = g.workspace AND NOT h.clock_uncertain),
-                   (SELECT COALESCE(SUM(events), 0) FROM export_gaps x WHERE x.installation = g.installation AND x.workspace = g.workspace),
-                   (SELECT MAX(at) FROM receipts r WHERE r.installation = g.installation AND r.generation = g.generation), g.scopes, g.board, g.capabilities,
-                   (SELECT generation FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace),
-                   (SELECT payload FROM resources x WHERE x.installation = g.installation AND x.workspace = g.workspace), g.created
-                 FROM grants g JOIN installations i ON i.id = g.installation
-                 LEFT JOIN snapshots s ON s.installation = g.installation AND s.workspace = g.workspace
-                 WHERE g.generation = (SELECT MAX(generation) FROM grants x WHERE x.installation = g.installation AND x.workspace = g.workspace)
-                   AND (?1 IS NULL OR EXISTS (SELECT 1 FROM members m WHERE m.workspace = g.workspace AND m.subject = ?1 AND (m.role = 'admin' OR g.account = ?1)))
-                 ORDER BY i.label, i.id, g.workspace",
-            )?;
+            let mut q = tx.prepare(PROJECTION)?;
             let mut rows: Vec<Row> = q
                 .query_map([subject], |r| {
                     let (revoked, active): (bool, bool) = (r.get(6)?, r.get(7)?);
@@ -1634,6 +1637,27 @@ mod tests {
 
     /// #161 A3: stored telemetry blocks stay under the configured byte cap (oldest leave first; a block over the
     /// cap alone is refused) and leave after the configured retention.
+    /// #260 A1. Defect: every projection pass walked the overflow pages of each stored receipt and sample to reach
+    /// one column (1.4 s and 0.4 s under the store lock, every 2 s and on every page). Protection: receipt time and
+    /// sample count come from covering indexes, and a block's size is its bytes, which needs no payload page.
+    #[test]
+    fn projection_reads_times_and_counts_without_payload_pages() {
+        let s = Store::open(&dir("projection-plan").join("dashq.db"), LIMITS).unwrap();
+        let plan = {
+            let c = s.lock().unwrap();
+            let mut q = c.prepare(&format!("EXPLAIN QUERY PLAN {PROJECTION}")).unwrap();
+            let rows = q.query_map([Option::<&str>::None], |r| r.get::<_, String>(3)).unwrap();
+            rows.collect::<Result<Vec<_>, _>>().unwrap().join("\n")
+        };
+        for index in ["receipts_by_time", "history_by_scope"] {
+            assert!(plan.contains(&format!("USING COVERING INDEX {index}")), "{index} is not in the plan:\n{plan}");
+        }
+        let tq = Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac-1" };
+        s.grant(&tq, "w", "a", r#"["taskq-telemetry/1"]"#, b"v1", NOW).unwrap();
+        assert_eq!(s.accept(b"v1", &[tel("wide", "\u{e9}\u{e9}")], NOW).unwrap(), [Outcome::Accepted]);
+        assert_eq!(cover(&s, "tq-1").bytes, 4, "two 2-byte characters are 4 bytes");
+    }
+
     #[test]
     fn telemetry_blocks_stay_bounded() {
         let s = Store::open(&dir("telemetry").join("dashq.db"), Limits { telemetry_bytes: 25, telemetry_secs: 86400, ..LIMITS }).unwrap();
