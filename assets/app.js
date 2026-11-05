@@ -22,8 +22,8 @@ function exactTime(t) {
 // D22 / F7: navigation never remounts controls or discards local drafts.
 const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
-  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry'], '/reports': ['reports']};
-// D28: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
+  '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry', 'global-store'], '/reports': ['reports']};
+// D29: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
 const viewMissing = {'/assets': 'AssetQ is not configured: the config has no assetq key, so nothing is read. '};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';

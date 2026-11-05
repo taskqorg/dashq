@@ -1,4 +1,4 @@
-//! AssetQ summary (dashq.md D28, docs/design/assetq-summary.md). AssetQ owns jobs, methods, comparisons,
+//! AssetQ summary (dashq.md D29, docs/design/assetq-summary.md). AssetQ owns jobs, methods, comparisons,
 //! recommendations and assets. This module reads them, GET only, projects an allowlist of metadata (R1) and renders
 //! one guarded read-only view. No field passes through unless it is named here, and nothing here writes to AssetQ.
 
@@ -32,7 +32,7 @@ pub struct Config {
     pub projects: Vec<Project>,
 }
 
-/// `assetq` config (D28); errors name the bad key, never its value (D2).
+/// `assetq` config (D29); errors name the bad key, never its value (D2).
 pub fn config(v: &Value) -> Result<Option<Config>, String> {
     let Some(a) = v.get("assetq") else { return Ok(None) };
     let base = a["base_url"].as_str().filter(|x| x.starts_with("https://") && !x.contains(['@', '"', '?', '#']) && x.len() > 8 && !x[8..].trim_end_matches('/').contains('/')).ok_or("config: bad key assetq.base_url")?;
@@ -584,7 +584,7 @@ pub(crate) mod tests {
         build("https://assets.example.com", vec![project(&config_fixture(), "https://assets.example.com", &snap, NOW)], NOW)
     }
 
-    /// R1/D28: request text, dataset cases, free-form evidence and receipt fields never reach /data or the page.
+    /// R1/D29: request text, dataset cases, free-form evidence and receipt fields never reach /data or the page.
     #[test]
     fn assetq_projection_drops_content() {
         let d = doc();
@@ -787,7 +787,7 @@ pub(crate) mod tests {
         assert!(html.contains("id=\"view-assets\"") && html.contains("id=\"assets\""));
         let mut section = String::new();
         render(&mut section, &doc_full["assets"]);
-        for write in ["<form", "<button", "<textarea", "<input", "<select"] { assert!(!section.contains(write), "D28: the view has no write control: {write}"); }
+        for write in ["<form", "<button", "<textarea", "<input", "<select"] { assert!(!section.contains(write), "D29: the view has no write control: {write}"); }
         let mut none = doc_full.clone();
         none.as_object_mut().unwrap().remove("assets");
         let unconfigured = crate::page::render_view(&none, &json!({}), "/assets");
@@ -859,7 +859,7 @@ pub(crate) mod tests {
         (Config { base, access: access.then(|| (dir.join("id"), dir.join("secret"))), projects: vec![p.clone()] }, p)
     }
 
-    /// D28/R3/R7: every read carries the Bearer token and the Access service token, and only ever uses GET. Risk: a
+    /// D29/R3/R7: every read carries the Bearer token and the Access service token, and only ever uses GET. Risk: a
     /// read that cannot pass the guard (found on the live origin), or a mutation from a reader.
     #[test]
     fn assetq_reads_carry_both_credentials_and_only_get() {

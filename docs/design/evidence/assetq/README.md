@@ -1,6 +1,6 @@
 # AssetQ summary evidence (#246)
 
-Evidence for [D28](../../../../dashq.md#d28-assetq-summary) and the [design package](../../assetq-summary.md). Each section names what it proves and what it leaves open. All values are public-safe: status codes, states and invented data, with no credential or private path.
+Evidence for [D29](../../../../dashq.md#d29-assetq-summary) and the [design package](../../assetq-summary.md). Each section names what it proves and what it leaves open. All values are public-safe: status codes, states and invented data, with no credential or private path.
 
 The owner withdrew A8 and the four write actions, so A6 needs no AssetQ R9 amendment and no grant rows. A7 stays read-only, and the owner allowed closing on source evidence when A7 needs the merged build on the target; the PM runs the live readback after the release.
 
@@ -8,7 +8,7 @@ The owner withdrew A8 and the four write actions, so A6 needs no AssetQ R9 amend
 
 | Acceptance | Executable evidence | Open |
 |---|---|---|
-| A1 | D28 and the design package precede the code in history. The owner approved the layout and then removed its actions. | None |
+| A1 | D29 and the design package precede the code in history. The owner approved the layout and then removed its actions. | None |
 | A2 | `assetq_reads_carry_both_credentials_and_only_get` reads status, jobs, methods, objects, a comparison and its recommendations from an in-process service over real HTTP. An earlier adapter ran against a real local AssetQ, below. | The deployed service |
 | A3 | Superseded by the owner's decision: DashQ has no write. `assetq_reads_carry_both_credentials_and_only_get` sees only GET, `assetq_page_evidence` finds no write control and `tests/assets-browser.cjs` sees no non-GET request. | None |
 | A4 | `assetq_projection_drops_content`, `assetq_unknowns_stay_explicit`, `assetq_capped_counts_read_at_least`, `assetq_times_use_shared_format`, `assetq_date_only_time_shows_its_date`, `assetq_nested_green_needs_ok_source`, `assetq_failed_jobs_keep_their_reason`, `assetq_read_failures_name_their_reason`, `assetq_view_is_scoped_and_absent_without_config`. | The viewer's own session on the linked pages |
@@ -35,6 +35,7 @@ The following table records the earlier Windows worker readback through the publ
 - `assetq#7` and `assetq#25` are closed. `assetq#51` remains open, but `GET https://pipe.ufobe.com/v1/health` through Access returned 200 with `service: up`, `database: ok`, version `0.1.0`.
 - Pipe's current R9 and `docs/method-evaluation.md` allow DashQ summary metadata and links, with no generation authority. The compatibility `assetq.md` points to `pipe.md`; the PM's token command is now `pipe token <project> --role member`.
 - `GET https://dash.ufobe.com/assets` through Access returned 404. A5 real configured service and A7 remain unverified: this feature needs the merged release and PM-provisioned project Bearer/config files. The worker created no configuration, credential or grant and made no write request.
+- 2026-11-06: `assetq#51` is closed. Without a credential, `GET https://pipe.ufobe.com/v1/health` and `GET https://dash.ufobe.com/assets` each answered 302, so Access still guards both; `https://assets.ufobe.com/v1/health` did not answer within 15 s. These probes do not read AssetQ data or qualify the view.
 - Every adapter URL and browser link derives from `assetq.base_url`. The configured-origin fixture uses an invented host, independent of either production host name.
 
 ## Real local service

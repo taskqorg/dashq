@@ -78,7 +78,10 @@ pub(super) fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
     let schemas: Option<Vec<&str>> = b["schemas"].as_array().filter(|a| (1..=16).contains(&a.len())).and_then(|a| a.iter().map(Value::as_str).collect());
     // a grant only ever covers its own product's schemas (C3 scope isolation)
     let ok_schema = |x: &&str| x.strip_prefix(product).and_then(|x| x.strip_prefix('-')).and_then(|x| x.split_once('/')).is_some_and(|(n, v)| id(n, 32) && !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
-    let Some(schemas) = schemas.filter(|v| PRODUCTS.contains(&product) && v.iter().all(ok_schema)) else { return error("400 Bad Request", "invalid_request") };
+    // D28: every product's shipper may add the shared observation schema; a shipper-only product may name nothing else
+    let shared = |x: &&str| *x == crate::observations::SCHEMA;
+    let allowed = |v: &Vec<&str>| (PRODUCTS.contains(&product) && v.iter().all(|x| shared(x) || ok_schema(x))) || (SHIPPERS.contains(&product) && v.iter().all(shared));
+    let Some(schemas) = schemas.filter(allowed) else { return error("400 Bad Request", "invalid_request") };
     let Ok(board) = board(b) else { return error("400 Bad Request", "invalid_request") };
     let Ok(caps) = capabilities(b, product) else { return error("400 Bad Request", "invalid_request") };
     if !id(s("installation"), 64) || !matches!(s("runtime"), "native" | "wsl") || !id(s("host_label"), 64) {

@@ -1,6 +1,6 @@
 # AssetQ summary
 
-Design package of [D28](../../dashq.md#d28-assetq-summary). AssetQ owns jobs, methods, comparisons, recommendations and assets; this page defines how DashQ reads and shows them. DashQ never writes to AssetQ.
+Design package of [D29](../../dashq.md#d29-assetq-summary). AssetQ owns jobs, methods, comparisons, recommendations and assets; this page defines how DashQ reads and shows them. DashQ never writes to AssetQ.
 
 ## Owner request
 
@@ -8,7 +8,7 @@ Design package of [D28](../../dashq.md#d28-assetq-summary). AssetQ owns jobs, me
 - The owner's decision on that task: "AssetQ R9 stays unchanged; DashQ is read-only for AssetQ, showing source-backed summary metadata and links to https://assets.ufobe.com. Scope change: A8 and the four D27 write actions are withdrawn; remove them and their grants from PR 258 and update D27 in the design first. A6 no longer needs an R9 amendment or assetq-grant rows. Access: use option 1, an Access service token added to the existing Bearer read; the PM provisions the token, config and credential files, so name exact paths and keys needed. A7 stays read-only: selftest and /assets through the real guard show real data with unknown, stale and capped states."
 - The owner's answer on the visual candidate: "Approve this page layout - + dense, current page style, forms stay closed; - long scroll to reach methods".
 
-The decision's D27 is this section. `main` gave that number to the public limits push, so this section is D28; the meaning is unchanged.
+The decision's D27 is this section. `main` gave that number to the public limits push and D28 to the global telemetry store, so this section is D29; the meaning is unchanged.
 
 ## Use cases
 
@@ -45,7 +45,7 @@ The two Access keys come together or not at all; one alone refuses the config. W
 
 AssetQ has no read-only role, so `member` is the smallest grant it offers. DashQ's GET-only read adapter keeps reading from mutating: it has no code path that sends another method to AssetQ. Access decides whether a request reaches AssetQ; the Bearer token decides what AssetQ returns. Neither value reaches the browser, `/data`, logs, URLs or `report` (R7): the headers go to `curl` on stdin.
 
-[assetq#51](https://github.com/taskqorg/assetq/issues/51) moves the service to `https://pipe.ufobe.com`; Pipe's contract refuses requests that name `assets.ufobe.com`. Configure `base_url` for the provisioned origin and allow the service token on that origin's Access application; the Bearer tokens stay valid. No origin is hardcoded in the adapter.
+[assetq#51](https://github.com/taskqorg/assetq/issues/51) moved the service to `https://pipe.ufobe.com`; Pipe's contract refuses requests that name `assets.ufobe.com`. Configure `base_url` for the provisioned origin and allow the service token on that origin's Access application; the Bearer tokens stay valid. No origin is hardcoded in the adapter.
 
 Config errors name the bad key, never its value (D2). An unreadable credential file reads `credential unreadable`.
 

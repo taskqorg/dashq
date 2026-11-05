@@ -1,4 +1,4 @@
-// D28 / R1 / R2 / F3,F7: read-only AssetQ view coverage, layout, links and refresh.
+// D29 / R1 / R2 / F3,F7: read-only AssetQ view coverage, layout, links and refresh.
 const {chromium}=require('playwright'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const dir=process.env.DASHQ_ASSETS_EVIDENCE,shots=process.env.DASHQ_ASSETS_SHOTS;
 const read=f=>fs.readFileSync(f,'utf8');
@@ -33,7 +33,7 @@ const css=read('assets/style.css');
    assert((await updated.innerText()).endsWith(' ago'));
    assert(await updated.getAttribute('title'),'viewer-local exact time is available on hover');
    assert((await page.locator('[data-assets-state]').innerText()).includes('<1m old'));
-   // D28: no write control, and every link opens the AssetQ site, never a machine path.
+   // D29: no write control, and every link opens the AssetQ site, never a machine path.
    assert.equal(await root.locator('form,button,input,select,textarea').count(),0,'the view holds a write control');
    const hrefs=await root.locator('a').evaluateAll(a=>a.map(x=>x.getAttribute('href')));
    assert(hrefs.length>0);

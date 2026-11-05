@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 /// Measured operations (D20): name, p95 budget in ms, error budget as a failure rate.
-pub const OPS: [(&str, u64, f64); 20] = [
+pub const OPS: [(&str, u64, f64); 21] = [
     ("http.page", 3000, 0.01),
     ("http.data", 3000, 0.01),
     ("http.enroll", 500, 0.01),
@@ -28,6 +28,7 @@ pub const OPS: [(&str, u64, f64); 20] = [
     ("read.serverq", 50, 0.01),
     ("read.tasklog", 500, 0.01),
     ("read.assetq", 10000, 0.05),
+    ("read.observations", 3000, 0.05),
     ("push.limits", 10000, 0.05),
     ("update.check", 15000, 0.05),
     ("update", 120000, 0.05),
@@ -226,6 +227,17 @@ pub fn report(text: Option<&str>, now: u64, window: u64) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Defect: `read.observations` was recorded and in the contract but not in OPS, so its budget and unknown row were
+    // missing. Protects D20: the contract's measured operations and OPS name the same set, each named operation with its budget.
+    #[test]
+    fn contract_and_table_name_the_same_operations() {
+        let doc = include_str!("../docs/contract/process.md");
+        let list = doc.split("- Measured operations").nth(1).unwrap().split("- Times include").next().unwrap();
+        let named: std::collections::BTreeSet<&str> = list.split('`').skip(1).step_by(2).collect();
+        let table: std::collections::BTreeSet<&str> = OPS.iter().map(|o| o.0).collect();
+        assert_eq!(named, table);
+    }
 
     // chain: measured operations reach a ranked profile report (D20); missing data stays unknown, never zero
     #[test]

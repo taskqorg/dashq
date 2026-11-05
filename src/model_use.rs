@@ -59,8 +59,26 @@ fn price<'a>(prices: &'a [Value], model: &str, at: u64) -> Option<&'a Value> {
     prices.iter().filter(|p| p["model"] == model && p["effective"].as_str().and_then(day).is_some_and(|d| d <= at)).max_by_key(|p| p["effective"].as_str().and_then(day))
 }
 
+/// One call's estimate (also D28): every token count known and priced, at the price effective on the call's day.
+/// `tokens` holds `(field, rate, count)`.
+pub(crate) fn estimate(table: &[Value], model: Option<&str>, at: u64, tokens: &[(&str, &str, Option<u64>)]) -> Result<(String, f64), String> {
+    let m = model.ok_or("model not reported")?;
+    if table.is_empty() {
+        return Err("no price table configured".to_string());
+    }
+    let p = price(table, m, at).ok_or(format!("no price for {m}"))?;
+    let mut x = 0.0;
+    for (k, rate, n) in tokens {
+        let n = n.ok_or(format!("{k} not reported"))?;
+        if n > 0 {
+            x += n as f64 * p[*rate].as_f64().ok_or(format!("no {rate} price for {m}"))? / 1e6;
+        }
+    }
+    Ok((p["currency"].as_str().unwrap_or("").to_string(), x))
+}
+
 #[derive(Default)]
-struct Sum {
+pub(crate) struct Sum {
     amounts: BTreeMap<String, f64>,
     known: u64,
     of: u64,
@@ -68,7 +86,7 @@ struct Sum {
 }
 
 impl Sum {
-    fn add(&mut self, r: Result<(String, f64), String>) {
+    pub(crate) fn add(&mut self, r: Result<(String, f64), String>) {
         self.of += 1;
         match r {
             Ok((cur, x)) => {
@@ -81,7 +99,7 @@ impl Sum {
         }
     }
     /// Mixed currencies stay separate subtotals; no FX conversion.
-    fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         let amounts: BTreeMap<&String, f64> = self.amounts.iter().map(|(c, a)| (c, (a * 1e6).round() / 1e6)).collect();
         json!({"amounts": (!amounts.is_empty()).then_some(amounts), "known": self.known, "of": self.of, "reasons": self.reasons})
     }
@@ -155,22 +173,7 @@ pub fn build(inp: &Value, agent_work: &Value) -> Value {
             cover.entry(k).or_default().add(v, &why(k));
             tokens.insert(k, v);
         }
-        // the estimate: every token count known and priced, at the price effective on the call's day
-        let est = (|| {
-            let m = model.ok_or("model not reported")?;
-            if table.is_empty() {
-                return Err("no price table configured".to_string());
-            }
-            let p = price(&table, m, at).ok_or(format!("no price for {m}"))?;
-            let mut x = 0.0;
-            for (k, rate) in FIELDS {
-                let n = tokens[k].ok_or(format!("{k} not reported"))?;
-                if n > 0 {
-                    x += n as f64 * p[rate].as_f64().ok_or(format!("no {rate} price for {m}"))? / 1e6;
-                }
-            }
-            Ok((p["currency"].as_str().unwrap_or("").to_string(), x))
-        })();
+        let est = estimate(&table, model, at, &FIELDS.map(|(k, rate)| (k, rate, tokens[k])));
         cover.entry("price").or_default().add(est.is_ok().then_some(1), est.as_ref().err().map_or("", |e| e));
         priced.add(est.clone());
         e.2.add(est);
@@ -230,7 +233,7 @@ pub(crate) fn subtotal(s: &Value) -> String {
     if sums.is_empty() { "—".into() } else { format!("{}{}", if s["known"] == s["of"] { "" } else { "≥" }, sums.join(" + ")) }
 }
 
-fn amounts(s: &Value) -> String {
+pub(crate) fn amounts(s: &Value) -> String {
     let reasons: Vec<&str> = s["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let why = crate::page::esc(&if reasons.is_empty() { "no priced calls read".into() } else { reasons.join("; ") });
     let total = subtotal(s);

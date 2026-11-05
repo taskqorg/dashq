@@ -70,7 +70,7 @@ fn code(v: &Value) -> Option<&str> {
 }
 
 /// Each token split has independent coverage; a missing split never becomes zero.
-fn tokens(rows: &[&Value]) -> Value {
+pub(crate) fn tokens(rows: &[&Value]) -> Value {
     let mut out = json!({});
     for k in TOKENS {
         let mut sum = Some(0u64);

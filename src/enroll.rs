@@ -17,6 +17,8 @@ pub const CLIENT: &str = "x-dashq-client";
 pub const MAX_BODY: usize = coreq::enroll::MAX_BODY;
 const ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const PRODUCTS: [&str; 3] = ["agentq", "serverq", "taskq"];
+/// D28: products that connect only to ship observations.
+const SHIPPERS: [&str; 2] = ["assetq", "pilotq"];
 /// Operation capabilities a device may request for separate approval (D16), with the product that owns each and
 /// the effect the approval page names.
 const CAPABILITIES: [(&str, &str, &str); 1] = [("agentq", "agentq.configure", "change AgentQ client integration settings on this host, one reviewed request at a time")];
@@ -433,7 +435,7 @@ use browser::*;
 use ingestion::*;
 pub use browser::{anchor, form};
 pub use ingestion::{RESOURCES, TELEMETRY};
-pub use projection::{SILENT_SECS, RETIRE_SECS, projection, telemetry_block, stage_records, fleet_records, finding_samples, resource_samples};
+pub use projection::{SILENT_SECS, RETIRE_SECS, projection, telemetry_block, stage_records, fleet_records, finding_samples, resource_samples, observations, export_observations, parity};
 
 #[cfg(test)]
 mod tests;

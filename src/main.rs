@@ -17,6 +17,7 @@ mod export;
 mod findings;
 mod limits;
 mod link;
+mod observations;
 mod optimization;
 mod page;
 mod policy;
@@ -40,7 +41,7 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | export [--window=S] [--to=UNIX] [--format=jsonl|csv] [--product=P] | parity [--window=S] [--to=UNIX] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
@@ -72,7 +73,7 @@ struct Config {
     taskq_logs: Vec<(String, String)>,
     /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
     limits: store::Limits,
-    /// `assetq` names the AssetQ origin and read credential files (D28); absent: no read and no view.
+    /// `assetq` names the AssetQ origin and read credential files (D29); absent: no read and no view.
     assetq: Option<assetq::Config>,
     /// `limits_push`: the public limits page (D27); without its token nothing is pushed.
     limits_push: Option<limits::Config>,
@@ -263,7 +264,7 @@ struct App {
 }
 
 impl App {
-    /// `/data.assets` (D28): only the projects of the actor's workspaces. A browser request never waits for the read (D4).
+    /// `/data.assets` (D29): only the projects of the actor's workspaces. A browser request never waits for the read (D4).
     fn assets(&self, doc: &mut Value, scope: Option<store::Scope>, now: u64, background: bool) {
         let Some(c) = &self.cfg.assetq else { return };
         let member = |ws: &str| match scope {
@@ -359,6 +360,7 @@ impl App {
         // started up to a day before the widest window share one decoded set
         let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400, background));
         let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64, background));
+        let observations = projection.as_ref().map_or(Value::Null, |p| enroll::observations(&self.enroll, &p["rows"], now, period, filters["host"].as_str(), &c.prices, background));
         let cli_releases: serde_json::Map<String, Value> = crate::runtimes::clis().map(|(cli, repo)| {
             let snap = if c.github_token.is_some() && !c.projects.is_empty() {
                 let token = c.github_token.clone();
@@ -373,7 +375,7 @@ impl App {
         let doc = data::build(&json!({
             "now": now, "period": period, "filters": filters, "projects": c.projects, "serverq_host": c.serverq_host,
             "langfuse": lf, "boards": boards, "taskq": taskq, "releases": releases, "serverq": serverq, "enrolled_resources": enrolled,
-            "fleet_records": fleet_records, "cli_releases": cli_releases,
+            "fleet_records": fleet_records, "cli_releases": cli_releases, "observations": observations,
             "installations": projection, "agent_work": agent_work, "agent_telemetry": stages, "serverq_samples": findings, "prices": c.prices,
         }));
         profile::step("build", t0);
@@ -394,6 +396,53 @@ impl App {
 }
 
 /// `dashq report --k=v..` (D2): the period and filters of a `/data` request with the same parameters.
+/// `--window=S` and `--to=UNIX` of a D28 command, the rest as `(key, value)`: `(from, to, rest)`.
+fn window_args<'a>(args: &[&'a str], to: u64, allowed: &[&str]) -> Result<(i64, i64, Vec<(&'a str, &'a str)>), String> {
+    let (mut window, mut to, mut rest) = (86400u64, to, vec![]);
+    for a in args {
+        let (k, v) = a.strip_prefix("--").and_then(|a| a.split_once('=')).ok_or(USAGE)?;
+        match k {
+            "window" => window = v.parse().ok().filter(|w| *w > 0).ok_or(USAGE)?,
+            "to" => to = v.parse().map_err(|_| USAGE)?,
+            _ if allowed.contains(&k) => rest.push((k, v)),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    Ok((to.saturating_sub(window) as i64, to as i64, rest))
+}
+
+/// `dashq export` (D28): on the host, with the 0600 config and key like `dashq report`.
+fn export_command(t: &Tool, args: &[&str]) -> Result<(), String> {
+    let (from, to, rest) = window_args(args, source::now(), &["format", "product"])?;
+    let value = |key: &str| rest.iter().find(|(k, _)| *k == key).map(|(_, v)| *v);
+    let format = value("format").unwrap_or("jsonl");
+    if !["jsonl", "csv"].contains(&format) {
+        return Err(USAGE.into());
+    }
+    let cfg = load_config(&config_path(t))?;
+    let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
+    let e = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    enroll::export_observations(&e, &mut out, format, from, to, value("product"))?;
+    out.flush().map_err(|x| format!("write: {x}"))
+}
+
+/// `dashq parity` (D28): old and new paths per product for one settled window; writes nothing but the report.
+fn parity_command(t: &Tool, args: &[&str]) -> Result<(), String> {
+    let now = source::now();
+    let (from, to, _) = window_args(args, now.saturating_sub(600), &[])?;
+    let cfg = load_config(&config_path(t))?;
+    let dir = config_path(t).parent().map(PathBuf::from).unwrap_or_default();
+    let e = enroll::Enroll::open_with(&dir, &cfg.public_host, cfg.limits);
+    let projected = enroll::projection(&e, Some(store::Scope::All), None, now).ok_or("enrollment is not set up")?;
+    let langfuse = match &cfg.langfuse {
+        None => Err("Langfuse not configured".to_string()),
+        Some((base, auth)) => source::langfuse(base, auth, to as u64, (to - from) as u64).map_err(|x| format!("Langfuse read failed ({})", x.0)).and_then(|(read, _)| observations::langfuse_calls(&read)),
+    };
+    println!("{}", enroll::parity(&e, &projected["rows"], from, to, now as i64, langfuse)?);
+    Ok(())
+}
+
 fn report_query(args: &[&str]) -> Result<(u64, Value), String> {
     let q: Vec<&str> = args.iter().map(|x| x.strip_prefix("--").filter(|x| x.contains('=')).ok_or(USAGE)).collect::<Result<_, _>>()?;
     data::query(&q.join("&"))
@@ -882,6 +931,8 @@ fn main() {
         ["selftest"] => selftest(&t).unwrap_or_else(|e| t.die(&e)),
         ["limits"] => limits_command(&t, false).unwrap_or_else(|e| t.die(&e)),
         ["limits", "--check"] => limits_command(&t, true).unwrap_or_else(|e| t.die(&e)),
+        ["export", rest @ ..] => export_command(&t, rest).unwrap_or_else(|e| t.die(&e)),
+        ["parity", rest @ ..] => parity_command(&t, rest).unwrap_or_else(|e| t.die(&e)),
         ["doctor"] => {
             let lines = doctor_lines(&t);
             for (_, l) in &lines {
@@ -963,7 +1014,7 @@ mod tests {
         assert!(doc["sources"]["assetq"]["reason"].as_str().unwrap().contains("read failed"), "{}", doc["sources"]["assetq"]);
     }
 
-    /// D28/D11/D4: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok; a
+    /// D29/D11/D4: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok; a
     /// browser request gets the last value and never waits for AssetQ; an unconfigured product adds no key, view link
     /// or panel (D10).
     #[test]
@@ -1115,6 +1166,118 @@ mod tests {
     // Chain: stored block -> `/data?block=` and `dashq report --block=` -> one document builder.
     // Risk (#181 A6): the page's caller and the host report reading different blocks, receipts or coverage, or a
     // caller without a subject reading a block by guessing its id.
+    /// The shipper's request with its producer times moved to `at`, the way a live shipper would send it.
+    fn shipped(at: i64) -> Vec<(String, i64, String)> {
+        let wire: Value = serde_json::from_str(include_str!("../fixture/coreq-observation/shipper-wire.json")).unwrap();
+        wire["records"].as_array().unwrap().iter().map(|r| {
+            let mut p = r["payload"].clone();
+            p["observation"]["started_ms"] = json!(at * 1000);
+            p["received_ms"] = json!(at * 1000);
+            (r["event_id"].as_str().unwrap().to_string(), at, p.to_string())
+        }).collect()
+    }
+
+    fn enrolled_app(name: &str, cfg: Config) -> (App, std::path::PathBuf) {
+        let d = std::env::temp_dir().join(format!("dashq-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        enroll::Enroll::admin(&d, "ws", "github|1").unwrap();
+        let e = enroll::Enroll::open(&d, "dash.example.com");
+        (App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }, d)
+    }
+
+    fn accept_shipped(app: &App, installation: &str, product: &str, verifier: &[u8], at: i64) {
+        let s = app.enroll.as_ref().unwrap().store();
+        s.grant(&store::Installation { id: installation, product, runtime: "native", label: "mac" }, "ws", "github|1", r#"["coreq-observation/1","taskq-telemetry/1"]"#, verifier, at).unwrap();
+        let rows = shipped(at);
+        let events: Vec<store::Event> = rows.iter().map(|(id, observed, payload)| store::Event { id, schema: observations::SCHEMA, observed: *observed, kind: store::Kind::Observation, payload }).collect();
+        assert!(s.accept(verifier, &events, at).unwrap().iter().all(|o| *o == store::Outcome::Accepted));
+    }
+
+    // Defect: a reader could keep its own copy or skip scope. Protects D28: pages and reports read one store, in scope.
+    #[test]
+    fn observations_read_back_alike_through_data_report_and_page_in_scope() {
+        let mut cfg = load_config_fixture();
+        cfg.prices = json!([{"model": "claude-invented-1", "source": "https://example.invalid/p", "effective": "2020-01-01", "currency": "USD", "input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75}]);
+        let (app, _d) = enrolled_app("observations", cfg);
+        // no grant names the schema: no key, no source, no panel
+        let empty = app.doc(1800, json!({}), Some(store::Scope::All));
+        assert!(empty.get("observations").is_none() && empty["sources"].get("observations").is_none());
+        assert!(!String::from_utf8(route(&app, "GET", "/telemetry", "", Some(store::Scope::All)).2).unwrap().contains("Global store"));
+        let now = source::now() as i64;
+        accept_shipped(&app, "tq-1", "taskq", b"v1", now - 5);
+        // `dashq report` waits for the read; a page then shares it, since a browser request never waits (D4)
+        let report = app.doc(1800, json!({}), Some(store::Scope::All));
+        let (_, _, body) = route(&app, "GET", "/data", "", Some(store::Scope::All));
+        let data: Value = serde_json::from_slice(&body).unwrap();
+        for doc in [&data, &report] {
+            let o = &doc["observations"];
+            assert_eq!(o["store"]["rows"], 7, "{o}");
+            assert_eq!(o["store"]["retention"], "no fixed retention");
+            assert_eq!(o["records"], 7);
+            assert_eq!(doc["sources"]["observations"]["state"], "ok", "{}", doc["sources"]["observations"]);
+            // agent.call 100/50/25/10 at the table's rates; the turn with the same tokens is never added
+            let usd = (100.0 * 3.0 + 50.0 * 0.3 + 25.0 * 3.75 + 10.0 * 15.0) / 1e6;
+            assert!((o["cost"]["estimate"]["amounts"]["USD"].as_f64().unwrap() - usd).abs() < 1e-5, "{}", o["cost"]);
+            assert_eq!((&o["cost"]["estimate"]["known"], &o["cost"]["estimate"]["of"]), (&json!(1), &json!(1)));
+            assert_eq!(o["totals"]["agent.turn"]["tokens"]["input_tokens"]["observed"], 100);
+            assert_eq!(o["totals"]["agent.call"]["tokens"]["input_tokens"]["observed"], 100);
+            let classes: Vec<&str> = o["errors"]["rows"].as_array().unwrap().iter().filter_map(|r| r["class"].as_str()).collect();
+            assert!(classes.contains(&"failure") && classes.contains(&"unstable"), "{classes:?}");
+            assert_eq!(doc["installations"]["rows"][0]["observations"]["state"], "ok");
+        }
+        let page = String::from_utf8(route(&app, "GET", "/telemetry", "", Some(store::Scope::All)).2).unwrap();
+        assert!(page.contains("Global store") && page.contains("API-equivalent estimate") && page.contains("board.issue.read"), "{}", page.len());
+        // D26 and D21 read the same store
+        let fleet = &report["fleet"]["hosts"].as_array().unwrap().iter().find(|h| h["host"] == "mac").unwrap()["streams"][0];
+        assert_eq!(fleet["projects"][0]["turns"], 1, "{fleet}");
+        let work = &report["agent_work"];
+        assert_eq!((&work["source"]["state"], &work["attempts_total"]), (&json!("ok"), &json!(1)), "{work}");
+        // scope: a request without a subject sees nothing, a host filter narrows the read
+        let scoped = app.doc(1800, json!({}), None);
+        assert!(scoped.get("observations").is_none());
+        let other = app.doc(1800, json!({"host": "no-such-host"}), Some(store::Scope::All));
+        assert_eq!((&other["observations"]["records"], &other["sources"]["observations"]["state"]), (&json!(0), &json!("unknown")));
+        assert_eq!(other["sources"]["observations"]["reason"], "no observations in window");
+    }
+
+    // Defect: a window could be cut without saying so, or parity could read green on no evidence. Protects A5 and A6.
+    #[test]
+    fn export_and_parity_read_the_store_and_state_their_window() {
+        let (app, _d) = enrolled_app("export", load_config_fixture());
+        let now = source::now() as i64;
+        accept_shipped(&app, "tq-1", "taskq", b"v1", now - 100);
+        accept_shipped(&app, "pq-1", "pilotq", b"v2", now - 100);
+        let mut out = Vec::new();
+        enroll::export_observations(&app.enroll, &mut out, "jsonl", now - 200, now, Some("pilotq")).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines[0], json!({"export": "dashq-observations/1", "schema": "coreq-observation/1", "version": 1, "from": now - 200, "to": now, "rows": 7, "format": "jsonl"}));
+        assert_eq!(lines.len(), 8);
+        assert!(lines[1..].iter().all(|l| l["product"] == "pilotq" && l["observation"]["schema"] == 1));
+        let mut out = Vec::new();
+        enroll::export_observations(&app.enroll, &mut out, "csv", now - 50, now, None).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 2, "records outside the window stay out, the header still states it: {text}");
+        assert!(text.starts_with(&format!("# export=dashq-observations/1 schema=coreq-observation/1 version=1 from={} to={now} rows=0\n", now - 50)));
+        // a TaskQ old path holding the same ids, a Langfuse read of the one call and no ServerQ path
+        let rows = enroll::projection(&app.enroll, Some(store::Scope::All), None, now as u64).unwrap();
+        let report = enroll::parity(&app.enroll, &rows["rows"], now - 200, now, now, Ok(2)).unwrap();
+        let product = |p: &str| report["products"].as_array().unwrap().iter().find(|r| r["product"] == p).unwrap().clone();
+        assert_eq!(report["report"], "dashq-parity/1");
+        assert_eq!(report["window"], json!({"from": now - 200, "to": now, "seconds": 200}));
+        assert_eq!(product("taskq")["state"], "unknown", "no old block: {}", product("taskq"));
+        assert_eq!(product("taskq")["new"], 7);
+        assert_eq!((&product("agentq")["state"], &product("agentq")["old"], &product("agentq")["new"]), (&json!("parity"), &json!(2), &json!(2)));
+        assert_eq!(product("serverq")["state"], "unknown");
+        assert_eq!((&report["parity"], &report["langfuse"]["stays"]), (&json!(false), &json!(true)));
+        let refused = enroll::parity(&app.enroll, &rows["rows"], now - 200, now, now, Err("Langfuse not configured".into())).unwrap();
+        assert_eq!(refused["products"][1]["reason"], "Langfuse not configured");
+        assert_eq!(window_args(&["--window=60", "--to=1000"], 5, &[]).unwrap().0, 940);
+        assert!(window_args(&["--window=0"], 5, &[]).is_err());
+        assert!(window_args(&["--format=csv"], 5, &[]).is_err(), "parity takes no format");
+    }
+
     #[test]
     fn telemetry_block_reads_back_alike_through_data_and_report() {
         let d = std::env::temp_dir().join(format!("dashq-block-{}", std::process::id()));
