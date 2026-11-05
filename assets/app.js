@@ -249,7 +249,7 @@ function expireHostObservations(failed = false) {
   document.querySelectorAll('[data-server-valid-for]').forEach(e => {
     e.observedSince ??= performance.now();
     const expired = (performance.now() - e.observedSince) / 1000 > Number(e.dataset.serverValidFor);
-    if ((e.dataset.serverState === 'ok' || e.dataset.serverState === 'unconfirmed') && (failed || expired)) {
+    if (['ok', 'incomplete', 'unconfirmed'].includes(e.dataset.serverState) && (failed || expired)) {
       e.dataset.serverState = expired ? 'stale' : 'unconfirmed';
       if (e.classList.contains('server-trend')) e.textContent = 'unknown: fresh inventory required';
       else {

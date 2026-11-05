@@ -19,6 +19,8 @@ const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/task
    await page.addStyleTag({content:`html{font-size:${size}px}`});
    const table=page.locator('#server-table');assert(await table.isVisible());
    assert.equal(await table.locator('tbody > tr').count(),3);
+   const partial=table.locator('tbody > tr').filter({hasText:'invented-partial/native'}).locator('.server-source').first();
+   assert.equal(await partial.getAttribute('data-server-state'),'incomplete','partial inventory must retain its initial coverage state');
    const text=await table.innerText();for(const s of ['invented-fresh/native','invented-stale/native','invented-partial/native','stale','collection-failed','unknown','estimated disk full'])assert(text.includes(s),s);
    assert.equal(await table.locator('form,button,input').count(),0);
    const contrast=await table.locator('span.unknown').first().evaluate(e=>{
@@ -40,15 +42,25 @@ const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/task
    assert(await detail.locator('summary').evaluate(e=>e===document.activeElement),'refresh lost focus');
    assert.equal(await comparison.evaluate(e=>e.scrollLeft),x,'refresh lost table scroll');
    if(process.env.DASHQ_SERVERS_SHOTS&&width===1280&&size===16&&theme==='light')await table.screenshot({path:path.join(dir,'servers.png')});
+   await partial.evaluate(e=>e.dataset.serverValidFor='1');
+   await page.clock.fastForward(2000);await page.evaluate(()=>expireHostObservations());
+   assert.equal(await partial.getAttribute('data-server-state'),'stale','partial inventory must expire while refresh is deferred');
+   assert((await partial.innerText()).includes('producer reports partial inventory'),'expiry lost the partial collection reason');
+   await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
    offline=true;await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
    assert((await table.innerText()).includes('Unconfirmed inventory'),'failed refresh left fresh status');
+   assert.equal(await partial.getAttribute('data-server-state'),'unconfirmed','failed refresh must also mark partial inventory unconfirmed');
+   assert((await partial.innerText()).includes('producer reports partial inventory'),'outage lost the partial collection reason');
    assert(!(await table.innerText()).includes('estimated disk full'),'outage kept a current-looking forecast');
    assert(await detail.evaluate(e=>e.open));
    offline=false;await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);
    assert((await table.innerText()).includes('estimated disk full'),'recovery did not restore observed estimate');
+   assert.equal(await partial.getAttribute('data-server-state'),'incomplete','recovery must restore partial coverage, never healthy');
    await page.evaluate(()=>{document.querySelectorAll('[data-server-valid-for]').forEach(e=>e.dataset.serverValidFor='1')});
    await page.clock.fastForward(2000);await page.evaluate(()=>expireHostObservations());
    assert((await table.innerText()).includes('Stale inventory'),'time expiry left fresh status');
+   assert.equal(await partial.getAttribute('data-server-state'),'stale','partial inventory must expire while refresh is deferred');
+   assert((await partial.innerText()).includes('producer reports partial inventory'),'expiry lost the partial collection reason');
    assert(!(await table.innerText()).includes('estimated disk full'));
    assert.deepEqual(errors,[]);assert.deepEqual(writes,[]);cells.push({width,theme,size,result:'PASS'});
    await page.close();

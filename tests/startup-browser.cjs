@@ -84,14 +84,14 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
       const ageBefore = await page.$eval('#servers [data-age-s]', e => Number(e.dataset.ageS));
       // D22 / F7: same DOM/card and drafts across tabs and browser history; shared entry retains filters.
       const projection = await page.locator('#boards').getAttribute('data-boards');
-      for (const view of ['tasks', 'host detail', 'agents', 'services', 'checks', 'connections']) {
+      for (const view of ['tasks', 'servers', 'agents', 'services', 'checks', 'connections']) {
         await page.locator('[data-view-link]').filter({hasText: new RegExp('^' + view + '$', 'i')}).evaluate(e => e.click());
-        assert.equal(new URL(page.url()).pathname, '/' + ({tasks:'projects','host detail':'hosts',connections:'integrations'}[view] || view));
-        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + ({tasks:'projects','host detail':'hosts',connections:'integrations'}[view] || view));
+        assert.equal(new URL(page.url()).pathname, '/' + ({tasks:'projects',servers:'hosts',connections:'integrations'}[view] || view));
+        assert.equal(await page.locator('body').getAttribute('data-view'), '/' + ({tasks:'projects',servers:'hosts',connections:'integrations'}[view] || view));
         assert.equal(await page.locator('#boards').getAttribute('data-boards'), projection);
         assert.equal(await page.locator(card + ' textarea').inputValue(), 'Retained draft');
         if (view === 'tasks') assert(await page.locator('#boards').isVisible());
-        if (view === 'host detail') { assert(await page.locator('#servers').isVisible()); assert(!await page.locator('#boards').isVisible()); }
+        if (view === 'servers') { assert(await page.locator('#servers').isVisible()); assert(!await page.locator('#boards').isVisible()); }
       }
       await page.goBack(); assert.equal(new URL(page.url()).pathname, '/checks');
       await page.goForward(); assert.equal(new URL(page.url()).pathname, '/integrations');
@@ -126,7 +126,7 @@ const states = ['first-launch', 'first-failure', 'taskq-only', 'empty-board', 'p
         assert.equal(await page.locator('body').getAttribute('data-view'), '/' + view);
         assert.equal(new URL(page.url()).searchParams.get('session'), 'safe');
         await page.addStyleTag({content: 'html{font-size:' + size + 'px}'});
-        const viewName = {projects:'Tasks',hosts:'Host detail',integrations:'Connections',agents:'Agents',services:'Services',checks:'Checks'}[view];
+        const viewName = {projects:'Tasks',hosts:'Servers',integrations:'Connections',agents:'Agents',services:'Services',checks:'Checks'}[view];
         await page.locator('#more').evaluate(e => e.open = true);
         await page.locator('[data-view-link]').filter({hasText: new RegExp('^' + viewName + '$','i')}).first().evaluate(e => e.focus());
         for (let i = 0; i < 2; i++) { await page.clock.fastForward(60000); await page.waitForFunction(() => !busy); }
