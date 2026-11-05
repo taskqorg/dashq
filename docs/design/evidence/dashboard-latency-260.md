@@ -9,9 +9,9 @@
 |---|---|---|
 | A1 root cause | named | [Root cause](#a1-root-cause) |
 | A2 Fleet never holds the page | verified in tests and live | [A2](#a2-fleet) |
-| A3 ten public tries under 5 s | passed on the installed candidate | [A3](#a3-install-and-probes) |
+| A3 ten public tries under 5 s | passed on the rebased candidate | [Current candidate](#current-candidate-a285098) |
 
-Source of the service for the install receipts below:
+Source of the service for the original install receipts below:
 `b3d7259bac8f3bc6a3fc47c29aa682058771bc09`, a development activation before merge.
 These receipts describe that artifact, not a later rebased candidate.
 
@@ -24,10 +24,9 @@ reader retains valid rows and `known_loss` together (D4, D6, D11). Both existing
 regression checks remain: invalid blocks after restart and browser routes during a
 blocked Fleet read. No protecting assertion or authentication rule changes.
 
-The rebase does not activate another production binary. The A1/A3 receipts below
-remain evidence for the previously accepted artifact; merge-result CI must check
-the rebased candidate. The invalid-block follow-up is now implemented in main,
-but the installed artifact below predates it.
+The conflict-resolution attempt did not activate another production binary. Its
+receipts apply to the original artifact. The subsequent activation below covers
+the rebased runtime, including main's invalid-block fix.
 
 Rebase validation on Windows: `cargo test --locked` passed (160 passed, 2 existing
 live checks ignored); `cargo run -- selftest` passed with no config, skipping live
@@ -35,6 +34,60 @@ source reads. `node scripts/taskq-assets.cjs`, `node tests/resources.cjs` and th
 CI-pinned specq contract lint passed. The lint reports the existing line-headroom
 warning. No production install, public probes or browser chain was repeated for
 this merge-conflict resolution; those live receipts remain tied to their artifact.
+
+## Current candidate a285098
+
+[Machine-readable receipts](dashboard-latency-260-rebased.json) pair the source,
+archive, built and running digests with all ten public probes and profile rows.
+
+- Source: `a285098836adc3d2df5b02eb2c2e01b192a4f508`.
+- The `git archive` transfer matched SHA-256
+  `7de0a1b724b7d809423a087f8eff78212fdcfe84dc116f96f4835e3ad3204f56` at both ends.
+- Built on pds18 as the service user with `cargo build --locked --release`.
+  Built file and running `/proc/PID/exe` matched SHA-256
+  `cb20feb739ed52a48fb1844b4acc3c1612908d254c3248a4faeebb422da2dadd`.
+- Activated at 2026-11-05 12:42:27 UTC using the existing runtime drop-in
+  `90-task260.conf`. The prior binary and drop-in were preserved for rollback.
+  A readback at 12:44:43 UTC confirmed the same digest and an active service.
+- From the macOS worker, 12:43:02–12:43:25 UTC: **10/10 authenticated public
+  `GET /` requests returned HTTP 200 under 5 s**, with a 5 s client limit.
+  Full-response times were 1.192–3.250 s; first-byte times were 0.866–1.935 s.
+  No request was discarded or retried in this acceptance run. Authentication
+  and the proxy configuration were unchanged (R5, R7).
+- `/data` returned in 3.210 s. Cached Fleet streams retained producer ages of
+  173 s and 8622 s with `unconfirmed: refresh in progress`; absent values retained
+  null ages and `unknown` (D4, D6, D11). Two explicit `known_loss` entries were
+  visible; the target restart regression also verified preservation of valid records.
+
+The before profile was re-read from the retained pds18 snapshot: 39273 rows,
+SHA-256 `e6eab569cc70e6f2172043c95ae79aeb9aabd02ba3453378b701496ab90fe88c`.
+It retains both named request maxima. Its 287929 ms page window contains eleven
+completed Fleet reads, including three over 120 s; its 88515 ms data window
+contains four, including the three long serial reads named below. Profile rows
+still have no request ID, so attribution remains by code path and interval (D20).
+
+| Operation | Before p50 / p95 / max ms | During public probes and data read p50 / p95 / max ms | Rows after |
+|---|---:|---:|---:|
+| `http.page` | 5461 / 200501 / 759354 | 539 / 1570 / 1570 | 10 |
+| `http.data` | 9536 / 88078 / 634887 | 1581 / 1581 / 1581 | 1 |
+| `read.fleet` | 29327 / 71494 / 157263 | 23660 / 25821 / 25821 | 7 |
+| `http.enroll` | 524 / 2667 / 27198 | 7 / 595 / 595 | 10 |
+
+The profile also retains startup requests before the acceptance run: six
+`http.page` rows exceeded 5 s, with a maximum of 6165 ms, before loopback readiness
+succeeded. This proves the ten-request acceptance after readiness, not a sub-5 s
+cold-start guarantee. No startup failure is excluded from the attached profile.
+The holder of those startup delays was not attributed in this activation attempt.
+
+Target checks on pds18 passed: `cargo test --locked fleet_` (10 tests),
+`browser_routes_do_not_wait_for_a_hung_source_read`,
+`projection_reads_times_and_counts_without_payload_pages` and
+`revalidate_keeps_the_last_value_unmarked_during_one_read` (one each).
+The installed artifact's `DASHQ_SELFTEST_OFFLINE=1 dashq selftest` passed fixture
+and config validation; live source reads were skipped. Existing protecting
+assertions were unchanged. Only evidence documents changed after this build;
+the Windows full-suite and exact-head GitHub CI results remain applicable to the
+unchanged runtime, tests and dependencies. Merge-result CI remains separate.
 
 ## A1 root cause
 
@@ -61,7 +114,7 @@ third set the floor under every page.
    - `http.data` 88515 ms (1793872543 to 1793872631): three `read.fleet` of 6971,
      35534 and 33545 ms ran back to back from 1793872552 to 1793872628. They account
      for 76 s of the 88.5 s, and the request finished 3 s after the last one.
-   - `http.page` 287929 ms (1793873021 to 1793873309): nine `read.fleet` finished in
+   - `http.page` 287929 ms (1793873021 to 1793873309): eleven `read.fleet` finished in
      the window, three of them 121593 to 134557 ms. A fourth of 133868 ms finished 2 s
      after the request.
    - Limit: a profile row has a completion time and no request ID. This correlation
@@ -171,9 +224,11 @@ Profile since activation against the 0.18.1 table above:
   file, so a reboot also removes it and returns the service to 0.18.1.
 - **Rollback:** remove that drop-in, reload the user units and restart the service.
   The indexes stay and are harmless.
-- **Invalid stored block:** one stream's window contains a block that no longer
-  decodes, so `read.fleet` fails for it. After a restart that stream has no last data
-  and reads unknown until the block ages out. This is filed as a follow-up task.
+- **Invalid stored block:** #262/#264 is included in the current activated candidate.
+  Corrupt blocks retain explicit loss reasons while valid records remain visible;
+  the historical installed artifact above predates that fix.
 - **`read.fleet` still takes about 25 s per stream** in the background while pages are
   being requested. It no longer holds a request.
 - **Merge-result CI** is separate required evidence.
+- **Cold startup:** six page rows exceeded 5 s before readiness on the current
+  activation. The ten public acceptance probes all passed after readiness.
