@@ -2,6 +2,7 @@
 
 mod accounting;
 mod agent_work;
+mod assetq;
 mod fleet;
 mod model_use;
 mod answer;
@@ -72,6 +73,8 @@ struct Config {
     taskq_logs: Vec<(String, String)>,
     /// `telemetry` `{retention_days, max_mib}`: bounds of stored `taskq-telemetry/1` blocks, `max_mib` per installation (D11 #161, #181).
     limits: store::Limits,
+    /// `assetq` names the AssetQ origin and read credential files (D29); absent: no read and no view.
+    assetq: Option<assetq::Config>,
     /// `limits_push`: the public limits page (D27); without its token nothing is pushed.
     limits_push: Option<limits::Config>,
     /// `prices`: the owner's model price table for API-equivalent estimates (D24); `null`: estimates read unknown.
@@ -177,8 +180,10 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     let prices = v.get("prices").map(model_use::prices).transpose()?.unwrap_or(Value::Null);
     let public_host = s("/public_host", &|x| safe_host(x))?.to_ascii_lowercase();
     let limits_push = v.get("limits_push").map(limits::Config::parse).transpose()?;
+    let assetq = assetq::config(&v)?;
     Ok(Config {
         limits_push,
+        assetq,
         limits,
         links,
         langfuse,
@@ -256,6 +261,25 @@ struct App {
     resources: policy::State,
     export: export::Last,
     link: link::Relay,
+}
+
+impl App {
+    /// `/data.assets` (D29): only the projects of the actor's workspaces. A browser request never waits for the read (D4).
+    fn assets(&self, doc: &mut Value, scope: Option<store::Scope>, now: u64, background: bool) {
+        let Some(c) = &self.cfg.assetq else { return };
+        let member = |ws: &str| match scope {
+            Some(store::Scope::All) => true,
+            Some(store::Scope::Subject(s)) => self.enroll.as_ref().ok().and_then(|e| e.store().workspaces(s).ok()).is_some_and(|w| w.iter().any(|(x, _)| x == ws)),
+            None => false,
+        };
+        let rows = c.projects.iter().filter(|p| member(&p.workspace)).map(|p| {
+            let (cfg, project) = (c.clone(), p.clone());
+            let snap = source_read(&self.cache, background, &format!("assetq:{}", p.id), assetq::TTL_S, move || assetq::read(&cfg, &project));
+            assetq::project(p, &c.base, &snap, now)
+        }).collect();
+        doc["assets"] = assetq::build(&c.base, rows, now);
+        doc["sources"]["assetq"] = doc["assets"]["source"].clone();
+    }
 }
 
 impl App {
@@ -362,6 +386,7 @@ impl App {
         }
         // the page offers review/apply only where the route is on (D16)
         doc["controls"] = json!({"agentq_configure": c.agentq_configure});
+        self.assets(&mut doc, scope, now, background);
         // outbox counts span every workspace: host-local readers only (D11)
         if let (Some(store::Scope::All), Ok(e)) = (scope, &self.enroll) {
             doc["sources"]["export"] = export::status(Some(e.store()), &self.export, c.langfuse.is_some() && c.forward, now);
@@ -757,11 +782,16 @@ fn selftest(t: &Tool) -> Result<(), String> {
     if std::env::var_os(t.env("SELFTEST_OFFLINE")).is_some() {
         return Ok(());
     }
-    let doc = App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(1800, json!({}), None);
+    let doc = selftest_read(cfg);
     for (name, s) in doc["sources"].as_object().unwrap() {
         println!("{name}: {} {}", s["state"].as_str().unwrap_or(""), s["reason"].as_str().unwrap_or(""));
     }
     Ok(())
+}
+
+/// One read of each configured source (D2), in the host-local scope, with no store and no actor.
+fn selftest_read(cfg: Config) -> Value {
+    App { cfg, cache: source::Cache::default(), enroll: Err(String::new()), answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }.doc(1800, json!({}), Some(store::Scope::All))
 }
 
 /// The release the coreq launcher rolled back: newer than `running`, never healthy, three starts of `project` (D2).
@@ -970,6 +1000,59 @@ mod tests {
     use super::*;
 
     // chain: `dashq update` switches the running service to the new release (#83)
+    /// D2: selftest reads each source once, AssetQ included. Defect guarded: a selftest that printed an empty AssetQ
+    /// scope and never touched the configured service.
+    #[test]
+    fn selftest_reads_each_assetq_project() {
+        let mut cfg = load_config_fixture();
+        let read = std::env::temp_dir().join(format!("dashq-selftest-read-{}", std::process::id()));
+        std::fs::write(&read, "invented-read-token").unwrap();
+        cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), access: None, projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: read.clone() }] });
+        let doc = selftest_read(cfg);
+        let _ = std::fs::remove_file(&read);
+        assert_eq!(doc["assets"]["projects"].as_array().map(Vec::len), Some(1), "{}", doc["assets"]);
+        assert!(doc["sources"]["assetq"]["reason"].as_str().unwrap().contains("read failed"), "{}", doc["sources"]["assetq"]);
+    }
+
+    /// D29/D11/D4: `/data.assets` follows the actor's workspace; a failed read stays unknown, never empty or ok; a
+    /// browser request gets the last value and never waits for AssetQ; an unconfigured product adds no key, view link
+    /// or panel (D10).
+    #[test]
+    fn assetq_view_is_scoped_and_absent_without_config() {
+        let dir = std::env::temp_dir().join(format!("dashq-assetq-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("read"), "invented-read-token").unwrap();
+        enroll::Enroll::admin(&dir, "invented-workspace", "github|member").unwrap();
+        let e = enroll::Enroll::open(&dir, "dash.example.com");
+        let app_with = |cfg: Config, enroll| App { cfg, cache: Default::default(), enroll, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() };
+        let doc = app_with(load_config_fixture(), Err(String::new())).doc(1800, json!({}), Some(store::Scope::All));
+        assert!(doc.get("assets").is_none() && doc["sources"].get("assetq").is_none());
+        assert!(!page::render_view(&doc, &json!({}), "/").contains("id=\"view-assets\""));
+        let configured = || {
+            let mut cfg = load_config_fixture();
+            cfg.assetq = Some(assetq::Config { base: "http://127.0.0.1:1".into(), access: None, projects: vec![assetq::Project { id: "invented-project".into(), workspace: "invented-workspace".into(), read_token: dir.join("read") }] });
+            cfg
+        };
+        let cold = app_with(configured(), Err(String::new())).document(1800, json!({}), Some(store::Scope::All), true);
+        assert_eq!(cold["assets"]["projects"][0]["source"]["state"], "unknown");
+        assert!(cold["assets"]["projects"][0]["source"]["reason"].as_str().unwrap().contains("refresh in progress"), "{}", cold["assets"]);
+        let app = app_with(configured(), e);
+        let host = app.doc(1800, json!({}), Some(store::Scope::All));
+        assert_eq!(host["assets"]["projects"][0]["source"]["state"], "unknown");
+        assert_eq!(host["sources"]["assetq"]["state"], "unknown");
+        assert!(host["assets"]["projects"][0]["source"]["reason"].as_str().unwrap().contains("read failed"));
+        assert!(!host.to_string().contains("invented-read-token"), "R7");
+        let html = page::render_view(&host, &json!({}), "/assets");
+        assert!(html.contains("id=\"view-assets\"") && html.contains("No AssetQ observation yet"));
+        let mine = app.doc(1800, json!({}), Some(store::Scope::Subject("github|member")));
+        assert_eq!(mine["assets"]["projects"].as_array().unwrap().len(), 1);
+        let foreign = app.doc(1800, json!({}), Some(store::Scope::Subject("github|other")));
+        assert_eq!(foreign["assets"]["projects"], json!([]));
+        assert_eq!(foreign["assets"]["source"]["state"], "unknown");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn update_restarts_only_onto_a_new_release() {
         let new = Ok(Some("0.7.0".to_string()));
@@ -1346,7 +1429,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { assetq: None, limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.

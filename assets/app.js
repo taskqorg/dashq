@@ -20,9 +20,11 @@ function exactTime(t) {
 }
 
 // D22 / F7: navigation never remounts controls or discards local drafts.
-const viewSections = {'/fleet': ['fleet'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
+const viewSections = {'/fleet': ['fleet'], '/assets': ['assets'], '/': ['host-grid', 'attention'], '/projects': ['boards'], '/hosts': ['host-grid', 'servers', 'resources', 'observations'],
   '/agents': ['agentwork', 'agents', 'agenttotals', 'modeluse', 'aqresults'], '/services': ['qversions'], '/checks': ['checks'],
   '/integrations': ['installations', 'integrations'], '/telemetry': ['telemetry', 'global-store'], '/reports': ['reports']};
+// D29: a view with its own reason for being absent names it; refresh swaps the main element, so the text is set here.
+const viewMissing = {'/assets': 'AssetQ is not configured: the config has no assetq key, so nothing is read. '};
 const viewPositions = new Map();
 history.scrollRestoration = 'manual';
 let viewURL = location.href;
@@ -46,6 +48,7 @@ function applyView() {
   const missing = document.getElementById('view-unavailable');
   if (missing) {
     missing.hidden = location.pathname === '/' || viewSections[location.pathname].some(id => document.getElementById(id));
+    missing.firstChild.textContent = viewMissing[location.pathname] ?? 'No observations available for this view. ';
     missing.querySelector('a').href = '/' + location.search;
   }
   applyAttempts();
@@ -194,7 +197,7 @@ async function refresh() {
   } catch (e) {
     const readingY = scrollY;
     expireHostObservations(true);
-    document.querySelectorAll('.attempt-source,.report-source [data-report-state],[data-fleet-state]').forEach(e => {
+    document.querySelectorAll('.attempt-source,.report-source [data-report-state],[data-fleet-state],[data-assets-state]').forEach(e => {
       e.dataset.retained ||= e.textContent;
       e.textContent = 'Unconfirmed after refresh failure. Retained: ' + e.dataset.retained;
     });
@@ -206,6 +209,7 @@ async function refresh() {
       e.dataset.ageS = String(Number(e.dataset.ageS) + elapsed);
       e.textContent = (e.closest('.overview-age,.attempt-select') ? '' : 'Last observation ') + time(Number(e.dataset.ageS)) + ' old · unconfirmed';
     });
+    document.querySelectorAll('#assets .s.ok').forEach(e => { e.textContent += ' · source unconfirmed'; });
     document.querySelectorAll('main .s.ok').forEach(e => {
       e.classList.replace('ok', 'unconfirmed');
       e.title = 'Last-known evidence; current source state unknown';

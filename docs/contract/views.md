@@ -1,6 +1,6 @@
 # Views detail
 
-Linked detail of [dashq.md](../../dashq.md): the `/data` document, the source reads of D4 and the view rules of D5, D8–D10, D13–D15, D17–D19 and D21–D24. The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them.
+Linked detail of [dashq.md](../../dashq.md): the `/data` document, the source reads of D4 and the view rules of D5, D8–D10, D13–D15, D17–D19, D21–D24, D28 and D29. The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them.
 
 ## Data document
 
@@ -144,7 +144,7 @@ D10 detail.
 
 D22 detail.
 
-- Guarded GET page paths: `/projects` (Tasks, every configured project and source coverage), `/hosts` (servers, host/resource detail), `/agents` (activity, work and optimization results), `/services` (versions), `/checks` (ServerQ), `/integrations` (connections and AgentQ profiles), `/telemetry` (per-sender delivery and coverage), `/reports`.
+- Guarded GET page paths: `/projects` (Tasks, every configured project and source coverage), `/hosts` (servers, host/resource detail), `/agents` (activity, work and optimization results), `/services` (versions), `/checks` (ServerQ), `/integrations` (connections and AgentQ profiles), `/telemetry` (per-sender delivery and coverage), `/reports`, `/assets` (D29; offered only with config `assetq`).
 - Existing controls retain their authority and components.
 - The shareable query keeps the D7 defaults and validation; navigation preserves these filters.
 - Local drafts, disclosures, component selection, focus and reading positions stay local to the page session and survive tab changes, history navigation and automatic refresh. Reload or shared entry restores the view and encoded filters, not unsent local drafts.
@@ -387,3 +387,14 @@ Fleet reads at most 10,000 relevant rows per installation from the retained seve
 Limit snapshots validate percent in 0?100 and nonnegative reset timestamps; missing or invalid fields are null with reasons. Account rows retain their turn time; after 300 s the displayed snapshot is stale and current use is unknown. The sender does not certify full-window coverage, so observed window counts remain incomplete rather than complete totals. CLI release reads share the normal single-flight cache for 180 s, with the D4 HTTP timeout; they start only with configured GitHub projects.
 
 Fleet uses a 30 s single-flight cache per installation/workspace, authorized before lookup; failed store reads retain the last good rows as unconfirmed. An undecodable stored block leaves the other blocks readable, including after restart without cached data. Each affected stream lists `known_loss` with the stored `block_id` and reason, and its source is unknown with that reason (R2/D6); observed counts remain visible. Source age uses newest producer observation time, never receipt or page time; after 300 s it is stale. `last_received` separately records transport contact.
+
+## AssetQ
+
+D29 detail; config, use cases and states: [AssetQ summary](../design/assetq-summary.md).
+
+- `/data.assets`, present only with config `assetq`: `source`, `origin`, `projects`. Each project row has `project`, `workspace`, `source`, `revisions`, `jobs`, `method_outcomes`, `providers`, `store`, `integrity`, `backup`, `restore`, `methods`, `comparisons`, `recommendations`, `objects`, `coverage` and `links`. `sources.assetq` is the worst project state.
+- Reads per project, refreshed in the background every 60 s with one single flight: `GET /v1/status`, `/v1/jobs?phase=queued|active|waiting&limit=100`, `/v1/jobs?phase=failed&limit=50`, `/v1/methods?limit=500`, `/v1/comparisons?limit=50` and `/v1/comparisons/{id}` for at most 10 records, `/v1/recommendations` for each use case and constraints those comparisons name (at most 10), `/v1/objects?limit=50`. A further page or skipped record marks that list `incomplete`.
+- Succeeded and cancelled jobs are counts from `/v1/status`; AssetQ owns their rows and result records. Failed jobs also list rows with AssetQ's bounded reason. `coverage` names each list `complete`, `capped` or `unknown`, and the page counts it `N`, `≥N (capped)` or `—` (D6). A method row keeps its registry status, qualification and provider separately; `/v1/status` provider health is shown on its own.
+- Job rows drop `request` except `operation`. Method rows drop `spec` except the named summary fields. Comparison rows drop `plan` and `samples`, keeping identity, versions, `method_metrics`, totals, missing-case reasons, `winner` and `winner_reason`. Recommendation rows keep evidence key names and `observed_at`; `qualification_evidence` keeps its fixed metadata fields and https evidence links.
+- Links open the AssetQ site's published browser paths, each with `?project=P`: `/jobs/{id}`, `/assets/{id}`, `/browser/v1/objects/{id}/content`, `/methods/{id}/versions/{version}`, `/benchmarks/{id}` and `/operations`. The machine `/v1` paths take no browser session, so a link never names one. No credential or signed URL enters the page.
+- Page: `/assets` follows the D22 filter rules; host, agent and session filters do not apply. Each project keeps its own source state and age. Open disclosures survive refresh (D10).

@@ -41,7 +41,7 @@ pub(crate) fn badge(state: &str, label: &str) -> String {
     format!("<span class=\"s {class}\">{}</span>", esc(label))
 }
 
-fn at(v: &Value, now: u64) -> String {
+pub(crate) fn at(v: &Value, now: u64) -> String {
     crate::findings::time(v).map_or("? unavailable".into(), |a| format!("{} ago ({})", dur(now.saturating_sub(a)), clock(a, now)))
 }
 
@@ -63,7 +63,7 @@ fn issue(i: &Value) -> String {
     format!("<a href=\"{}\">#{}</a> {}", esc(i["url"].as_str().unwrap_or("")), text(&i["number"]), text(&i["title"]))
 }
 
-pub const VIEWS: [(&str, &str); 10] = [("/", "Overview"), ("/projects", "Tasks"), ("/fleet", "Fleet"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
+pub const VIEWS: [(&str, &str); 11] = [("/", "Overview"), ("/projects", "Tasks"), ("/fleet", "Fleet"), ("/assets", "Assets"), ("/hosts", "Host detail"), ("/agents", "Agents"), ("/services", "Services"), ("/checks", "Checks"), ("/integrations", "Connections"), ("/telemetry", "Telemetry"), ("/reports", "Reports")];
 
 pub fn render_view(doc: &Value, links: &Value, path: &str) -> String {
     render(doc, links).replacen("<body data-view=\"/\">", &format!("<body data-view=\"{}\">", esc(path)), 1)
@@ -82,7 +82,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let _ = write!(w, "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>dashq</title>\n<link rel=\"stylesheet\" href=\"/style.css\">\n<script src=\"/app.js\" defer></script>\n</head>\n<body data-view=\"/\">\n<header>\n<h1>dashq</h1>\n");
     let nav = VIEWS[..2].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", if *path == "/" { "home" } else { "projects" }, esc(&query))).collect::<Vec<_>>().join(" ");
     let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav} <a id=\"attention-link\" data-view-inherit data-view-link href=\"/{}#attention\">Attention · {action_count}</a></nav>", esc(&query));
-    let more = VIEWS[2..].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", path.trim_start_matches('/'), esc(&query))).collect::<Vec<_>>().join(" ");
+    let more = VIEWS[2..].iter().filter(|(path, _)| *path != "/assets" || doc["assets"].is_object()).map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", path.trim_start_matches('/'), esc(&query))).collect::<Vec<_>>().join(" ");
     let _ = writeln!(w, "<details id=\"more\"><summary>More</summary><div>{more} <a href=\"/connect\">Connect a service</a>");
     if !base.is_empty() { let _ = writeln!(w, "<a href=\"{}\">Langfuse traces</a> <a href=\"{}\">Langfuse dashboards</a>", text(&links["traces"]), text(&links["dashboards"])); }
     let _ = writeln!(w, "</div></details></header><main id=\"main\"><p id=\"view-unavailable\" class=\"note\" hidden>No observations available for this view. <a href=\"/{}\">Return to overview</a>.</p>", esc(&query));
@@ -114,6 +114,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
                 "export" => "Export",
                 "agent_work" => "Agent work",
                 "fleet" => "Fleet",
+                "assetq" => "AssetQ",
                 _ => "serverq",
             };
             format!("<li>{} {name}: {} · {}</li>", badge(s["state"].as_str().unwrap_or("unknown"), s["state"].as_str().unwrap_or("unknown")), esc(s["reason"].as_str().unwrap_or("")), s["age_s"].as_u64().map_or("age unknown".into(), |a| format!("<span data-age-s=\"{a}\">{} old</span>", esc(&dur(a)))))
@@ -129,6 +130,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let first_launch = unconfigured.len() == 3 && !has_rows(&doc["installations"]["rows"]);
     reports(w, doc, &query);
     crate::fleet::render(w, &doc["fleet"]);
+    crate::assetq::render(w, &doc["assets"]);
     if first_launch {
         let _ = writeln!(w, "<section id=\"startup\"><h2>Connect an existing installation</h2><p>Connect TaskQ, AgentQ or ServerQ using its existing service and identity.</p><a id=\"add-service\" href=\"/connect\">＋ Add service</a><p class=\"note\">Approval waits for credential activation, a durable first snapshot and dashboard readback. No observations received yet.</p></section></main></body></html>");
         return h;
