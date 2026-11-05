@@ -101,6 +101,7 @@ pub struct Enroll {
     /// Stage records of each decoded telemetry block by block id (D21 #182): blocks never change.
     stages: Mutex<HashMap<i64, std::sync::Arc<Vec<Value>>>>,
     fleet_cache: crate::source::Cache,
+    fleet_db: std::path::PathBuf,
 }
 
 /// The deployment unit: `dashq.db` and its key `dashq.key` (0600) in the config folder (C4).
@@ -140,6 +141,7 @@ impl Enroll {
             buckets: Mutex::new(HashMap::new()),
             stages: Mutex::new(HashMap::new()),
             fleet_cache: Default::default(),
+            fleet_db: db,
         })
     }
 
@@ -1040,16 +1042,17 @@ pub fn stage_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Va
 
 /// D26: retain only Fleet observation kinds from actor-scoped, unrevoked telemetry.
 /// A bounded read reports truncation; raw rows remain internal and never enter `/data`.
-pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Value {
+pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64, background: bool) -> Value {
     let Ok(e) = e else { return json!([]) };
     json!(rows.as_array().into_iter().flatten().filter(|r| r["product"] == "taskq" && r["connection"] != "revoked" && r["activity"]["state"] != "retired").map(|r| {
         // Authorization precedes cache access; each workspace keeps a separate single-flight last-good read.
         let key=format!("fleet:{}",json!([r["installation"],r["workspace"]]));
-        let snap=e.fleet_cache.get(&key,30,|| {
-            let blocks=e.store.telemetry_since(r["installation"].as_str().unwrap_or(""), r["workspace"].as_str().unwrap_or(""), since, |_| true).map_err(|_|("store unavailable".to_string(),None))?;
+        let (db, row) = (e.fleet_db.clone(), r.clone());
+        let read = move || {
+            let blocks=Store::fleet_blocks(&db, row["installation"].as_str().unwrap_or(""), row["workspace"].as_str().unwrap_or(""), since).map_err(|_|("store unavailable".to_string(),None))?;
             let mut known_loss = vec![];
             let lines = blocks.into_iter().flat_map(|(id, p)| {
-                let block = p.and_then(|p| serde_json::from_str::<Value>(&p).ok()).and_then(|p| telemetry_lines(&p));
+                let block = serde_json::from_str::<Value>(&p).ok().and_then(|p| telemetry_lines(&p));
                 if block.is_none() { known_loss.push(json!({"block_id": id, "reason": format!("stored block {id} invalid")})); }
                 block.map(|(_, l)| l).unwrap_or_default()
             }).filter(|l| matches!(l["observation"]["kind"].as_str(), Some("agent.turn" | "transition" | "worker")));
@@ -1057,9 +1060,10 @@ pub fn fleet_records(e: &Result<Enroll, String>, rows: &Value, since: i64) -> Va
             let mut kept = crate::fleet::keep_newest(lines, 10_000);
             kept["known_loss"] = json!(known_loss);
             let capped = kept["capped"] == true;
-            kept["telemetry"] = r["telemetry"].clone();
+            kept["telemetry"] = row["telemetry"].clone();
             Ok((kept,capped))
-        });
+        };
+        let snap = if background { e.fleet_cache.refresh(&key,30,read) } else { e.fleet_cache.get(&key,30,read) };
         json!({"installation": r["installation"], "workspace": r["workspace"], "host": r["host_label"], "telemetry": snap["value"]["telemetry"], "records": snap["value"]["records"], "known_loss": snap["value"]["known_loss"], "dropped_newest_ms": snap["value"]["dropped_newest_ms"], "error": snap["error"], "capped": snap["incomplete"]})
     }).collect::<Vec<_>>())
 }
@@ -1712,7 +1716,14 @@ mod tests {
             assert_eq!(got[0]["state"],"accepted");
         }
         let p=projection(&e,Some(Scope::Subject("github|1")),None,now).unwrap();
-        let streams=fleet_records(&e,&p["rows"],(now-7*86400) as i64);
+        // The reader must work while the shared ingestion/projection connection is occupied.
+        {
+            let store = e.as_ref().unwrap().store();
+            let _writer = store.lock().unwrap();
+            let blocks = Store::fleet_blocks(&paths(&_d).0, a["installation"].as_str().unwrap(), "ws-1", (now-7*86400) as i64).unwrap();
+            assert_eq!(blocks.len(), 1);
+        }
+        let streams=fleet_records(&e,&p["rows"],(now-7*86400) as i64,false);
         assert_eq!(streams[0]["records"].as_array().unwrap().len(),6,"stage rows excluded; replay stores one block");
         let mut inp=f.clone(); inp["fleet_records"]=streams;
         let doc=crate::data::build(&inp);
@@ -1721,9 +1732,9 @@ mod tests {
         assert!(html.contains("Tokens per project") && html.contains("invented-account") && html.contains("not-reported"));
         assert!(!html.contains(a["credential"].as_str().unwrap()));
         let denied=projection(&e,Some(Scope::Subject("github|other")),None,now).unwrap();
-        assert_eq!(fleet_records(&e,&denied["rows"],0),json!([]));
+        assert_eq!(fleet_records(&e,&denied["rows"],0,false),json!([]));
         let revoked=p["rows"].as_array().unwrap().iter().cloned().map(|mut r|{r["connection"]=json!("revoked");r}).collect::<Vec<_>>();
-        assert_eq!(fleet_records(&e,&json!(revoked),0),json!([]));
+        assert_eq!(fleet_records(&e,&json!(revoked),0,false),json!([]));
         if let Ok(path)=std::env::var("DASHQ_FLEET_EVIDENCE") {
             std::fs::create_dir_all(&path).unwrap();
             std::fs::write(std::path::Path::new(&path).join("page.html"),&html).unwrap();
@@ -1759,7 +1770,7 @@ mod tests {
                 e = Enroll::open(&d, HOST);
             }
             let p = projection(&e, Some(Scope::Subject("github|1")), None, now).unwrap();
-            let streams = fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64);
+            let streams = fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64, false);
             assert_eq!(streams[0]["records"].as_array().map(Vec::len), Some(2), "valid blocks on both sides survive; restarted={restarted}: {streams}");
             assert_eq!(streams[0]["known_loss"], json!([{"block_id": id, "reason": format!("stored block {id} invalid")}]));
             assert!(streams[0]["error"].is_null(), "a decode loss is not a failed store read");
@@ -1776,7 +1787,63 @@ mod tests {
             }
             let html = crate::page::render_view(&doc, &json!({}), "/fleet");
             assert!(html.contains(&format!("stored block {id} invalid")) && html.contains("invented-account"));
-            assert_eq!(fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64), inp["fleet_records"], "cached reads retain known loss");
+            assert_eq!(fleet_records(&e, &p["rows"], (now - 7 * 86400) as i64, false), inp["fleet_records"], "cached reads retain known loss");
+        }
+    }
+
+    /// #260 A2 / D4,D6,D11: every HTML view and /data retains aged Fleet data during a blocked read, within actor scope.
+    #[test]
+    fn fleet_pending_read_keeps_routes_and_scope_available() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let (_d, e) = setup("fleet-pending");
+        let now = crate::source::now();
+        let installation = "invented-fleet";
+        let enrollment = e.as_ref().unwrap();
+        enrollment.store.grant(&store::Installation { id: installation, product: "taskq", runtime: "native", label: "invented-host" }, "ws-1", "github|1", r#"["taskq-telemetry/1"]"#, b"invented-verifier", now as i64).unwrap();
+        let key = format!("fleet:{}", json!([installation, "ws-1"]));
+        let mut records = crate::fleet::tests::fixture()["fleet_records"][0]["records"].clone();
+        for record in records.as_array_mut().unwrap() { record["observation"]["started_ms"] = json!((now-120)*1000); }
+        enrollment.fleet_cache.get(&key, 0, || Ok((json!({"records": records, "telemetry": {"last_synced": now-120}}), false)));
+        let (started, running) = channel();
+        let (release, wait) = channel();
+        enrollment.fleet_cache.refresh(&key, 30, move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+            Err(("store unavailable".into(), None))
+        });
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        let app = app(e, None);
+        let (returned, result) = channel();
+        std::thread::scope(|threads| {
+            let app = &app;
+            threads.spawn(move || {
+                let pages: Vec<_> = crate::page::VIEWS.iter().map(|(path, _)| crate::route(app, "GET", path, "", Some(Scope::Subject("github|1")))).collect();
+                let data = data(app, "", Some(Scope::Subject("github|1")));
+                returned.send((pages, data)).unwrap();
+            });
+            let response = result.recv_timeout(Duration::from_secs(5));
+            release.send(()).unwrap();
+            let (pages, (status, doc)) = response.expect("Fleet held browser routes behind its read");
+            assert!(pages.iter().all(|p| p.0 == "200 OK"));
+            assert_eq!(status, "200 OK");
+            let window = doc["fleet"]["hosts"].as_array().unwrap().iter().flat_map(|h| h["streams"].as_array().unwrap()).next().expect("cached Fleet stream missing");
+            let source = &window["source"];
+            assert_eq!(source["state"], "unconfirmed");
+            assert_eq!(source["reason"], "refresh in progress");
+            assert_eq!(source["at"], now-120);
+            assert!(source["age_s"].as_u64().unwrap() >= 120);
+            assert_eq!(window["accounts"][0]["tokens"]["input_tokens"]["observed"], 100);
+            let fleet = String::from_utf8(pages.iter().find(|p| String::from_utf8_lossy(&p.2).contains("data-view=\"/fleet\"")).unwrap().2.clone()).unwrap();
+            assert!(fleet.contains("source age 120 s") && fleet.contains("refresh in progress"));
+        });
+        let (_, denied) = data(&app, "", Some(Scope::Subject("github|other")));
+        let (_, anonymous) = data(&app, "", None);
+        app.enroll.as_ref().unwrap().store.revoke(installation, now as i64).unwrap();
+        let (_, revoked) = data(&app, "", Some(Scope::Subject("github|1")));
+        for doc in [denied, anonymous, revoked] {
+            assert!(doc["fleet"]["hosts"].as_array().into_iter().flatten().all(|h| h["streams"].as_array().is_none_or(|s| s.is_empty())));
+            assert!(!doc["fleet"].to_string().contains("invented-account"));
         }
     }
 

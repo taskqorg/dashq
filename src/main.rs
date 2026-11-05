@@ -253,6 +253,10 @@ impl App {
     /// Reads every source (cached per D4) and builds the document; `scope` selects the enrolled installations
     /// the actor may see (D11), `None` for none.
     fn doc(&self, period: u64, filters: Value, scope: Option<store::Scope>) -> Value {
+        self.document(period, filters, scope, false)
+    }
+
+    fn document(&self, period: u64, filters: Value, scope: Option<store::Scope>, background: bool) -> Value {
         let c = &self.cfg;
         let now = source::now();
         let span = profile::current();
@@ -313,9 +317,14 @@ impl App {
         // D21 (#182): stage records of the TaskQ telemetry in scope; a fixed two days, so every period and an attempt
         // started up to a day before the widest window share one decoded set
         let stages = projection.as_ref().map_or(json!([]), |p| enroll::stage_records(&self.enroll, &p["rows"], now as i64 - 2 * 86400));
-        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64));
+        let fleet_records = projection.as_ref().map_or(json!([]), |p| enroll::fleet_records(&self.enroll, &p["rows"], now.saturating_sub(7 * 86400) as i64, background));
         let cli_releases: serde_json::Map<String, Value> = crate::runtimes::clis().map(|(cli, repo)| {
-            let snap = if c.github_token.is_some() && !c.projects.is_empty() { self.cache.get(&format!("cli-release:{cli}"), 180, || source::cli_release(repo, c.github_token.as_deref())) } else { Value::Null };
+            let snap = if c.github_token.is_some() && !c.projects.is_empty() {
+                let token = c.github_token.clone();
+                let read = move || source::cli_release(repo, token.as_deref());
+                let key = format!("cli-release:{cli}");
+                if background { self.cache.refresh(&key, 180, read) } else { self.cache.get(&key, 180, read) }
+            } else { Value::Null };
             (cli.into(), snap)
         }).collect();
         profile::step("enrollment", t0);
@@ -466,7 +475,7 @@ fn route(app: &App, method: &str, path: &str, query: &str, scope: Option<store::
             let Ok((period, filters)) = data::query(query) else {
                 return ("400 Bad Request", JSON, br#"{"error":"invalid parameters"}"#.to_vec());
             };
-            let doc = app.doc(period, filters, scope);
+            let doc = app.document(period, filters, scope, true);
             if path != "/data" {
                 return ("200 OK", HTML, page::render_view(&doc, &app.cfg.links, path).into_bytes());
             }

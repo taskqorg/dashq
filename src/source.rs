@@ -20,37 +20,68 @@ pub type Fail = (String, Option<u64>);
 struct Slot {
     snap: Value,
     next: u64,
+    reading: bool,
+}
+
+impl Slot {
+    fn finish(&mut self, at: u64, ttl: u64, result: Result<(Value, bool), Fail>) {
+        self.next = now() + ttl;
+        self.reading = false;
+        match result {
+            Ok((value, incomplete)) => self.snap = json!({"value": value, "at": at, "error": null, "incomplete": incomplete}),
+            Err((reason, retry)) => {
+                if self.snap.is_null() {
+                    self.snap = json!({"value": null, "at": null, "incomplete": false});
+                }
+                self.snap["error"] = json!(reason);
+                if let Some(retry) = retry.filter(|r| *r > now()) { self.next = retry; }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 pub struct Cache(Mutex<HashMap<String, Arc<Mutex<Slot>>>>);
 
 impl Cache {
+    /// One background read per key; pending callers get the last-good snapshot immediately (D4/D6).
+    pub fn refresh(&self, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), Fail> + Send + 'static) -> Value {
+        let slot = self.0.lock().unwrap().entry(key.to_string()).or_default().clone();
+        let mut s = slot.lock().unwrap();
+        if s.reading || (!s.snap.is_null() && now() < s.next) { return s.snap.clone(); }
+        s.reading = true;
+        if s.snap.is_null() {
+            s.snap = json!({"value": null, "at": null, "incomplete": false});
+        }
+        s.snap["error"] = json!("refresh in progress");
+        let (target, key, at) = (slot.clone(), key.to_string(), now());
+        let span = crate::profile::current();
+        if std::thread::Builder::new().spawn(move || {
+            crate::profile::enter(span);
+            let t0 = std::time::Instant::now();
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read))
+                .unwrap_or_else(|_| Err(("read panicked".into(), None)));
+            crate::profile::record(&format!("read.{}", key.split(':').next().unwrap_or(&key)), t0, result.as_ref().err().map(|e| e.0.as_str()));
+            target.lock().unwrap().finish(at, ttl, result);
+        }).is_err() {
+            s.finish(at, ttl, Err(("refresh unavailable".into(), None)));
+        }
+        s.snap.clone()
+    }
+
     pub fn get(&self, key: &str, ttl: u64, read: impl FnOnce() -> Result<(Value, bool), Fail>) -> Value {
         let slot = self.0.lock().unwrap().entry(key.to_string()).or_default().clone();
         // single flight: the slot lock is held during the read, so waiting callers share its result
         let mut s = slot.lock().unwrap();
         let now = now();
-        if !s.snap.is_null() && now < s.next {
+        if s.reading || (!s.snap.is_null() && now < s.next) {
             return s.snap.clone();
         }
         let t0 = std::time::Instant::now();
         let r = read();
         // `langfuse:1800` is `read.langfuse` (D20)
         crate::profile::record(&format!("read.{}", key.split(':').next().unwrap_or(key)), t0, r.as_ref().err().map(|e| e.0.as_str()));
-        match r {
-            Ok((value, incomplete)) => {
-                s.snap = json!({"value": value, "at": now, "error": null, "incomplete": incomplete});
-                s.next = now + ttl;
-            }
-            Err((reason, retry)) => {
-                if s.snap.is_null() {
-                    s.snap = json!({"value": null, "at": null, "error": null, "incomplete": false});
-                }
-                s.snap["error"] = json!(reason);
-                s.next = retry.filter(|r| *r > now).unwrap_or(now + ttl);
-            }
-        }
+        s.finish(now, ttl, r);
         s.snap.clone()
     }
 }
@@ -479,6 +510,73 @@ mod tests {
         assert_eq!((b["value"].as_i64(), b["error"].as_str()), (Some(1), Some("timeout")));
         let fresh = c.get("k2", 60, || Ok((json!(2), false)));
         assert_eq!(c.get("k2", 60, || panic!("cached")), fresh);
+    }
+
+    /// #260 A2 / D4,D6: a blocked refresh must share one read without holding callers or losing the last-good time.
+    #[test]
+    fn fleet_refresh_does_not_hold_callers() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let c = Arc::new(Cache::default());
+        let original = c.get("fleet:test", 0, || Ok((json!({"records": [1]}), true)));
+        let (started, running) = channel();
+        let (release, wait) = channel();
+        let (returned, result) = channel();
+        let worker = c.clone();
+        let request = std::thread::spawn(move || {
+            returned.send(worker.refresh("fleet:test", 30, move || {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+                Err(("store unavailable".into(), None))
+            })).unwrap();
+        });
+        running.recv_timeout(Duration::from_secs(5)).unwrap();
+        let response = result.recv_timeout(Duration::from_secs(1));
+        let (returned, result) = channel();
+        let caller = c.clone();
+        let second = std::thread::spawn(move || {
+            returned.send(caller.refresh("fleet:test", 30, || panic!("duplicate read"))).unwrap();
+        });
+        let shared = result.recv_timeout(Duration::from_secs(1));
+        release.send(()).unwrap();
+        request.join().unwrap();
+        second.join().unwrap();
+        let response = response.expect("Fleet held the caller behind its read");
+        assert_eq!(response["value"], original["value"]);
+        assert_eq!(response["at"], original["at"]);
+        assert_eq!(response["incomplete"], true);
+        assert_eq!(response["error"], "refresh in progress");
+        assert_eq!(shared.expect("Fleet held the second caller"), response);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let failed = c.refresh("fleet:test", 30, || panic!("retry before backoff"));
+            if failed["error"] == "store unavailable" {
+                assert_eq!(failed["value"], original["value"]);
+                assert_eq!(failed["at"], original["at"]);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "refresh never completed");
+            std::thread::yield_now();
+        }
+        let (release, wait) = channel();
+        let cold = c.refresh("fleet:cold", 30, move || {
+            wait.recv().unwrap();
+            Ok((json!(2), false))
+        });
+        assert!(cold["value"].is_null() && cold["at"].is_null());
+        assert_eq!(cold["error"], "refresh in progress");
+        release.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let fresh = c.refresh("fleet:cold", 30, || panic!("duplicate cold read"));
+            if fresh["error"].is_null() {
+                assert_eq!(fresh["value"], 2);
+                assert!(fresh["at"].is_u64());
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "cold refresh never completed");
+            std::thread::yield_now();
+        }
     }
 
     #[cfg(unix)]

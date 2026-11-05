@@ -1178,6 +1178,14 @@ impl Store {
         ids.into_iter().map(|id| Ok((id, if need(id) { Some(q.query_row([id], |r| r.get(0))?) } else { None }))).collect()
     }
 
+    /// Fleet scans the same WAL database without holding the ingestion/projection connection (D11, #260 A2).
+    pub fn fleet_blocks(path: &Path, installation: &str, workspace: &str, since: i64) -> Result<Vec<(i64, String)>, Error> {
+        let c = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Ok(c.prepare_cached("SELECT id, payload FROM telemetry WHERE installation = ?1 AND workspace = ?2 AND received >= ?3 ORDER BY id")?
+            .query_map(params![installation, workspace, since], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?)
+    }
+
     /// The newest current snapshot of an installation in any workspace.
     pub fn snapshot(&self, installation: &str) -> Result<Option<Snapshot>, Error> {
         Ok(self
