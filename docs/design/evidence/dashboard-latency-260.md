@@ -39,9 +39,9 @@ third set the floor under every page.
    - `http.data` 88515 ms (1793872543 to 1793872631): three `read.fleet` of 6971,
      35534 and 33545 ms ran back to back from 1793872552 to 1793872628. They account
      for 76 s of the 88.5 s, and the request finished 3 s after the last one.
-   - `http.page` 287929 ms (1793873021 to 1793873309): ten `read.fleet` finished in
-     the window, four of them 121593 to 134557 ms. The request finished within 6 s of
-     the last long pair.
+   - `http.page` 287929 ms (1793873021 to 1793873309): nine `read.fleet` finished in
+     the window, three of them 121593 to 134557 ms. A fourth of 133868 ms finished 2 s
+     after the request.
    - Limit: a profile row has a completion time and no request ID. This correlation
      is by interval, supported by the code path and the blocked-read reproduction.
 2. **Each projection walked 2.6 GB of old receipts under the store lock.**
@@ -88,15 +88,15 @@ Authentication, grants and configuration are unchanged (R5, R7).
 
 ## Regression checks
 
-Each check failed before its fix and passes after it.
+All pass on the candidate. The second column gives the recorded failure before the fix.
 
 | Check | Failure before | Protects |
 |---|---|---|
 | `fleet_refresh_does_not_hold_callers`, `fleet_pending_read_keeps_routes_and_scope_available` | `Fleet held the caller behind its read: Timeout` | A2: last data, age, single flight, actor scope |
 | `projection_reads_times_and_counts_without_payload_pages` | Plan `SEARCH r USING INDEX sqlite_autoindex_receipts_1`; bytes `2`, expected `4` | The projection reads no payload to reach another column |
 | `browser_routes_do_not_wait_for_a_hung_source_read` | `the source read held the routes: Timeout`, with the background read reverted | A page and `/data` answer during a hung read; a first read is not "all sources failed" |
-| `revalidate_keeps_the_last_value_unmarked_during_one_read` | New method | Last value keeps its time, one read runs, the result replaces it |
-| `taskq_stage_replay_through_ingest`, added case | New case | During the start decode a browser read reads unknown, then returns the same records |
+| `revalidate_keeps_the_last_value_unmarked_during_one_read` | None: new method | Last value keeps its time, one read runs, the result replaces it |
+| `taskq_stage_replay_through_ingest`, added case | None: new case | During the start decode a browser read reads unknown, then returns the same records |
 
 ## A2 Fleet
 
@@ -129,8 +129,8 @@ Public `GET /` with the agent site credentials, from the Windows worker:
 
 The first request after the restart took 4.26 s. The one miss, 9.39 s at 1793879185,
 is outside DashQ: its `http.page` row is 1316 ms, finished at 1793879187. No later try
-reproduced it, and its cause is unknown. A public `/style.css` takes about 1.2 to
-1.9 s, which is the guard and proxy cost of any request. `/data` took 2.9 to 3.3 s.
+reproduced it, and its cause is unknown. A public `/style.css` took 1.2 to
+1.5 s, which is the guard and proxy cost of a small request. `/data` took 2.9 to 3.3 s.
 
 Profile since activation against the 0.18.1 table above:
 
