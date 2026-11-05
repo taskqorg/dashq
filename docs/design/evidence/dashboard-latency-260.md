@@ -11,8 +11,30 @@
 | A2 Fleet never holds the page | verified in tests and live | [A2](#a2-fleet) |
 | A3 ten public tries under 5 s | passed on the installed candidate | [A3](#a3-install-and-probes) |
 
-Source of the running service: `b3d7259bac8f3bc6a3fc47c29aa682058771bc09`, a
-development activation before merge. Later commits on the branch change evidence only.
+Source of the service for the install receipts below:
+`b3d7259bac8f3bc6a3fc47c29aa682058771bc09`, a development activation before merge.
+These receipts describe that artifact, not a later rebased candidate.
+
+## Merge conflict resolution
+
+The main-moved requeue rebases this change onto
+`57d1ece375c7b78372bf49d5a599591e759e84c2`, which includes #262's invalid-block fix.
+The read-only Fleet query now returns block IDs with payloads so the background
+reader retains valid rows and `known_loss` together (D4, D6, D11). Both existing
+regression checks remain: invalid blocks after restart and browser routes during a
+blocked Fleet read. No protecting assertion or authentication rule changes.
+
+The rebase does not activate another production binary. The A1/A3 receipts below
+remain evidence for the previously accepted artifact; merge-result CI must check
+the rebased candidate. The invalid-block follow-up is now implemented in main,
+but the installed artifact below predates it.
+
+Rebase validation on Windows: `cargo test --locked` passed (160 passed, 2 existing
+live checks ignored); `cargo run -- selftest` passed with no config, skipping live
+source reads. `node scripts/taskq-assets.cjs`, `node tests/resources.cjs` and the
+CI-pinned specq contract lint passed. The lint reports the existing line-headroom
+warning. No production install, public probes or browser chain was repeated for
+this merge-conflict resolution; those live receipts remain tied to their artifact.
 
 ## A1 root cause
 
