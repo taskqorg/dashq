@@ -170,6 +170,9 @@
         assert_eq!(receipts(&machine(&e, "/machine/ingest", Some(cred), json!({"protocol": 1, "records": [changed]}), T0 + 120).1)[0].1.as_deref(), Some("replay_mismatch"));
         assert_eq!(refused(&|r| r["payload"]["observation"]["cost_usd"] = json!(1.5), "a1").as_deref(), Some("payload"), "records hold no price");
         assert_eq!(refused(&|r| r["payload"]["observation"]["unit_price"] = json!(1.5), "a2").as_deref(), Some("payload"));
+        // Defect: only top-level keys were read, so a nested price was stored. Protects A3 "records hold no price".
+        assert_eq!(refused(&|r| r["payload"]["observation"]["unknown"] = json!({"unit_price": 1.5}), "a7").as_deref(), Some("payload"));
+        assert_eq!(refused(&|r| r["payload"]["observation"]["detail"] = json!([{"deep": {"Cost": 1.5}}]), "a8").as_deref(), Some("payload"));
         assert_eq!(refused(&|r| r["payload"]["id"] = json!("other"), "a3").as_deref(), Some("payload"));
         assert_eq!(refused(&|r| r["payload"]["observation"]["prompt"] = json!("hello"), "a4").as_deref(), Some("payload"));
         assert_eq!(refused(&|r| r["payload"]["observation"]["schema"] = json!(2), "a5").as_deref(), Some("payload"));

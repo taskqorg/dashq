@@ -276,16 +276,28 @@ pub(super) fn telemetry_envelope(p: &Value) -> bool {
     !(p["schema"] != 1 || !status || o.keys().any(|k| !["schema", "first", "last", "rows", "bytes", "gzip", "status"].contains(&k.as_str())) || first.0 > last.0 || rows == 0 || bytes > TELEMETRY_BYTES)
 }
 
+/// A key naming a price or cost, at any depth: records hold quantities, never prices (D28).
+fn priced(v: &Value) -> bool {
+    match v {
+        Value::Object(o) => o.iter().any(|(k, x)| {
+            let k = k.to_ascii_lowercase();
+            k.contains("price") || k.contains("cost") || priced(x)
+        }),
+        Value::Array(a) => a.iter().any(priced),
+        _ => false,
+    }
+}
+
 /// A `coreq-observation/1` payload (D28) `{seq, id, received_ms, observation}`: the shipper's shared record, metadata
 /// by the same allowlist as a telemetry line, and quantities only, never a price.
 pub(super) fn observation(p: &Value, event: &str) -> bool {
     let Some(o) = p.as_object() else { return false };
     let r = &p["observation"];
-    let priced = |k: &String| { let k = k.to_ascii_lowercase(); k.contains("price") || k.contains("cost") };
     let code = |k: &str| r[k].as_str().is_some_and(|s| !s.is_empty());
     o.len() == 4 && p["seq"].is_u64() && p["received_ms"].is_u64() && p["id"] == event && r["schema"] == 1
         && ["kind", "operation", "outcome", "error"].iter().all(|k| code(k))
-        && r.as_object().is_some_and(|r| !r.keys().any(priced))
+        && r.is_object()
+        && !priced(r)
         && metadata_keys(p, 0, counter_field)
 }
 

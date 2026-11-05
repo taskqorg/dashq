@@ -314,6 +314,7 @@ D28 detail. `/data.observations` and `sources.observations` exist only when a ro
   - `attempts` lists at most 200 newest attempts with a stage record in the window and no terminal record, by the D21 rule, with `reason` `no terminal record` or `open-stage`. Stage records of the two days before the window count as evidence, so an attempt that ended earlier is not listed.
   - `refused` is the count of refused records, never a row.
 - Each of `operations`, `work`, `board_calls`, `stages`, `queue_waits` and `pipelines` is `{state, reason, rows}`, `unknown` with its reason when no record answers it. They answer the specq telemetry questions: calls, duration and outcome per operation; tokens, time and outcome per project, task, attempt and actor; `board.*` calls per product, host and task; time per stage; wait per queue state; pipelines by method, units, time, retries and outcome.
+- Every row of these answers except `work` and `queue_waits` holds one record kind. A `work` row has `turns`, `calls` and `stages`, each `{records, tokens, duration_us, outcomes, units}` of that kind only: `agent.turn` and `agent.call` describe the same tokens and time, so no field adds them.
 - `product` is the record's own `product`, else the grant's. The Telemetry view states the volume, errors, cost and the top operations.
 - D21 and D26 add the same records to their block reads. D26's window deduplicates by observation ID and D21 by stage key, so one record on both paths counts once.
 

@@ -43,7 +43,8 @@ impl Line {
     }
 }
 
-/// Calls, duration and outcome of a group; a missing duration stays unknown, never zero.
+/// Calls, duration and outcome of a group of one record kind ([`grouped`], the `work` rows), since `agent.turn` and
+/// `agent.call` describe the same tokens and time; a missing duration stays unknown, never zero.
 #[derive(Default)]
 struct Tally {
     calls: u64,
@@ -87,7 +88,8 @@ fn answer(mut rows: Vec<Value>, why: &str) -> Value {
 fn grouped<'a>(lines: impl Iterator<Item = &'a Line>, key: impl Fn(&Line) -> Value) -> BTreeMap<String, (Value, Tally)> {
     let mut groups: BTreeMap<String, (Value, Tally)> = BTreeMap::new();
     for l in lines {
-        let k = key(l);
+        let mut k = key(l);
+        k["kind"] = l.o()["kind"].clone();
         groups.entry(k.to_string()).or_insert_with(|| (k, Tally::default())).1.add(l);
     }
     groups
@@ -196,26 +198,27 @@ fn totals(lines: &[Line]) -> Value {
 /// `/data.observations` without its `source` and `store`: one read of the window's records. `earlier`: see [`errors`].
 pub fn query(lines: &[Line], earlier: &[Line], prices: &[Value], from: i64, to: i64) -> Value {
     let kind = |k: &'static str| lines.iter().filter(move |l| l.o()["kind"] == k);
-    let operations = grouped(lines.iter(), |l| json!({"product": l.product(), "operation": l.o()["operation"], "kind": l.o()["kind"]}));
+    let operations = grouped(lines.iter(), |l| json!({"product": l.product(), "operation": l.o()["operation"]}));
     let work = lines.iter().filter(|l| !l.o()["task"].is_null() && matches!(l.o()["kind"].as_str(), Some("agent.turn" | "agent.call" | "stage")));
-    let mut who: BTreeMap<String, (Value, Tally, Vec<&Value>, Vec<&Value>)> = BTreeMap::new();
+    // `agent.turn`, `agent.call` and `stage` each keep their own tally and tokens: no field of a row adds them
+    let mut who: BTreeMap<String, (Value, BTreeMap<&str, (Tally, Vec<&Value>)>)> = BTreeMap::new();
     for l in work {
         let o = l.o();
         let k = json!({"project": o["project"], "task": o["task"], "attempt": o["attempt"], "actor": o["actor"], "product": l.product()});
-        let e = who.entry(k.to_string()).or_insert_with(|| (k, Tally::default(), vec![], vec![]));
-        e.1.add(l);
-        match o["kind"].as_str() {
-            Some("agent.turn") => e.2.push(o),
-            Some("agent.call") => e.3.push(o),
-            _ => {}
-        }
+        let e = who.entry(k.to_string()).or_insert_with(|| (k, BTreeMap::new())).1.entry(o["kind"].as_str().unwrap_or("")).or_default();
+        e.0.add(l);
+        e.1.push(o);
     }
     let work: Vec<Value> = who
         .into_values()
-        .map(|(k, tally, turns, calls)| {
-            let mut r = row((k, tally));
-            r["turns"] = json!({"records": turns.len(), "tokens": crate::fleet::tokens(&turns)});
-            r["calls"] = json!({"records": calls.len(), "tokens": crate::fleet::tokens(&calls)});
+        .map(|(mut r, kinds)| {
+            r["last_at"] = json!(kinds.values().map(|(t, _)| t.last).max());
+            for (field, kind) in [("turns", "agent.turn"), ("calls", "agent.call"), ("stages", "stage")] {
+                let (tally, records) = kinds.get(kind).map_or((Tally::default().json(), &[][..]), |(t, o)| (t.json(), &o[..]));
+                r[field] = tally;
+                r[field]["records"] = json!(records.len());
+                r[field]["tokens"] = crate::fleet::tokens(records);
+            }
             r
         })
         .collect();
@@ -401,6 +404,35 @@ mod tests {
         credits["unit_kind"] = json!("credits");
         let c = query(&[line("i", "taskq", credits)], &[], &prices(1.0), AT - 10, AT + 10);
         assert!(c["cost"]["estimate"]["reasons"].to_string().contains("provider credits are not priced"));
+    }
+
+    // Defect: `agent.turn` and `agent.call` describe the same tokens and time, so one row adding them read 370 tokens for
+    // 185 (review of attempt 6663625241). Protects A3 in every group, including one operation name used by both kinds.
+    #[test]
+    fn turn_and_call_units_and_time_are_never_added_in_any_group() {
+        let same = |kind: &str| {
+            let mut o = base(kind, "agent.run", "ok", "none", AT);
+            o["units"] = json!(185);
+            o["unit_kind"] = json!("tokens");
+            o["pipeline"] = json!("p1");
+            o["input_tokens"] = json!(185);
+            o
+        };
+        let lines = [line("i", "taskq", same("agent.turn")), line("i", "taskq", same("agent.call")), line("i", "taskq", base("stage", "build", "ok", "none", AT))];
+        let q = query(&lines, &[], &[], AT - 10, AT + 10);
+        assert_eq!(q["work"]["total"], 1, "one project, task, attempt and actor");
+        let who = &q["work"]["rows"][0];
+        for k in ["turns", "calls"] {
+            assert_eq!((&who[k]["records"], &who[k]["units"]["tokens"], &who[k]["duration_us"]["sum"], &who[k]["tokens"]["input_tokens"]["observed"]), (&json!(1), &json!(185), &json!(2000), &json!(185)), "{k}: {who}");
+        }
+        assert_eq!((&who["stages"]["records"], &who["stages"]["duration_us"]["sum"]), (&json!(1), &json!(2000)));
+        assert!(who.get("units").is_none() && who.get("duration_us").is_none() && who.get("outcomes").is_none(), "no field adds the kinds: {who}");
+        assert_eq!(who["last_at"], AT);
+        for group in ["operations", "pipelines"] {
+            let rows: Vec<&Value> = q[group]["rows"].as_array().unwrap().iter().filter(|r| r["units"]["tokens"].is_number()).collect();
+            assert_eq!(rows.len(), 2, "{group}: {}", q[group]);
+            assert!(rows.iter().all(|r| r["units"]["tokens"] == 185 && r["duration_us"]["sum"] == 2000), "{group}: {rows:?}");
+        }
     }
 
     // Defect: a failure could hide in a separate detector, or `refused` read as failure. Protects the one errors query.

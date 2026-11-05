@@ -428,6 +428,11 @@ fn observation_bytes(c: &Connection) -> Result<u64, Error> {
     Ok(c.query_row("SELECT COALESCE(SUM(bytes), 0) FROM observation_volume", [], |r| r.get::<_, i64>(0))? as u64)
 }
 
+/// The store size the C5 ceiling compares: everything except the observations it does not count (D28).
+pub(crate) fn used_by_others(c: &Connection, path: &Path) -> Result<u64, Error> {
+    Ok(used(c, path)?.saturating_sub(observation_bytes(c)?))
+}
+
 /// SQLite's own page limit for this connection: the C5 ceiling plus the observation volume it does not count.
 fn page_ceiling(c: &Connection, bytes: u64) -> Result<(), Error> {
     let page: i64 = c.query_row("PRAGMA page_size", [], |r| r.get(0))?;
@@ -831,7 +836,7 @@ impl Store {
             if pending >= MAX_OPERATIONS as i64 || unresolved >= MAX_UNRESOLVED || (apply && applying > 0) {
                 return Ok(Queued::Refused("busy"));
             }
-            if used(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes {
+            if used_by_others(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes {
                 return Ok(Queued::Refused("store_full"));
             }
             tx.execute(
@@ -1108,7 +1113,7 @@ impl Store {
             let scopes: Vec<String> = serde_json::from_str(&g.scopes).unwrap_or_default();
             // D28: observations are outside the ceiling, so they neither fill it for other kinds nor meet it themselves
             let volume = observation_bytes(tx)?;
-            let full = used(tx, &Self::path(tx))?.saturating_sub(volume) + l.reserve_bytes >= l.store_bytes;
+            let full = used_by_others(tx, &Self::path(tx))? + l.reserve_bytes >= l.store_bytes;
             let batch: u64 = events.iter().filter(|e| e.kind == Kind::Observation).map(|e| e.payload.len() as u64 + OBSERVATION_ROW_BYTES).sum();
             if batch > 0 {
                 page_ceiling(tx, l.store_bytes.saturating_add(volume).saturating_add(batch))?;
@@ -2006,6 +2011,17 @@ mod tests {
             s
         };
         let l = Limits { store_bytes: 2 << 20, reserve_bytes: 1 << 20, ..LIMITS };
+        // Defect: observations sit outside the C5 ceiling (D28), yet their size refused new operations as `store_full`.
+        let s = open("ops-volume", l);
+        s.grant(&Installation { id: "tq-1", product: "taskq", runtime: "native", label: "mac" }, "w", "a", r#"["coreq-observation/1"]"#, b"obs", NOW).unwrap();
+        let record = observation("pad", 400);
+        for batch in 0..30 {
+            let ids: Vec<String> = (0..100).map(|i| format!("o{batch}-{i}")).collect();
+            let events: Vec<Event> = ids.iter().map(|id| Event { id, schema: "coreq-observation/1", observed: NOW, kind: Kind::Observation, payload: &record }).collect();
+            assert!(s.accept(b"obs", &events, NOW).unwrap().iter().all(|o| *o == Outcome::Accepted));
+        }
+        assert!(s.used().unwrap() + l.reserve_bytes >= l.store_bytes, "the file alone would meet the ceiling");
+        assert_eq!(s.queue("a", &op(1, "plan", NOW), NOW).unwrap(), Queued::Queued);
         let s = open("ops-full", l);
         // the queuing subject must be the authority's actor
         assert_eq!(s.queue("b", &op(1, "apply", NOW), NOW).unwrap(), Queued::Refused("authority"));

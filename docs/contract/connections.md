@@ -132,7 +132,7 @@ D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/
 
 - A device may request `coreq-observation/1` next to its product's own schemas. `pilotq` and `assetq` installations may enroll for that schema alone.
 - Payload `{seq, id, received_ms, observation}`, with `id` equal to `event_id`, `observation.schema` 1 and non-empty `kind`, `operation`, `outcome` and `error`. Every key and value passes the metadata allowlist with the `method:route` key exception (#181). Anything else is `payload`.
-- A key naming a price or cost is `payload`: records hold quantities, never prices.
+- A key naming a price or cost, at any depth, is `payload`: records hold quantities, never prices.
 - Replay is by (installation, workspace, event ID) in the observation table, not by the 8-day receipt window. The same content answers `accepted` and stores nothing new, also after the receipt is gone or under a new generation. Other content is `replay_mismatch`.
 - An observation never reads `expired`, whatever its age. A record `scope` still holds the shipper's cursor.
 - It still writes a C4 receipt, so `/machine/connection/receipt` and D11 silence stay accurate. It never becomes `projected`: it is not a snapshot.
@@ -140,7 +140,7 @@ D28 detail. Wire source: CoreQ [Shipper](https://github.com/taskqorg/coreq/blob/
 ### Retention and volume
 
 - No prune deletes observations, and revoking or retiring an installation keeps them.
-- The C5 ceiling excludes them: other kinds compare store size minus the measured observation volume, and SQLite's page limit rises with that volume. Filling the disk answers 503 and acknowledges nothing, so the shipper's cursor holds.
+- The C5 ceiling excludes them: other kinds, D16 operations and D13 PM requests compare store size minus the measured observation volume, and SQLite's page limit rises with that volume. Filling the disk answers 503 and acknowledges nothing, so the shipper's cursor holds.
 - Volume per installation and workspace is one counter row: `rows`, `bytes` (payload plus 1024 bytes per row, an upper estimate of the row and index cost), `first_observed`, `last_observed`, `last_received`.
 - A row whose grant names the schema, or that stored observations, adds `observations` `{state, rows, bytes, first_observed, last_observed, last_received}`; `state` is `off` (`observations not in grant`), `unknown` (`no observation yet`) or `ok`. Other rows have no such key.
 
