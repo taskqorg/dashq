@@ -319,7 +319,7 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
         (s, srcs, own)
     };
     let mut out = format!(
-        "<p><a href=\"/archive\">All sessions</a></p><h2>{}</h2><pre class=\"archive-manifest\">{}</pre>",
+        "<p><a href=\"/archive\">All sessions</a></p><h2>{}</h2><h3>First recorded conditions</h3><pre class=\"archive-manifest\">{}</pre>",
         esc(if s.name.is_empty() {
             s.manifest["session"].as_str().unwrap_or("Unnamed run")
         } else {
@@ -430,9 +430,12 @@ pub(super) fn metrics(c: &Connection, s: &Session) -> Res<Value> {
         let parsed: Value = serde_json::from_str(&payload).map_err(|_| Failure("unavailable"))?;
         let r = &parsed["observation"];
         let conditions = r["project"] == s.manifest["project"]
-            && ["task", "attempt"]
-                .iter()
-                .all(|k| identity(&r[*k]) == identity(&s.manifest[*k]));
+            && ["task", "attempt"].iter().all(|k| {
+                (r[*k].is_null() && s.manifest[*k].is_null())
+                    || identity(&r[*k])
+                        .zip(identity(&s.manifest[*k]))
+                        .is_some_and(|(a, b)| a == b)
+            });
         if !conditions {
             continue;
         }

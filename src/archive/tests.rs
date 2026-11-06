@@ -577,6 +577,47 @@ fn viewer_search_full_output_unknown_raw_naming_and_csrf() {
             .contains(&quoted_id),
         "search includes decoded step text, not only JSON-escaped raw bytes"
     );
+    let console_record=(json!({"type":"user","sessionId":"console","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"console-call","content":""}]},"toolUseResult":{"stdout":"first line\nsecond line <script>alert(1)</script>","stderr":"invented stderr","exitCode":0}}).to_string()+"\n").into_bytes();
+    let mut console_upload = body("console", "console-source", &console_record);
+    console_upload["format"] = json!("claude-native");
+    console_upload["manifest"]["runtime"] = json!("claude");
+    rehash(&mut console_upload);
+    let console_id = f.ingest(&console_upload, NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (cs, source, bytes) = read_source(
+        f.e(),
+        &f.objects(),
+        &console_id,
+        "console-source",
+        OWNER,
+        "test",
+        NOW,
+    )
+    .unwrap();
+    let shell = steps(&f.objects(), &cs, &source, &bytes)
+        .unwrap()
+        .0
+        .into_iter()
+        .find(|s| s.kind == agentq_runtime::agent::history::StepKind::Shell)
+        .unwrap();
+    let console = f.request(
+        "GET",
+        "/archive/step",
+        &format!("id={console_id}&source=console-source&step={}", shell.id),
+        Some(OWNER),
+        b"",
+        &[],
+    );
+    assert_eq!(console.status, "200 OK");
+    let console = String::from_utf8(console.body).unwrap();
+    assert!(
+        console.contains("first line\nsecond line &lt;script&gt;")
+            && console.contains("Standard error")
+            && !console.contains("<script>alert(1)"),
+        "console text keeps line breaks and remains inert"
+    );
     let named = form(
         f.e(),
         HashMap::from([
@@ -640,6 +681,7 @@ fn viewer_search_full_output_unknown_raw_naming_and_csrf() {
             ("detail", detail),
             ("step", full),
             ("search", searched),
+            ("console", console),
         ] {
             let html = html.replace(
                 "<link rel=\"stylesheet\" href=\"/style.css\">",
@@ -733,6 +775,24 @@ fn comparison_joins_only_exact_scoped_session_and_preserves_unknown() {
     assert_eq!(joined["records"], 1);
     assert_eq!(joined["duration_us"], 100);
     assert_eq!(joined["tokens"]["input_tokens"]["observed"], 7);
+    drop(c);
+    let mut no_task = body("no-task", "source", &record("no-task"));
+    no_task["manifest"]["task"] = Value::Null;
+    no_task["manifest"]["attempt"] = Value::Null;
+    rehash(&mut no_task);
+    let no_task_id = f.ingest(&no_task, NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let invalid=json!({"observation":{"kind":"agent.turn","session_id":"no-task","project":"example/project","task":false,"attempt":null,"duration_us":999,"outcome":"ok"}}).to_string();
+    f.e().store().write(|tx|{tx.execute("INSERT INTO observations(installation,workspace,generation,product,event_id,observed,received,kind,payload) VALUES ('inst','ws',1,'agentq','invalid-task',?1,?1,'agent.turn',?2)",params![NOW,invalid])?;Ok(())}).unwrap();
+    let c = f.e().store().lock().unwrap();
+    let s = session(&c, &no_task_id, OWNER, false).unwrap();
+    assert_eq!(
+        view::metrics(&c, &s).unwrap()["duration_us"],
+        Value::Null,
+        "invalid task identity must not match a missing task"
+    );
 }
 
 // D31 full-output boundary: a native record larger than the legacy runtime page limit must remain readable.

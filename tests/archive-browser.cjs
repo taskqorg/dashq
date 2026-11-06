@@ -7,7 +7,7 @@ const dir=process.env.DASHQ_ARCHIVE_EVIDENCE;
   for(const [width,size] of [[1440,16],[360,20]])for(const theme of ['light','dark']) {
    const page=await browser.newPage({viewport:{width,height:1100},colorScheme:theme});
    const errors=[];page.on('pageerror',e=>errors.push(e.message));
-   for(const file of ['list','detail','step','search']) {
+   for(const file of ['list','detail','step','search','console']) {
     await page.setContent(fs.readFileSync(path.join(dir,file+'.html'),'utf8'));
     await page.addStyleTag({content:`html{font-size:${size}px}`});
     assert(await page.getByRole('heading',{name:'Session archive',exact:true}).isVisible());
@@ -28,6 +28,10 @@ const dir=process.env.DASHQ_ARCHIVE_EVIDENCE;
      assert((await page.locator('pre').first().innerText()).includes('<script>alert(1)</script>'));
      await page.getByText('Exact raw record and source range',{exact:true}).click();
      assert(await page.locator('details pre').isVisible());
+    }
+    if(file==='console') {
+     assert(await page.getByText('Standard output',{exact:true}).isVisible());
+     assert((await page.locator('details pre').first().innerText()).includes('first line\nsecond line <script>alert(1)</script>'));
     }
     await page.screenshot({path:path.join(dir,`${file}-${width}-${size}-${theme}.png`),fullPage:true});
    }
