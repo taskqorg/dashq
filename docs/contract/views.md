@@ -410,6 +410,10 @@ D30 owns the read-only `/hosts` table. `/data.servers` and `dashq report` share 
 
 ### PilotQ link contract
 
-`pilotq_url` is an optional HTTPS discussion entry URL without credentials, query or fragment. DashQ appends `?server=<selector>` where `selector` is percent-encoded JSON `[workspace, machine/kind]`; a legacy row has a null workspace, so PilotQ must resolve access rather than infer it. No folder path, token, request text or permission is carried. The row's `pilotq_selector` is the same opaque string in `/data` and `report`. PilotQ must authenticate the person, resolve that selector within their scope and select the server before discussing it; the link grants no access and dispatches nothing from DashQ.
+`pilotq_url` is an optional HTTPS discussion entry URL without credentials, query or fragment. The row's `pilotq_selector` is compact JSON `[workspace, machine/kind]`, the same opaque string in `/data` and `report`; a legacy row has a null workspace, so PilotQ must resolve access rather than infer it. No folder path, token, request text or permission is carried. PilotQ must authenticate the person, resolve the selector within their scope and select the server before discussing it; the link grants no access and dispatches nothing from DashQ.
 
-Without a configured target the row says `PilotQ unavailable: not configured` and retains the selector. A configured link is labelled `Discuss in PilotQ · chat selection pending` until PilotQ's integration is qualified. Live selection belongs to [PilotQ #375](https://github.com/taskqorg/pilotq/issues/375); DashQ's fixtures prove the link and selector contract only.
+- **Telegram target.** For `https://t.me/BOT`, where `BOT` is letters, digits or underscores, the link is `https://t.me/BOT?start=server-DIGEST`. `DIGEST` is the FNV-1a 64-bit hash of the exact selector bytes, in 16 lowercase hexadecimal digits, because Telegram accepts only 64 URL-safe characters in `start`. The invented selector `["example","invented-fresh/native"]` gives `server-0ad79b58009edbd1`. The link reads `Discuss in PilotQ`.
+- **Other configured target.** DashQ appends `?server=<percent-encoded selector>`. PilotQ's chat cannot read this form, so the link reads `Discuss in PilotQ · chat selection pending`.
+- **No target.** The row says `PilotQ unavailable: not configured` and retains the selector.
+
+The label states the link protocol, not a live result. Live selection belongs to [PilotQ #375](https://github.com/taskqorg/pilotq/issues/375); DashQ's fixtures prove the link and selector contract only.
