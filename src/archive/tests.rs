@@ -282,7 +282,7 @@ fn enrollment_authority_manual_opt_in_revocation_and_browser_roles() {
         .status,
         "404 Not Found"
     );
-    let device=json!({"protocol":1,"product":"agentq","installation":"manual-request","runtime":"native","label":"invented-host","schemas":[WIRE],"capabilities":["agent-history.manual"]}).to_string();
+    let device=json!({"protocol":1,"product":"agentq","installation":"manual-request","runtime":"native","host_label":"invented-host","schemas":[WIRE],"capabilities":["agent-history.manual"]}).to_string();
     let started = enroll::route(
         &f.e,
         &Req {
