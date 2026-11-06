@@ -120,6 +120,17 @@
         serde_json::from_str(include_str!("../../fixture/coreq-observation/shipper-wire.json")).unwrap()
     }
 
+    #[test]
+    fn discovered_links_preserve_identity_boundaries_and_finding_reasons() {
+        let mut link=json!({"entity":"link","identity":"a".repeat(64),"relation":"uses","from_entity":"container","from_identity":"docker:web","to_entity":"folder","to_identity":"/srv/data"});
+        assert!(inventory(&link));
+        link["to_identity"]="/srv/../private".into();assert!(!inventory(&link));
+        link["to_identity"]="/srv/data".into();link["to_entity"]="service".into();assert!(!inventory(&link));
+        link["to_entity"]="folder".into();link["command"]="invented".into();assert!(!inventory(&link));
+        assert!(inventory(&json!({"entity":"finding","identity":"sshhole:abc","status":"unknown","reason":"probe-unavailable"})));
+        assert!(inventory(&json!({"entity":"process","identity":"worker:123:456","ram_used_bytes":1024})));
+    }
+
     fn inventory_wire() -> Value {
         serde_json::from_str(include_str!("../../fixture/coreq-observation/inventory-wire.json")).unwrap()
     }

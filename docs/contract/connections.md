@@ -147,14 +147,17 @@ The typed exception to the [metadata allowlist](#metadata-allowlist). It applies
 |---|---|---|
 | `host` | name | `status`, `os`, `os_version`, `uptime_s`, `load_1_milli`, `load_5_milli`, `load_15_milli`, `cpu_count`, `cpu_used_milli`, `ram_total_bytes`, `ram_used_bytes`, `swap_total_bytes`, `swap_used_bytes` |
 | `mount` | path | `status`, `disk_total_bytes`, `disk_used_bytes`, `disk_free_bytes` |
-| `service`, `container` | name | `status`, `cpu_used_milli`, `ram_used_bytes`, `disk_used_bytes` |
+| `service`, `container`, `process` | name | `status`, `cpu_used_milli`, `ram_used_bytes`, `disk_used_bytes` |
 | `project_root` | path | `status`, `cpu_used_milli`, `ram_used_bytes`, `disk_used_bytes` |
 | `folder` | path | `status`, `disk_used_bytes` |
+| `site`, `image`, `endpoint` | name | `status` |
+| `finding` | name | `status`, `reason` (fixed codes) |
 
+- `link` has exactly `entity`, a 64-hex `identity`, `relation` (`uses|runs|serves|contains|image|checks`), `from_entity`, `from_identity`, `to_entity`, `to_identity`. Endpoints use the named entity's identity rules; nested links and other fields are refused.
 - Keys: `entity`, `identity`, the entity's measures and `unknown`. Any other key is `payload`.
 - A name is 1-256 UTF-8 bytes, single line, without `=` or `://`, and any Unicode letter or space is allowed. A path-like name, which the allowlist refuses, stays refused: only the three path entities hold paths.
 - A path is 1-4096 UTF-8 bytes, single line, absolute and normalized: POSIX, drive, UNC or extended Windows (drive, UNC or volume GUID root). Empty, `.` and `..` segments are refused; one trailing separator is allowed. A UNC server holds no `@` or `:`.
-- `status`, `os` and `os_version` are codes of at most 128 bytes from ASCII letters, digits and `._:-`. Every other measure is an unsigned integer.
+- `status`, `os`, `os_version` and finding `reason` are codes of at most 128 bytes from ASCII letters, digits and `._:-`. Every other measure is an unsigned integer.
 - A null measure needs its reason in `unknown`, and a collected measure has none. A reason is a code keyed by one of the entity's measures. An omitted measure stays unknown, never zero.
 - This checks shape only, as CoreQ does: a secret inside a valid code or path is a collector defect, and the collector owns what it reads.
 - Receipts, replay, retention, scope and volume are the ones above; the wire schema stays `coreq-observation/1`, version 1.
