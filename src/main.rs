@@ -1519,6 +1519,8 @@ mod tests {
         // D30/R7: a discussion target is HTTPS metadata, never a credential-bearing or executable URL.
         let mut target = good.clone(); target["pilotq_url"] = json!("https://pilotq.example.com/discuss");
         write(&target); assert_eq!(load_config(&p).unwrap().links["pilotq"],target["pilotq_url"]);
+        target["pilotq_url"] = json!("https://t.me/invented_pilot_bot");
+        write(&target); assert_eq!(load_config(&p).unwrap().links["pilotq"],target["pilotq_url"]);
         for url in ["javascript:SECRET", "http://pilotq.example.com", "https://SECRET@pilotq.example.com", "https://pilotq.example.com/?token=SECRET", "https://pilotq.example.com/#SECRET", "https://pilotq.example.com/\nSECRET"] {
             target["pilotq_url"] = json!(url); write(&target);
             assert_eq!(load_config(&p).err().unwrap(),"config: bad key pilotq_url");

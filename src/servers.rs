@@ -87,6 +87,17 @@ fn trend(history: &[Value], field: &str, capacity: Option<&str>, now: u64, src: 
     out
 }
 
+fn telegram_entry(base: &str) -> bool {
+    base.strip_prefix("https://t.me/").is_some_and(|bot| !bot.is_empty() && bot.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+}
+
+/// D30: the only protocol PilotQ's chat reads is the digest in Telegram's `start` parameter.
+fn pilotq_link(base: &str, selector: &str) -> String {
+    if !telegram_entry(base) { return format!("{base}?server={}",enc(selector)); }
+    let digest = selector.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h,b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    format!("{base}?start=server-{digest:016x}")
+}
+
 /// `snap` contains only validated inventory from currently authorized installation generations.
 pub fn build(snap: &Value, installations: &Value, legacy: &Value, host_filter: Option<&str>, pilotq: Option<&str>, now: u64) -> Value {
     let active: Vec<_> = installations.as_array().into_iter().flatten().filter(|r| r["connection"] != "revoked" && r["activity"]["state"] != "retired").collect();
@@ -140,7 +151,7 @@ pub fn build(snap: &Value, installations: &Value, legacy: &Value, host_filter: O
         row["entities"] = json!(entities.into_values().collect::<Vec<_>>());
         row["source"] = row["entities"].as_array().unwrap().iter().filter(|e| e["inventory"]["entity"] == "host").max_by_key(|e| e["source"]["at"].as_u64()).map_or_else(|| unknown("no host inventory received"), |e| e["source"].clone());
         row["pilotq_selector"] = json!(json!([row["workspace"],row["host"]]).to_string());
-        row["pilotq_url"] = json!(pilotq.map(|base| format!("{base}?server={}",enc(row["pilotq_selector"].as_str().unwrap()))));
+        row["pilotq_url"] = json!(pilotq.map(|base| pilotq_link(base,row["pilotq_selector"].as_str().unwrap())));
         row
     }).collect();
     let mut src = crate::data::source(snap,now,FRESH,None);
@@ -200,7 +211,10 @@ pub fn render(w: &mut String, doc: &Value, now: u64) {
             let _ = write!(w,"<code>{}</code><br>{}<small>{} · largest measured; coverage may be partial</small>",esc(i["identity"].as_str().unwrap()),value(i,"disk_used_bytes",1073741824.0,"GiB"),status(e,now));
         } else { w.push_str("unknown: no measured consumer"); }
         w.push_str("</td><td>");
-        if let Some(url) = row["pilotq_url"].as_str() { let _ = write!(w,"<a href=\"{}\" rel=\"noreferrer\">Discuss in PilotQ · chat selection pending</a>",esc(url)); }
+        if let Some(url) = row["pilotq_url"].as_str() {
+            let supported = url.split_once("?start=server-").is_some_and(|(base,_)| telegram_entry(base));
+            let _ = write!(w,"<a href=\"{}\" rel=\"noreferrer\">Discuss in PilotQ{}</a>",esc(url),if supported {""} else {" · chat selection pending"});
+        }
         else { w.push_str("PilotQ unavailable: not configured"); }
         w.push_str("</td></tr>");
     }
@@ -222,7 +236,7 @@ mod tests {
         }
         json!({"value":samples.finish(),"at":f["now"],"error":null})
     }
-    fn project(f: &Value) -> Value { build(&fixture_snap(f),&f["installations"],&json!([]),None,Some("https://pilotq.example.com/discuss"),f["now"].as_u64().unwrap()) }
+    fn project(f: &Value) -> Value { build(&fixture_snap(f),&f["installations"],&json!([]),None,Some("https://t.me/invented_pilot_bot"),f["now"].as_u64().unwrap()) }
     fn host<'a>(d: &'a Value, name: &str) -> &'a Value { d["rows"].as_array().unwrap().iter().find(|r|r["host"]==name).unwrap() }
     fn entity<'a>(r: &'a Value, kind: &str) -> &'a Value { r["entities"].as_array().unwrap().iter().find(|e|e["inventory"]["entity"]==kind).unwrap() }
 
@@ -240,10 +254,9 @@ mod tests {
         assert_eq!(host(&d,"invented-partial/native")["source"]["state"],"incomplete");
         assert!(entity(host(&d,"invented-stale/native"),"host")["trends"]["ram"]["per_day"].is_null());
         let mut html = String::new(); render(&mut html,&d,now);
-        for s in ["Servers","All observed and expected servers","Projects","Services","Largest folders","stale","collection-failed","unknown","estimated disk full","/srv/invented-&lt;cache&gt;","chat selection pending"] { assert!(html.contains(s),"{s}"); }
+        for s in ["Servers","All observed and expected servers","Projects","Services","Largest folders","stale","collection-failed","unknown","estimated disk full","/srv/invented-&lt;cache&gt;"] { assert!(html.contains(s),"{s}"); }
         assert!(!html.contains("<cache>") && !html.contains("<button") && !html.contains("<form"));
         for row in d["rows"].as_array().unwrap() {
-            assert_eq!(row["pilotq_url"],format!("https://pilotq.example.com/discuss?server={}",enc(row["pilotq_selector"].as_str().unwrap())));
             assert_eq!(serde_json::from_str::<Value>(row["pilotq_selector"].as_str().unwrap()).unwrap(),json!(["example",row["host"]]));
         }
         let evidence = std::env::var("DASHQ_SERVERS_EVIDENCE").ok().or_else(|| std::env::var("DASHQ_HOST_FIRST_EVIDENCE").ok().map(|p| format!("{p}/servers")));
@@ -252,6 +265,35 @@ mod tests {
             let mut doc = crate::fixture_doc(); doc["servers"] = d; doc["generated_at"] = json!(now);
             std::fs::write(format!("{dir}/page.html"),crate::page::render_view(&doc,&json!({}),"/hosts")).unwrap();
         }
+    }
+
+    // #272 A2/A3: the ?server= form cannot open the Telegram chat, so the selection is lost; only the supported payload may drop the pending label.
+    #[test]
+    fn pilotq_link_protocol_and_label() {
+        let f = fixture(); let now = f["now"].as_u64().unwrap();
+        let link = |base: Option<&str>| {
+            let d = build(&fixture_snap(&f),&f["installations"],&json!([]),None,base,now);
+            let mut html = String::new(); render(&mut html,&d,now);
+            (d,html)
+        };
+        let (d,html) = link(Some("https://t.me/invented_pilot_bot"));
+        let fresh = host(&d,"invented-fresh/native");
+        assert_eq!(fresh["pilotq_selector"],r#"["example","invented-fresh/native"]"#);
+        assert_eq!(fresh["pilotq_url"],"https://t.me/invented_pilot_bot?start=server-0ad79b58009edbd1");
+        assert!(html.contains(r#"<a href="https://t.me/invented_pilot_bot?start=server-0ad79b58009edbd1" rel="noreferrer">Discuss in PilotQ</a>"#),"{html}");
+        assert!(!html.contains("chat selection pending"));
+        for base in ["https://pilotq.example.com/discuss","https://t.me/joinchat/invented","https://t.me/+invented","https://t.me/"] {
+            let (d,html) = link(Some(base));
+            let fresh = host(&d,"invented-fresh/native");
+            assert_eq!(fresh["pilotq_url"],format!("{base}?server={}",enc(fresh["pilotq_selector"].as_str().unwrap())));
+            assert_eq!(html.matches("chat selection pending").count(),3,"{base}");
+        }
+        let (d,html) = link(None);
+        let fresh = host(&d,"invented-fresh/native");
+        assert!(fresh["pilotq_url"].is_null());
+        assert_eq!(fresh["pilotq_selector"],r#"["example","invented-fresh/native"]"#);
+        assert_eq!(html.matches("PilotQ unavailable: not configured").count(),3);
+        assert!(!html.contains("Discuss in PilotQ"));
     }
 
     // A6 live-input check: no writes or deployment; the actual receiver's document goes through this candidate renderer.

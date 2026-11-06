@@ -19,3 +19,20 @@ The existing `tests/host-first-browser.cjs` CI entrypoint runs the server browse
 Reproduce fixture evidence with `DASHQ_SERVERS_EVIDENCE=<temporary directory> cargo test --locked servers::tests`, then run `tests/servers-browser.cjs` with that variable and the project's Playwright runner. The opt-in live check takes a fresh authorized `/data` capture through `DASHQ_SERVERS_LIVE_DATA` and runs `cargo test --locked live_server_table_readback -- --ignored --nocapture`. Keep live documents and screenshots private; commit only invented fixtures.
 
 The review correction reproduces two failures on `5e74b99`: `tests/startup-browser.cjs:88` times out looking for the retired "Host detail" navigation label, and the server browser regression reports `incomplete` instead of `stale` after partial inventory expires. The navigation check now uses "Servers" and retains its D22 route/history/filter/focus/draft assertions. R2/D6 expiry now includes incomplete inventory; the eight server matrix cells check partial-to-stale, outage-to-unconfirmed and recovery-to-incomplete, retaining the partial collection reason. Both browser chains pass on Windows with Playwright 1.56.1 Chromium. A fresh authorized pds18 readback also passes; inventory and deployment remain unqualified.
+
+## Telegram chat link (#272)
+
+D30 states the deep link before the code, and PilotQ's server discussion contract ([PR #388](https://github.com/taskqorg/pilotq/pull/388), `docs/integration-contract.md`) gives the byte vector.
+
+| Requirement | Executable evidence | Boundary |
+|---|---|---|
+| A1 | D30 and [link contract](../../../contract/views.md#pilotq-link-contract); pinned contract lint | Contract text only |
+| A2 | `pilotq_link_protocol_and_label` checks the emitted URL and HTML link for `["example","invented-fresh/native"]`, payload `server-0ad79b58009edbd1`; `tests/servers-browser.cjs` checks one link per row in the rendered table | Link rendering only |
+| A3 | The same test keeps `chat selection pending` for other targets and non-bot `t.me` forms, and `PilotQ unavailable: not configured` without a target; config test accepts `https://t.me/BOT` and keeps the credential, query and fragment refusals | Invented bot name; no credential in links, fixtures or logs |
+| A4 | Local and CI results below | No PilotQ candidate installed on pds18 |
+
+Before the change, `cargo test --locked servers::tests::pilotq_link` failed: the row emitted `https://t.me/invented_pilot_bot?server=%5B%22example%22%2C%22invented-fresh%2Fnative%22%5D`, not `https://t.me/invented_pilot_bot?start=server-0ad79b58009edbd1`. The same command passes after it.
+
+Local proof on Windows: `cargo test --locked`, `cargo run -- selftest`, the pinned contract lint on `dashq.md` and `tests/servers-browser.cjs` with Playwright 1.56.1 Chromium, 8 width/text/theme cells. CI proof is the `tests` workflow on the pull request and its merge result.
+
+**Handoff for [PilotQ #375](https://github.com/taskqorg/pilotq/issues/375) A4.** After this change ships, set `pilotq_url` to `https://t.me/BOT` for the PilotQ bot on the DashQ host. Each row then links to `https://t.me/BOT?start=server-DIGEST`, computed from the row's exact `pilotq_selector`; a legacy row hashes its selector with the null workspace. PilotQ resolves the digest among the rows the person may read. This repository proves link rendering only: the live check that the chat opens with the server selected stays with PilotQ. DashQ's config, release and pds18 installation are unchanged by this task.

@@ -31,10 +31,11 @@ const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/task
    assert(contrast>=4.5,'D7 unknown text contrast '+contrast);
    const detail=table.locator('details').filter({hasText:'invented-fresh/native'});await table.locator('tbody > tr').first().locator('th a').click();assert(await detail.evaluate(e=>e.open),'server link did not open native detail');await detail.locator('summary').focus();
    for(const s of ['Projects','Services','Largest folders','/srv/invented-<cache>'])assert((await detail.innerText()).includes(s),s);
-   for(const href of await table.locator('a[href^="https://pilotq.example.com"]').evaluateAll(es=>es.map(e=>e.href))){
-    const u=new URL(href),selector=JSON.parse(u.searchParams.get('server'));
-    assert.equal(selector[0],'example');assert(selector[1].endsWith('/native'));assert(!href.includes('/srv/'));
-   }
+   // #272 A2/A3: every row opens the Telegram chat with its server selected; a lost payload or a stale pending label fails here.
+   const links=table.locator('a[href^="https://t.me/"]');assert.equal(await links.count(),3,'one Telegram link per server row');
+   for(const href of await links.evaluateAll(es=>es.map(e=>e.href)))assert.match(href,/^https:\/\/t\.me\/invented_pilot_bot\?start=server-[0-9a-f]{16}$/);
+   assert.equal(await table.locator('tbody > tr').first().locator('a[href^="https://t.me/"]').getAttribute('href'),'https://t.me/invented_pilot_bot?start=server-0ad79b58009edbd1');
+   assert(!text.includes('chat selection pending'),'supported link still reads pending');
    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'page overflow outside table '+JSON.stringify(await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,items:[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&getComputedStyle(e).position!=='absolute').slice(0,12).map(e=>[e.tagName,e.id,e.className,e.getBoundingClientRect().width])}))));
    const comparison=table.locator('table');await comparison.evaluate(e=>e.scrollLeft=80);const x=await comparison.evaluate(e=>e.scrollLeft);
    await page.evaluate(()=>refresh());await page.waitForFunction(()=>!busy);

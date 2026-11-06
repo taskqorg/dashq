@@ -30,7 +30,7 @@ Config: `DASHQ_CONFIG`, else `<install>/config.json`, mode 0600:
 
 `langfuse` and `github` (with `projects`) are optional: without them their sections read `not configured` and enrolled snapshots still show. `langfuse.forward: true` forwards enrolled `agentq-event/1` records to that Langfuse project (D11 Forwarding); leave it off until live readback qualifies. `answer` (D13) is off unless set and stays unset in production until #44 qualifies the real board: a dedicated forge credential file (0600) and the workspace of each answerable board; `dashq answerer <workspace> <subject> on|off` grants or removes the answer capability of a workspace administrator ([answers § Route](docs/design/answers.md#route-41)).
 
-`/hosts` compares server inventory, disk consumers and observed resource trends. Missing or stale inventory stays explicit; DashQ runs no AI. Optional `pilotq_url` supplies the HTTPS discussion entry URL ([link contract](docs/contract/views.md#pilotq-link-contract)); live chat selection is qualified by PilotQ #375.
+`/hosts` compares server inventory, disk consumers and observed resource trends. Missing or stale inventory stays explicit; DashQ runs no AI. Optional `pilotq_url` supplies the HTTPS discussion entry URL, `https://t.me/BOT` for the PilotQ Telegram chat ([link contract](docs/contract/views.md#pilotq-link-contract)); live chat selection is qualified by PilotQ #375.
 
 Tasks uses TaskQ v4.6.66's released workspace, detail menus and PM composer. PM is off by default: `pm_requests: true` additionally requires an explicit `dashq pm-requester <workspace> <subject> on` grant and the owner's separate TaskQ host PM grant. Production enablement waits for #195 and owner approval; see the [workspace/PM adapter](docs/design/task-workspace.md).
 
