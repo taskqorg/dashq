@@ -83,7 +83,7 @@ pub fn render(doc: &Value, links: &Value) -> String {
     let nav = VIEWS[..2].iter().map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", if *path == "/" { "home" } else { "projects" }, esc(&query))).collect::<Vec<_>>().join(" ");
     let _ = writeln!(w, "<nav id=\"views\" aria-label=\"Dashboard views\">{nav} <a id=\"attention-link\" data-view-inherit data-view-link href=\"/{}#attention\">Attention · {action_count}</a></nav>", esc(&query));
     let more = VIEWS[2..].iter().filter(|(path, _)| *path != "/assets" || doc["assets"].is_object()).map(|(path, name)| format!("<a id=\"view-{}\" data-view-inherit data-view-link href=\"{path}{}\">{name}</a>", path.trim_start_matches('/'), esc(&query))).collect::<Vec<_>>().join(" ");
-    let _ = writeln!(w, "<details id=\"more\"><summary>More</summary><div>{more} <a href=\"/connect\">Connect a service</a>");
+    let _ = writeln!(w, "<details id=\"more\"><summary>More</summary><div>{more} <a href=\"/connect\">Connect a service</a> <a href=\"/archive\">Session archive</a>");
     if !base.is_empty() { let _ = writeln!(w, "<a href=\"{}\">Langfuse traces</a> <a href=\"{}\">Langfuse dashboards</a>", text(&links["traces"]), text(&links["dashboards"])); }
     let _ = writeln!(w, "</div></details></header><main id=\"main\"><p id=\"view-unavailable\" class=\"note\" hidden>No observations available for this view. <a href=\"/{}\">Return to overview</a>.</p>", esc(&query));
     let period = doc["period"].as_u64().unwrap_or(1800);
@@ -740,6 +740,7 @@ fn aq_code(c: &Value) -> String {
         "unparseable_config" => "client config cannot be parsed".into(),
         "unreadable_config" => "client config cannot be read".into(),
         "not_released" => "configuration adapter not released".into(),
+        crate::enroll::FEATURE_RETIRED => "feature retired; this operation is no longer available".into(),
         "stale" => "stale snapshot".into(),
         "truncated" => "profile list truncated".into(),
         "incomplete" => "incomplete readback".into(),
@@ -1745,6 +1746,11 @@ mod tests {
     /// stay distinct; no write control, task or saving appears.
     #[test]
     fn agentq_profiles_render_read_only_from_snapshots() {
+        let mut retired = agentq_doc();
+        retired["installations"]["rows"][0]["snapshot"]["payload"]["configuration"]["profiles"][0]["writes"] = json!({"enabled":false,"reasons":[crate::enroll::FEATURE_RETIRED]});
+        let mut retired_html = String::new();
+        integrations(&mut retired_html, &retired["installations"], false);
+        assert!(retired_html.contains("feature retired; this operation is no longer available"));
         let mut w = String::new();
         integrations(&mut w, &agentq_doc()["installations"], false);
         if let Some(out) = std::env::var_os("DASHQ_EVIDENCE") {

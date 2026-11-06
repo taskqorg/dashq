@@ -147,6 +147,7 @@ pub(super) fn device_data(e: &Enroll, path: &str, v: &[u8], body: &Value, now: i
     let mut index = Vec::new();
     for (i, r) in records.iter().enumerate() {
         match (r["schema"].as_str(), r["observed_at"].as_i64()) {
+            (Some(crate::archive::WIRE), _) => out[i] = Some("scope"), // content has only the D31 route
             // `agentq-event/1` goes to the export outbox (C5); every other schema is a snapshot (C2)
             (Some(crate::export::SCHEMA), Some(_)) if !crate::export::valid(&r["payload"]) => out[i] = Some("payload"),
             (Some(schema), Some(_)) if !in_board(schema, &r["payload"], g) => out[i] = Some("scope"),
@@ -484,7 +485,7 @@ pub(super) fn limit_groups(r: &store::Row, p: &Value) -> Value {
 }
 
 /// Standard padded base64; `None` on any other byte.
-pub(super) fn unbase64(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn unbase64(s: &str) -> Option<Vec<u8>> {
     let val = |c: u8| match c {
         b'A'..=b'Z' => Some(c - b'A'),
         b'a'..=b'z' => Some(c - b'a' + 26),

@@ -15,13 +15,13 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - **R6 Loopback only.** `dashq serve` binds `127.0.0.1:18882`; the port is not configurable to a non-loopback address. No public port.
 - **R7 Secrets stay server side.** Except D31 archive content for its explicit readers, secrets never reach the browser, `/data`, logs, URLs or `report` output.
 - **R8 Pull by default.** dashq pulls the D4 sources. Hosts push only through the R3 machine routes; any other host push is a later task (#4).
-- **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database; D31 adds a filesystem object store, with its index in that SQLite store.
+- **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database; D31 adds a separate archive SQLite index and filesystem object store.
 ## D2. Process
 - One Rust binary `dashq` on the shared `taskqorg/coreq` crate, pinned in `Cargo.toml` and updated by Dependabot (release, update, launcher, service). Installation prepares and activates the release before reloading the service; a refusal leaves the running unit alone. `dashq serve` serves the page (R6).
 - `dashq report [--period=S] [--host=H] [--agent=A] [--session=ID] [--cursor=N] [--block=ID]` prints the `/data` JSON once (D7) for agents on the host without a browser login. `dashq admin WORKSPACE SUBJECT` binds a workspace administrator for enrollment (D11). `dashq limits [--check]` prints the D27 payload, or compares it with the live page. `dashq export` and `dashq parity` read the D28 store.
 - `dashq selftest` loads config, renders the fixture snapshot and reads each source once; no writes. Without any config file it skips the source reads and says so.
 - `dashq service install|uninstall|run` and `dashq update [--check]` are the coreq commands; `service run` is `serve` and marks the release healthy after 60 s. `profile`, `doctor`, `--snapshot`, update, rollback and release: [process detail](docs/contract/process.md).
-- Baseline routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. D11, D13, D14, D16, D22 and D25 add their explicit routes. Any other path is 404; any other method is 405.
+- Baseline routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. D11, D13, D14, D16, D22, D25 and D31 add their explicit routes. Any other path is 404; any other method is 405.
 - Every response sends `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` and CSP `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. No third-party assets.
 - Requests whose `Host` is neither the loopback address nor the configured public name get 421 (DNS rebinding).
 - Config is a private JSON file named by env `DASHQ_CONFIG`, else `<install>/config.json` (coreq service units pass only `PATH`), mode 0600. Invalid config: the service refuses to start and names the bad key, never the value. Keys: [process detail](docs/contract/process.md#config).

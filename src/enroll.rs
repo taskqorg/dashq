@@ -21,7 +21,7 @@ const PRODUCTS: [&str; 3] = ["agentq", "serverq", "taskq"];
 const SHIPPERS: [&str; 2] = ["assetq", "pilotq"];
 /// Operation capabilities a device may request for separate approval (D16), with the product that owns each and
 /// the effect the approval page names.
-const CAPABILITIES: [(&str, &str, &str); 1] = [("agentq", "agentq.configure", "change AgentQ client integration settings on this host, one reviewed request at a time")];
+const CAPABILITIES: [(&str, &str, &str); 2] = [("agentq", "agentq.configure", "change AgentQ client integration settings on this host, one reviewed request at a time"), ("agentq", "agent-history.manual", "archive manual sessions on this host, including personal conversation content")];
 /// C3: new pairing sessions per source address per minute, and live sessions overall.
 const PER_MINUTE: usize = 10;
 const MAX_PENDING: i64 = 1000;
@@ -64,6 +64,9 @@ pub const TREND_SAMPLES: i64 = 3;
 const WAIT_SECS: i64 = 60;
 const MACHINE: [&str; 8] = ["/machine/connect/device", "/machine/connect/token", "/machine/connect/ack", "/machine/ingest", "/machine/connection/receipt", "/machine/connection/revoke", "/machine/operations", "/machine/operations/result"];
 /// AgentQ configure fields and values (agentq CONFIGURATION.md A3 request `changes`); no removal value exists.
+/// AgentQ PR #304 refuses retired routing, optimization and MCP effects with this code.
+pub const FEATURE_RETIRED: &str = "feature_retired";
+// Keep the wire choices for older enrolled releases; current host operations remain producer-owned.
 pub const CHANGES: [(&str, &[&str]); 5] = [("routing", &["routed", "direct"]), ("optimization", &["enabled", "disabled"]), ("mcp", &["registered"]), ("hooks", &["registered"]), ("plugin", &["enabled"])];
 
 pub struct Req<'a> {
@@ -94,6 +97,7 @@ pub struct Resp {
 pub struct Enroll {
     store: Store,
     seal: aead::LessSafeKey,
+    archive_key: Vec<u8>,
     csrf: hmac::Key,
     public_host: String,
     rng: SystemRandom,
@@ -136,6 +140,7 @@ impl Enroll {
         let store = Store::open(&db, limits).map_err(|e| format!("dashq.db: {e:?}"))?;
         Ok(Enroll {
             store,
+            archive_key: k.clone(),
             seal: aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, &k).map_err(|_| "dashq.key: bad key")?),
             // separate keys for sealing and CSRF, both from the one deployment key
             csrf: hmac::Key::new(hmac::HMAC_SHA256, ring::digest::digest(&ring::digest::SHA256, &[b"dashq csrf\n".as_slice(), &k].concat()).as_ref()),
@@ -167,7 +172,8 @@ impl Enroll {
             std::io::Write::write_all(&mut o.open(&key).map_err(|e| format!("dashq.key: {e}"))?, &k).map_err(|e| format!("dashq.key: {e}"))?;
         }
         let s = Store::open(&db, store::LIMITS).map_err(|e| format!("dashq.db: {e:?}"))?;
-        s.add_member(workspace, subject, "admin").map_err(|e| format!("dashq.db: {e:?}"))
+        s.add_member(workspace, subject, "admin").map_err(|e| format!("dashq.db: {e:?}"))?;
+        s.write(|tx| Ok(tx.execute("INSERT OR IGNORE INTO archive_owners VALUES (?1,?2)", [workspace,subject]).map(|_|())?)).map_err(|e| format!("dashq.db: {e:?}"))
     }
 
     fn random(&self, n: usize) -> Vec<u8> {
@@ -188,6 +194,10 @@ impl Enroll {
     pub fn token_ok(&self, purpose: &str, token: &str) -> bool {
         unhex(token).is_some_and(|t| hmac::verify(&self.csrf, purpose.as_bytes(), &t).is_ok())
     }
+
+    pub(crate) fn archive_key(&self) -> &[u8] { &self.archive_key }
+
+    pub fn public_host(&self) -> &str { &self.public_host }
 
     pub fn store(&self) -> &Store {
         &self.store
@@ -435,6 +445,7 @@ use browser::*;
 use ingestion::*;
 pub use browser::{anchor, form};
 pub use ingestion::{RESOURCES, TELEMETRY};
+pub(crate) use ingestion::unbase64;
 pub use projection::{SILENT_SECS, RETIRE_SECS, projection, telemetry_block, stage_records, fleet_records, finding_samples, resource_samples, observations, server_inventory, export_observations, parity};
 
 #[cfg(test)]

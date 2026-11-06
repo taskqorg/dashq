@@ -614,7 +614,7 @@ impl Store {
             limits.reserve_bytes,
             limits.store_bytes / page as u64
         ))?;
-        c.execute_batch(&format!("BEGIN IMMEDIATE; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"))?;
+        c.execute_batch(&format!("BEGIN IMMEDIATE; {SCHEMA} {} PRAGMA user_version = {VERSION}; COMMIT;", crate::archive::SCHEMA))?;
         let volume = observation_bytes(&c)?;
         page_ceiling(&c, limits.store_bytes.saturating_add(volume))?;
         // additive: gaps recorded before the column existed keep workspace '' and show in no scoped view

@@ -69,7 +69,7 @@ If the response is lost, retry the same event ID. If DashQ restarts, grants, rev
 
 AgentQ enrollment preserves a previously configured standalone destination until the new connection is verified. Show the proposed switch once; new events switch atomically, and old queued events keep their original destination. Do not export pre-enrollment backlog without explicit scope approval. Disconnect does not silently reactivate old credentials or destinations. Native telemetry capture/provider configuration is unchanged.
 
-Only allowlisted metadata and producer schemas cross this connection. Do not upload raw `status.json`, prompts, tool output, paths, credentials or arbitrary OTLP attributes. Publish the AgentQ projection for routing/engine/queue fields that current installation events omit; unknown is explicit. Preserve supported native usage/IDs only where the approved metadata contract supplies them.
+Only allowlisted metadata and producer schemas cross this connection, except the separately granted [D31 archive route](../contract/archive.md). Do not upload raw `status.json`, prompts, tool output, paths, credentials or arbitrary OTLP attributes. Publish the AgentQ projection for routing/engine/queue fields that current installation events omit; unknown is explicit. Preserve supported native usage/IDs only where the approved metadata contract supplies them.
 
 ## C5. Operational defaults to qualify
 
