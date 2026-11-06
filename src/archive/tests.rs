@@ -104,7 +104,12 @@ impl Fixture {
     }
 }
 fn body(session: &str, source: &str, bytes: &[u8]) -> Value {
-    json!({"protocol":1,"schema":WIRE,"manifest":{"project":"example/project","task":283,"attempt":"attempt-1","actor":"manager","entry":"taskq","runtime":"codex","cli_version":"invented-version","model":"invented-model","effort":"high","policy":{"write":"project"},"account_label":"invented-account","host":"invented-host","session":session,"parent_session":null,"instructions_hash":null},"capture":"launched","source":source,"format":"codex-rollout","start":0,"end":bytes.len(),"sha256":hash_bytes(bytes),"bytes":crate::base64(bytes),"scrubbed":0,"observed_at":NOW})
+    let mut b = json!({"protocol":1,"schema":WIRE,"manifest":{"project":"example/project","task":283,"attempt":"attempt-1","actor":"manager","entry":"taskq","runtime":"codex","cli_version":"invented-version","model":"invented-model","effort":"high","policy":{"write":"project"},"account_label":"invented-account","host":"invented-host","session":session,"parent_session":null,"instructions_hash":null},"capture":"launched","source":source,"format":"codex-rollout","start":0,"end":bytes.len(),"sha256":hash_bytes(bytes),"bytes":crate::base64(bytes),"scrubbed":0,"observed_at":NOW});
+    rehash(&mut b);
+    b
+}
+fn rehash(b: &mut Value) {
+    b["manifest_sha256"] = json!(coreq::enroll::digest(&b["manifest"]));
 }
 fn record(session: &str) -> Vec<u8> {
     format!("{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session}\"}}}}\n{{\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"invented-private-canary <script>alert(1)</script>\"}}]}}}}\n").into_bytes()
@@ -139,6 +144,7 @@ fn ingest_replay_ranges_integrity_and_content_stays_out_of_sqlite() {
     );
     let mut changed = b.clone();
     changed["manifest"]["model"] = json!("another");
+    rehash(&mut changed);
     assert_eq!(f.ingest(&changed, NOW), Err(Failure("replay_mismatch")));
     changed = b.clone();
     changed["bytes"] = json!(crate::base64(b"wrong"));
@@ -399,10 +405,12 @@ fn deletion_retention_shared_media_and_replay_tombstones() {
     let mut media = body("s", &hash_bytes(b"invented-media"), b"invented-media");
     media["format"] = json!("media");
     media["media"] = json!(true);
+    media["total"] = media["end"].clone();
     f.ingest(&media, NOW).unwrap();
     f.ingest(&media, NOW).unwrap();
     let mut other = media.clone();
     other["manifest"]["session"] = json!("s2");
+    rehash(&mut other);
     let id2 = f.ingest(&other, NOW).unwrap()["id"]
         .as_str()
         .unwrap()
@@ -742,6 +750,7 @@ fn full_native_console_crosses_upload_ranges_and_unknown_steps_stay_raw() {
         let mut b = body("large", "claude-source", chunk);
         b["format"] = json!("claude-native");
         b["manifest"]["runtime"] = json!("claude");
+        rehash(&mut b);
         b["start"] = json!(start);
         b["end"] = json!(start + chunk.len());
         id = f.ingest(&b, NOW).unwrap()["id"]
@@ -776,4 +785,197 @@ fn full_native_console_crosses_upload_ranges_and_unknown_steps_stay_raw() {
         |s| s.kind == agentq_runtime::agent::history::StepKind::Unknown
             && s.source["raw"] == unknown
     ));
+}
+
+// The existing HTTP body bound must not become a whole-video bound, and no partial/incorrect media is readable.
+#[test]
+fn chunked_media_is_invisible_until_whole_object_verified() {
+    let f = Fixture::new("media-chunks");
+    let raw = [
+        vec![11; 512 * 1024],
+        vec![22; 512 * 1024],
+        vec![33; 512 * 1024],
+    ]
+    .concat();
+    let whole = hash_bytes(&raw);
+    let mut id = String::new();
+    let make = |start: usize, bytes: &[u8]| {
+        let mut b = body("video", &whole, bytes);
+        b["media"] = json!(true);
+        b["format"] = json!("media");
+        b["total"] = json!(raw.len());
+        b["start"] = json!(start);
+        b["end"] = json!(start + bytes.len());
+        b
+    };
+    for (n, chunk) in raw.chunks(512 * 1024).take(2).enumerate() {
+        let b = make(n * 512 * 1024, chunk);
+        assert!(b.to_string().len() < enroll::MAX_BODY);
+        let accepted = f.ingest(&b, NOW).unwrap();
+        assert_eq!(accepted["complete"], false);
+        id = accepted["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            read_source(f.e(), &f.objects(), &id, &whole, OWNER, "raw", NOW).unwrap_err(),
+            Failure("incomplete")
+        );
+    }
+    assert_eq!(f.audit(), 0, "pending media bytes are not read");
+    let pending = f.request(
+        "GET",
+        "/archive",
+        &format!("id={id}"),
+        Some(OWNER),
+        b"",
+        &[],
+    );
+    let pending = String::from_utf8(pending.body).unwrap();
+    assert!(pending.contains("Media pending") && !pending.contains("Download exact raw bytes"));
+    let mut altered = make(512 * 1024, &raw[512 * 1024..1024 * 1024]);
+    altered["total"] = json!(raw.len() + 1);
+    assert_eq!(f.ingest(&altered, NOW), Err(Failure("replay_mismatch")));
+    let bad = make(1024 * 1024, &vec![99; 512 * 1024]);
+    assert_eq!(f.ingest(&bad, NOW), Err(Failure("invalid_request")));
+    let last = make(1024 * 1024, &raw[1024 * 1024..]);
+    let accepted = f.ingest(&last, NOW).unwrap();
+    assert_eq!(accepted["complete"], true);
+    assert_eq!(
+        f.ingest(&make(0, &raw[..512 * 1024]), NOW).unwrap()["complete"],
+        true
+    );
+    assert!(
+        read_source(f.e(), &f.objects(), &id, &whole, OWNER, "raw", NOW)
+            .unwrap()
+            .2
+            == raw
+    );
+}
+
+// Resumes can change conditions; byte bindings, not current labels or observation arrival order, select versions.
+#[test]
+fn manifest_versions_are_append_only_and_comparison_uses_turn_positions() {
+    let f = Fixture::new("manifest-versions");
+    let line = b"{\"type\":\"future\"}\n";
+    let mut first = body("resumed", "source", line);
+    first["manifest"]["model"] = json!("model-a");
+    rehash(&mut first);
+    let mut second = first.clone();
+    second["start"] = json!(line.len());
+    second["end"] = json!(2 * line.len());
+    second["manifest"]["model"] = json!("model-b");
+    second["manifest"]["effort"] = json!("low");
+    second["manifest"]["policy"] = json!({"write":"all"});
+    rehash(&mut second);
+    let mut third = first.clone();
+    third["start"] = json!(2 * line.len());
+    third["end"] = json!(3 * line.len());
+    third["manifest"]["project"] = json!("other/project");
+    third["manifest"]["task"] = json!(284);
+    third["manifest"]["attempt"] = json!("attempt-2");
+    rehash(&mut third);
+    let mut fourth = first.clone();
+    fourth["start"] = json!(3 * line.len());
+    fourth["end"] = json!(4 * line.len());
+    let mut uploads = [first, second, third, fourth];
+    let mut id = String::new();
+    for (n, b) in uploads.iter_mut().enumerate() {
+        b["turns"] = json!([{"event_id":format!("turn-{n}"),"start":n*line.len()}]);
+        id = f.ingest(b, NOW + n as i64).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let payload=json!({"observation":{"kind":"agent.turn","session_id":"resumed","project":b["manifest"]["project"],"task":b["manifest"]["task"],"attempt":b["manifest"]["attempt"],"duration_us":(n+1)*100,"outcome":"ok","input_tokens":(n+1)*10,"cache_read_tokens":0,"cache_write_tokens":0,"output_tokens":1}}).to_string();
+        f.e().store().write(|tx|{tx.execute("INSERT INTO observations(installation,workspace,generation,product,event_id,observed,received,kind,payload) VALUES ('inst','ws',1,'agentq',?1,?2,?2,'agent.turn',?3)",params![format!("turn-{n}"),NOW,payload])?;Ok(())}).unwrap();
+    }
+    let c = f.e().store().lock().unwrap();
+    let all = versions(&c, &id).unwrap();
+    assert_eq!(all.len(), 3);
+    let first_hash = uploads[0]["manifest_sha256"].as_str().unwrap();
+    assert_eq!(
+        all.iter()
+            .find(|v| v.hash == first_hash)
+            .unwrap()
+            .positions
+            .len(),
+        2,
+        "returning to earlier conditions keeps both activations"
+    );
+    for (n, expected) in [(0, 50), (1, 20), (2, 30)] {
+        let mut s = session(&c, &id, OWNER, false).unwrap();
+        s.manifest = uploads[n]["manifest"].clone();
+        s.version = uploads[n]["manifest_sha256"].as_str().map(String::from);
+        let m = view::metrics(&c, &s).unwrap();
+        assert_eq!(m["tokens"]["input_tokens"]["observed"], expected);
+        assert_eq!(m["duration_us"], expected * 10);
+    }
+    drop(c);
+    let mut changed = uploads[0].clone();
+    changed["manifest"]["model"] = json!("rewrite");
+    rehash(&mut changed);
+    assert_eq!(f.ingest(&changed, NOW), Err(Failure("replay_mismatch")));
+    let payload=json!({"observation":{"kind":"agent.turn","session_id":"resumed","project":"example/project","task":283,"attempt":"attempt-1","duration_us":500,"outcome":"ok","input_tokens":50,"cache_read_tokens":0,"cache_write_tokens":0,"output_tokens":1}}).to_string();
+    f.e().store().write(|tx|{tx.execute("INSERT INTO observations(installation,workspace,generation,product,event_id,observed,received,kind,payload) VALUES ('inst','ws',1,'agentq','late-turn',?1,?1,'agent.turn',?2)",params![NOW,payload])?;Ok(())}).unwrap();
+    {
+        let c = f.e().store().lock().unwrap();
+        let s = session(&c, &id, OWNER, false).unwrap();
+        let m = view::metrics(&c, &s).unwrap();
+        assert_eq!(m["unattributed"], 1);
+        assert_eq!(m["duration_us"], Value::Null);
+        assert_eq!(m["tokens"]["input_tokens"]["state"], "unknown");
+    }
+    let mut replay = uploads[1].clone();
+    replay["turns"] = json!([{"event_id":"late-turn","start":line.len()}]);
+    f.ingest(&replay, NOW + 5).unwrap();
+    {
+        let c = f.e().store().lock().unwrap();
+        let mut s = session(&c, &id, OWNER, false).unwrap();
+        s.manifest = uploads[1]["manifest"].clone();
+        s.version = uploads[1]["manifest_sha256"].as_str().map(String::from);
+        let m = view::metrics(&c, &s).unwrap();
+        assert_eq!(m["duration_us"], 700);
+        assert_eq!(m["tokens"]["input_tokens"]["observed"], 70);
+    }
+    replay["turns"] = json!([{"event_id":"late-turn","start":0}]);
+    assert_eq!(f.ingest(&replay, NOW + 6), Err(Failure("replay_mismatch")));
+    let html = f.request("GET", "/archive", "model=model-b", Some(OWNER), b"", &[]);
+    let html = String::from_utf8(html.body).unwrap();
+    assert!(html.contains("model-b") && !html.contains("model-a"));
+    let project = HashMap::from([
+        ("workspace".into(), "ws".into()),
+        ("project".into(), "other/project".into()),
+        ("confirm".into(), "delete".into()),
+    ]);
+    mutate(f.e(), &f.objects(), &project, OWNER, false).unwrap();
+    assert_eq!(
+        f.ingest(&uploads[0], NOW),
+        Err(Failure("deleted")),
+        "project deletion includes every historical manifest"
+    );
+}
+
+#[test]
+fn archive_v1_index_migration_preserves_bytes_and_first_manifest() {
+    let f = Fixture::new("v1-migration");
+    let raw = record("s");
+    let id = f.ingest(&body("s", "source", &raw), NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    f.e().store().lock().unwrap().execute_batch("DROP TABLE archive.archive_turns; DROP TABLE archive.archive_versions; DROP TABLE archive.archive_manifests; ALTER TABLE archive.archive_sources DROP COLUMN total; ALTER TABLE archive.archive_sources DROP COLUMN complete; ALTER TABLE archive.archive_ranges DROP COLUMN manifest; PRAGMA archive.user_version=1;").unwrap();
+    let e = Enroll::open(&f.dir, "dash.example.test").unwrap();
+    let o = objects::Objects::open(&f.root(), e.archive_key()).unwrap();
+    assert_eq!(
+        read_source(&e, &o, &id, "source", OWNER, "migration", NOW)
+            .unwrap()
+            .2,
+        raw
+    );
+    let c = e.store().lock().unwrap();
+    let v = versions(&c, &id).unwrap();
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].positions, vec![("source".into(), 0)]);
+    assert_eq!(
+        c.query_row("PRAGMA archive.user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
 }

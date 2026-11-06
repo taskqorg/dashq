@@ -171,6 +171,19 @@ fn list(
         q.query_map([subject], session_row)?
             .collect::<Result<Vec<_>, _>>()?
     };
+    sessions = {
+        let c = e.store().lock()?;
+        let mut rows = Vec::new();
+        for s in sessions {
+            for v in versions(&c, &s.id)? {
+                let mut row = s.clone();
+                row.manifest = v.manifest;
+                row.version = Some(v.hash);
+                rows.push(row);
+            }
+        }
+        rows
+    };
     let mut out = String::new();
     write!(out,"<h2>Find and compare runs</h2><form action=\"/archive\" method=\"get\" class=\"archive-filters\">").unwrap();
     for (field, label) in [
@@ -239,7 +252,7 @@ fn list(
         sessions = found;
         out.push_str("<p>Search results across all authorized retained sessions; expired or deleted content cannot be searched.</p>");
     }
-    write!(out,"<p>{} sessions in scope. Metrics are reported agent.turn quantities, never inferred from transcript text.</p><div class=\"archive-table\"><table><thead><tr><th>Run</th><th>Task / attempt</th><th>Runtime / model</th><th>Conditions</th><th>Usage</th><th>Duration (µs) / observed outcomes</th><th>Archive position</th></tr></thead><tbody>",sessions.len()).unwrap();
+    write!(out,"<p>{} session condition versions in scope. Metrics are reported agent.turn quantities, never inferred from transcript text.</p><div class=\"archive-table\"><table><thead><tr><th>Run</th><th>Task / attempt</th><th>Runtime / model</th><th>Conditions</th><th>Usage</th><th>Duration (µs) / observed outcomes</th><th>Archive position</th></tr></thead><tbody>",sessions.len()).unwrap();
     let c = e.store().lock()?;
     for s in &sessions {
         let srcs = sources(&c, s, now)?;
@@ -269,6 +282,12 @@ fn list(
         ] {
             write!(out, "<dt>{label}</dt><dd>{}</dd>", value(&s.manifest[k])).unwrap();
         }
+        write!(
+            out,
+            "<dt>Manifest SHA-256</dt><dd>{}</dd>",
+            esc(s.version.as_deref().unwrap_or("unknown"))
+        )
+        .unwrap();
         write!(out,"</dl></details></td><td>{}</td><td>{}<br>{}</td><td>{state}<br>{} bytes · {} sources<small>received {} · age {}s</small></td></tr>",usage(&metrics),value(&metrics["duration_us"]),value(&metrics["outcome"]),bytes.map_or("unknown".into(),|n|n.to_string()),srcs.len(),esc(&crate::source::clock(s.received.max(0) as u64,now.max(0) as u64)),now.saturating_sub(s.received).max(0)).unwrap();
     }
     out.push_str("</tbody></table></div>");
@@ -308,6 +327,23 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
         }),
         esc(&serde_json::to_string_pretty(&s.manifest).unwrap_or_default())
     );
+    {
+        let c = e.store().lock()?;
+        out.push_str("<details><summary>All manifest versions and first byte positions</summary>");
+        for v in versions(&c, id)? {
+            write!(out, "<h3>{}</h3><ul>", esc(&v.hash)).unwrap();
+            for (source, start) in v.positions {
+                write!(out, "<li>{} · byte {start}</li>", esc(&source)).unwrap();
+            }
+            write!(
+                out,
+                "</ul><pre>{}</pre>",
+                esc(&serde_json::to_string_pretty(&v.manifest).unwrap_or_default())
+            )
+            .unwrap();
+        }
+        out.push_str("</details>");
+    }
     if s.deleted {
         out.push_str("<p>Deleted permanently. Index retained; upload replay refused.</p>");
         return Ok(out);
@@ -329,6 +365,10 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
         .unwrap();
         if src.expired {
             out.push_str("<p>Content expired after 365 days. Index retained.</p></section>");
+            continue;
+        }
+        if src.media && !src.complete {
+            write!(out,"<p>Media pending: {} of {} bytes; unavailable until complete and whole-object checksum verified.</p></section>",src.end,src.total.map_or("unknown".into(),|n|n.to_string())).unwrap();
             continue;
         }
         write!(
@@ -365,51 +405,88 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
     Ok(out)
 }
 
-/// Session identity is producer session_id, scoped to the grant's workspace and installation, never a name guess.
+/// Byte bindings select the manifest in force; ambiguous/missing multi-version attribution stays unknown.
 pub(super) fn metrics(c: &Connection, s: &Session) -> Res<Value> {
-    let mut q=c.prepare("SELECT payload FROM observations WHERE workspace=?1 AND installation=?2 AND kind='agent.turn' AND json_extract(payload,'$.observation.session_id')=?3")?;
-    let rows = q
+    let desired = s
+        .version
+        .clone()
+        .unwrap_or_else(|| coreq::enroll::digest(&s.manifest));
+    let versions = versions(c, &s.id)?;
+    let mut q=c.prepare("SELECT event_id,payload FROM observations WHERE workspace=?1 AND installation=?2 AND kind='agent.turn' AND json_extract(payload,'$.observation.session_id')=?3")?;
+    let stored = q
         .query_map(
             params![s.ws, s.installation, s.manifest["session"].as_str()],
-            |r| r.get::<_, String>(0),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
         )?
         .collect::<Result<Vec<_>, _>>()?;
-    let rows: Vec<Value> = rows
-        .into_iter()
-        .filter_map(|s| {
-            serde_json::from_str::<Value>(&s)
-                .ok()
-                .map(|v| v["observation"].clone())
-        })
-        .collect();
     let identity = |v: &Value| {
         v.as_str()
             .map(String::from)
             .or_else(|| v.as_u64().map(|n| n.to_string()))
     };
-    let rows: Vec<_> = rows
-        .into_iter()
-        .filter(|r| {
-            r["project"] == s.manifest["project"]
-                && ["task", "attempt"]
-                    .iter()
-                    .all(|k| identity(&r[*k]) == identity(&s.manifest[*k]))
-        })
-        .collect();
+    let mut rows = Vec::new();
+    let mut unattributed = 0usize;
+    for (event, payload) in stored {
+        let parsed: Value = serde_json::from_str(&payload).map_err(|_| Failure("unavailable"))?;
+        let r = &parsed["observation"];
+        let conditions = r["project"] == s.manifest["project"]
+            && ["task", "attempt"]
+                .iter()
+                .all(|k| identity(&r[*k]) == identity(&s.manifest[*k]));
+        if !conditions {
+            continue;
+        }
+        let mut q = c.prepare(
+            "SELECT source,start FROM archive.archive_turns WHERE session=?1 AND event_id=?2",
+        )?;
+        let bindings = q
+            .query_map([&s.id, &event], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut hashes = std::collections::BTreeSet::new();
+        let mut missing = false;
+        if bindings.is_empty() && versions.len() == 1 {
+            hashes.insert(versions[0].hash.clone());
+        } else if bindings.is_empty() {
+            missing = true;
+        }
+        for (source, start) in bindings {
+            match version_at(c, &s.id, &source, start)? {
+                Some(h) => {
+                    hashes.insert(h);
+                }
+                None => missing = true,
+            }
+        }
+        if missing || hashes.len() != 1 {
+            unattributed += 1;
+        } else if hashes.contains(&desired) {
+            rows.push(r.clone());
+        }
+    }
     let refs: Vec<_> = rows.iter().collect();
-    let duration = if rows.is_empty() {
+    let duration = if rows.is_empty() || unattributed > 0 {
         None
     } else {
         rows.iter().try_fold(0u64, |sum, r| {
             r["duration_us"].as_u64().and_then(|n| sum.checked_add(n))
         })
     };
+    let mut tokens = crate::fleet::tokens(&refs);
+    if unattributed > 0 {
+        for (_, v) in tokens.as_object_mut().into_iter().flatten() {
+            v["state"] = json!("unknown");
+            v["of"] = json!(rows.len() + unattributed);
+        }
+    }
     let outcomes: std::collections::BTreeSet<_> =
         rows.iter().filter_map(|r| r["outcome"].as_str()).collect();
     Ok(
-        json!({"records":rows.len(),"duration_us":duration,"outcome":if rows.is_empty() || rows.iter().any(|r|r["outcome"].is_null()){Value::Null}else{json!(outcomes)},"tokens":crate::fleet::tokens(&refs)}),
+        json!({"records":rows.len(),"unattributed":unattributed,"duration_us":duration,"outcome":if rows.is_empty() || unattributed>0 || rows.iter().any(|r|r["outcome"].is_null()){Value::Null}else{json!(outcomes)},"tokens":tokens}),
     )
 }
+
 fn usage(metrics: &Value) -> String {
     let mut out = String::new();
     for (k, label) in [
@@ -445,5 +522,13 @@ fn usage(metrics: &Value) -> String {
         value(&metrics["records"])
     )
     .unwrap();
+    if metrics["unattributed"].as_u64().unwrap_or(0) > 0 {
+        write!(
+            out,
+            "<small>Manifest attribution unknown for {} records</small>",
+            value(&metrics["unattributed"])
+        )
+        .unwrap();
+    }
     out
 }

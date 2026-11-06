@@ -1218,7 +1218,8 @@ mod tests {
         e.store().ack(&verifier,source::now() as i64).unwrap();
         let raw = b"invented-private-archive-content\n";
         let hash: String = ring::digest::digest(&ring::digest::SHA256,raw).as_ref().iter().map(|b|format!("{b:02x}")).collect();
-        let wire = json!({"protocol":1,"schema":"agent-history/1","manifest":{"project":"example/project","task":283,"attempt":1,"actor":"worker","entry":"taskq","runtime":"invented-runtime","cli_version":null,"model":null,"effort":null,"policy":null,"account_label":null,"host":"invented-host","session":"invented-session","parent_session":null,"instructions_hash":null},"source":"source","format":"invented-format","capture":"launched","start":0,"end":raw.len(),"bytes":base64(raw),"sha256":hash,"scrubbed":0,"observed_at":source::now()});
+        let mut wire = json!({"protocol":1,"schema":"agent-history/1","manifest":{"project":"example/project","task":283,"attempt":1,"actor":"worker","entry":"taskq","runtime":"invented-runtime","cli_version":null,"model":null,"effort":null,"policy":null,"account_label":null,"host":"invented-host","session":"invented-session","parent_session":null,"instructions_hash":null},"source":"source","format":"invented-format","capture":"launched","start":0,"end":raw.len(),"bytes":base64(raw),"sha256":hash,"scrubbed":0,"observed_at":source::now()});
+        wire["manifest_sha256"]=json!(coreq::enroll::digest(&wire["manifest"]));
         let request = |path:&str,method:&str,headers:&str,body:&str| {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();

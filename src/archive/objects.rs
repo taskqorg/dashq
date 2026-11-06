@@ -104,11 +104,15 @@ impl Objects {
                 return Err("unavailable".into());
             }
             c.execute_batch("PRAGMA archive.synchronous=FULL;")?;
-            if c.query_row("PRAGMA archive.user_version", [], |r| r.get::<_, i64>(0))? > 1 {
+            let version = c.query_row("PRAGMA archive.user_version", [], |r| r.get::<_, i64>(0))?;
+            if version > 2 {
                 return Err("unavailable".into());
             }
             c.execute_batch(INDEX)?;
-            c.execute_batch("PRAGMA archive.user_version=1;")?;
+            if version < 2 {
+                migrate_index(c)?;
+            }
+            c.execute_batch("PRAGMA archive.user_version=2;")?;
             if c.query_row("PRAGMA archive.quick_check", [], |r| r.get::<_, String>(0))? != "ok" {
                 return Err("unavailable".into());
             }

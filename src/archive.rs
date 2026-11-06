@@ -16,10 +16,52 @@ CREATE TABLE IF NOT EXISTS archive_readers(workspace TEXT NOT NULL, subject TEXT
 ";
 const INDEX: &str = "
 CREATE TABLE IF NOT EXISTS archive.archive_sessions(id TEXT PRIMARY KEY, workspace TEXT NOT NULL, installation TEXT NOT NULL, session TEXT NOT NULL, project TEXT NOT NULL, manifest TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, received INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, UNIQUE(workspace,installation,session));
-CREATE TABLE IF NOT EXISTS archive.archive_sources(session TEXT NOT NULL REFERENCES archive_sessions(id), source TEXT NOT NULL, format TEXT NOT NULL, media INTEGER NOT NULL, PRIMARY KEY(session,source));
-CREATE TABLE IF NOT EXISTS archive.archive_ranges(session TEXT NOT NULL, source TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, hash TEXT NOT NULL, received INTEGER NOT NULL, observed INTEGER NOT NULL, scrubbed INTEGER NOT NULL, retained INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(session,source,start), FOREIGN KEY(session,source) REFERENCES archive_sources(session,source));
+CREATE TABLE IF NOT EXISTS archive.archive_sources(session TEXT NOT NULL REFERENCES archive_sessions(id), source TEXT NOT NULL, format TEXT NOT NULL, media INTEGER NOT NULL, total INTEGER, complete INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(session,source));
+CREATE TABLE IF NOT EXISTS archive.archive_ranges(session TEXT NOT NULL, source TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, hash TEXT NOT NULL, received INTEGER NOT NULL, observed INTEGER NOT NULL, scrubbed INTEGER NOT NULL, retained INTEGER NOT NULL DEFAULT 1, manifest TEXT NOT NULL, PRIMARY KEY(session,source,start), FOREIGN KEY(session,source) REFERENCES archive_sources(session,source));
+CREATE TABLE IF NOT EXISTS archive.archive_manifests(session TEXT NOT NULL REFERENCES archive_sessions(id), hash TEXT NOT NULL, manifest TEXT NOT NULL, PRIMARY KEY(session,hash));
+CREATE TABLE IF NOT EXISTS archive.archive_versions(session TEXT NOT NULL, source TEXT NOT NULL, start INTEGER NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(session,source,start), FOREIGN KEY(session,source) REFERENCES archive_sources(session,source));
+CREATE TABLE IF NOT EXISTS archive.archive_turns(session TEXT NOT NULL, source TEXT NOT NULL, event_id TEXT NOT NULL, start INTEGER NOT NULL, PRIMARY KEY(session,source,event_id), FOREIGN KEY(session,source) REFERENCES archive_sources(session,source));
 CREATE TABLE IF NOT EXISTS archive.archive_audit(id INTEGER PRIMARY KEY, actor TEXT NOT NULL, workspace TEXT NOT NULL, session TEXT NOT NULL, source TEXT NOT NULL, action TEXT NOT NULL, at INTEGER NOT NULL, outcome TEXT NOT NULL DEFAULT 'pending', reason TEXT);
 ";
+fn migrate_index(c: &Connection) -> Res<()> {
+    for (table, column, definition) in [
+        ("archive_sources", "total", "INTEGER"),
+        ("archive_sources", "complete", "INTEGER NOT NULL DEFAULT 1"),
+        ("archive_ranges", "manifest", "TEXT NOT NULL DEFAULT ''"),
+    ] {
+        let has = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1,'archive') WHERE name=?2)",
+            [table, column],
+            |r| r.get::<_, bool>(0),
+        )?;
+        if !has {
+            c.execute_batch(&format!(
+                "ALTER TABLE archive.{table} ADD COLUMN {column} {definition}"
+            ))?;
+        }
+    }
+    let rows = {
+        let mut q = c.prepare("SELECT id,manifest FROM archive.archive_sessions")?;
+        q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for (id, raw) in rows {
+        let m: Value = serde_json::from_str(&raw).map_err(|_| Failure("unavailable"))?;
+        let hash = coreq::enroll::digest(&m);
+        c.execute(
+            "INSERT OR IGNORE INTO archive.archive_manifests VALUES (?1,?2,?3)",
+            params![id, hash, raw],
+        )?;
+        c.execute("INSERT OR IGNORE INTO archive.archive_versions SELECT session,source,MIN(start),?2 FROM archive.archive_ranges WHERE session=?1 GROUP BY session,source",params![id,hash])?;
+        c.execute(
+            "UPDATE archive.archive_ranges SET manifest=?2 WHERE session=?1 AND manifest=''",
+            params![id, hash],
+        )?;
+    }
+    c.execute("UPDATE archive.archive_sources SET total=(SELECT MAX(end) FROM archive.archive_ranges r WHERE r.session=archive_sources.session AND r.source=archive_sources.source) WHERE media=1 AND total IS NULL",[])?;
+    Ok(())
+}
+
 pub const WIRE: &str = "agent-history/1";
 const RETENTION: i64 = 365 * 86400;
 #[derive(Debug, PartialEq)]
@@ -166,6 +208,10 @@ fn ingest(
         return Err("invalid_request".into());
     }
     let m = &b["manifest"];
+    let manifest_hash = coreq::enroll::digest(m);
+    if b["manifest_sha256"] != manifest_hash {
+        return Err("invalid_request".into());
+    }
     let (
         Some(source),
         Some(format),
@@ -198,20 +244,27 @@ fn ingest(
         return Err("invalid_request".into());
     }
     let media = b["media"] == true;
-    if media && (source != hash || start != 0 || format != "media") {
+    let total = if media {
+        Some(
+            integer(&b["total"])
+                .filter(|n| *n > 0 && end <= *n)
+                .ok_or(Failure("invalid_request"))?,
+        )
+    } else {
+        None
+    };
+    if media && (!digest(source) || format != "media") {
         return Err("invalid_request".into());
     }
     let mut c = e.store().lock()?;
     objects.index(&c)?;
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    // Recheck the live credential under the same writer lock as the accepted index commit.
     let g = store::authorize(&tx, verifier)?.ok_or(Failure("revoked"))?;
-    let active = tx.query_row(
+    if !tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM activations WHERE installation=?1 AND generation=?2)",
         params![g.installation, g.generation],
         |r| r.get::<_, bool>(0),
-    )?;
-    if !active {
+    )? {
         return Err("not_active".into());
     }
     if !serde_json::from_str::<Vec<String>>(&g.scopes)
@@ -235,45 +288,38 @@ fn ingest(
             .to_string()
             .as_bytes(),
     );
-    let old: Option<(String, bool)> = tx
+    if tx
         .query_row(
-            "SELECT manifest,deleted FROM archive.archive_sessions WHERE id=?1",
+            "SELECT deleted FROM archive.archive_sessions WHERE id=?1",
             [&id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get::<_, bool>(0),
         )
-        .optional()?;
-    if let Some((old, deleted)) = &old {
-        if *deleted {
-            return Err("deleted".into());
-        }
-        if serde_json::from_str::<Value>(old).ok().as_ref() != Some(m) {
-            return Err("replay_mismatch".into());
-        }
+        .optional()?
+        .unwrap_or(false)
+    {
+        return Err("deleted".into());
     }
-    let receipt = || json!({"protocol":1,"schema":WIRE,"state":"accepted","id":id,"source":source,"start":start,"end":end,"sha256":hash});
-    let existing: Option<(String, bool)> = tx
-        .query_row(
-            "SELECT format,media FROM archive.archive_sources WHERE session=?1 AND source=?2",
-            [&id, source],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?;
+    let existing:Option<(String,bool,Option<i64>,bool)>=tx.query_row("SELECT format,media,total,complete FROM archive.archive_sources WHERE session=?1 AND source=?2",[&id,source],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
     if existing
         .as_ref()
-        .is_some_and(|(f, m)| f != format || *m != media)
+        .is_some_and(|(f, m, t, _)| f != format || *m != media || *t != total)
     {
         return Err("replay_mismatch".into());
     }
-    let old_range:Option<(i64,String,bool,i64)>=tx.query_row("SELECT end,hash,retained,received FROM archive.archive_ranges WHERE session=?1 AND source=?2 AND start=?3",params![id,source,start],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
-    if let Some((old_end, old_hash, retained, received)) = old_range {
-        if old_end != end || old_hash != hash {
+    let receipt = |complete| json!({"protocol":1,"schema":WIRE,"state":"accepted","id":id,"source":source,"start":start,"end":end,"sha256":hash,"manifest_sha256":manifest_hash,"complete":complete});
+    let old:Option<(i64,String,bool,i64,String)>=tx.query_row("SELECT end,hash,retained,received,manifest FROM archive.archive_ranges WHERE session=?1 AND source=?2 AND start=?3",params![id,source,start],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?;
+    if let Some((old_end, old_hash, retained, received, old_manifest)) = old {
+        if old_end != end || old_hash != hash || old_manifest != manifest_hash {
             return Err("replay_mismatch".into());
         }
         if !retained || now.saturating_sub(received) >= RETENTION {
             return Err("expired".into());
         }
         objects.read(hash)?;
-        return Ok(receipt());
+        bind_turns(&tx, &id, source, b, end, media)?;
+        let complete = existing.as_ref().is_some_and(|e| e.3);
+        tx.commit()?;
+        return Ok(receipt(complete));
     }
     let position: i64 = tx.query_row(
         "SELECT COALESCE(MAX(end),0) FROM archive.archive_ranges WHERE session=?1 AND source=?2",
@@ -288,22 +334,134 @@ fn ingest(
         }
         .into());
     }
+    let complete = !media || total == Some(end);
+    if media && complete {
+        let mut digest = ring::digest::Context::new(&ring::digest::SHA256);
+        let mut q=tx.prepare("SELECT hash,start,end,retained,received FROM archive.archive_ranges WHERE session=?1 AND source=?2 ORDER BY start")?;
+        let parts = q
+            .query_map([&id, source], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, bool>(3)?,
+                    r.get::<_, i64>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut offset = 0;
+        for (hash, from, to, retained, received) in parts {
+            if !retained || now.saturating_sub(received) >= RETENTION {
+                return Err("expired".into());
+            }
+            let part = objects.read(&hash)?;
+            if from != offset || to - from != part.len() as i64 {
+                return Err("unavailable".into());
+            }
+            digest.update(&part);
+            offset = to;
+        }
+        if offset != start {
+            return Err("unavailable".into());
+        }
+        digest.update(&bytes);
+        if hex(digest.finish().as_ref()) != source {
+            return Err("invalid_request".into());
+        }
+    }
     objects.put(hash, &bytes)?;
     tx.execute("INSERT OR IGNORE INTO archive.archive_sessions(id,workspace,installation,session,project,manifest,created,received) VALUES (?1,?2,?3,?4,?5,?6,?7,?7)",params![id,g.workspace,g.installation,m["session"].as_str(),m["project"].as_str(),m.to_string(),now])?;
+    tx.execute("INSERT OR IGNORE INTO archive.archive_sources(session,source,format,media,total,complete) VALUES (?1,?2,?3,?4,?5,?6)",params![id,source,format,media,total,complete])?;
     tx.execute(
-        "INSERT OR IGNORE INTO archive.archive_sources VALUES (?1,?2,?3,?4)",
-        params![id, source, format, media],
+        "INSERT OR IGNORE INTO archive.archive_manifests VALUES (?1,?2,?3)",
+        params![id, manifest_hash, m.to_string()],
     )?;
-    tx.execute("INSERT INTO archive.archive_ranges(session,source,start,end,hash,received,observed,scrubbed) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",params![id,source,start,end,hash,now,observed,scrubbed])?;
+    let previous:Option<String>=tx.query_row("SELECT hash FROM archive.archive_versions WHERE session=?1 AND source=?2 ORDER BY start DESC LIMIT 1",[&id,source],|r|r.get(0)).optional()?;
+    if previous.as_deref() != Some(&manifest_hash) {
+        tx.execute(
+            "INSERT INTO archive.archive_versions VALUES (?1,?2,?3,?4)",
+            params![id, source, start, manifest_hash],
+        )?;
+    }
+    tx.execute("INSERT INTO archive.archive_ranges(session,source,start,end,hash,received,observed,scrubbed,manifest) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![id,source,start,end,hash,now,observed,scrubbed,manifest_hash])?;
+    tx.execute(
+        "UPDATE archive.archive_sources SET complete=?3 WHERE session=?1 AND source=?2",
+        params![id, source, complete],
+    )?;
+    bind_turns(&tx, &id, source, b, end, media)?;
     tx.execute(
         "UPDATE archive.archive_sessions SET received=?2 WHERE id=?1",
         params![id, now],
     )?;
     tx.commit()?;
-    Ok(receipt())
+    Ok(receipt(complete))
 }
 
-#[derive(Debug)]
+fn bind_turns(c: &Connection, id: &str, source: &str, b: &Value, end: i64, media: bool) -> Res<()> {
+    let turns = match b.get("turns") {
+        None => return Ok(()),
+        Some(v) => v.as_array().ok_or(Failure("invalid_request"))?,
+    };
+    if media && !turns.is_empty() {
+        return Err("invalid_request".into());
+    }
+    for turn in turns {
+        let event = turn["event_id"]
+            .as_str()
+            .filter(|_| text(&turn["event_id"]))
+            .ok_or(Failure("invalid_request"))?;
+        let start = integer(&turn["start"])
+            .filter(|n| *n < end)
+            .ok_or(Failure("invalid_request"))?;
+        let old:Option<i64>=c.query_row("SELECT start FROM archive.archive_turns WHERE session=?1 AND source=?2 AND event_id=?3",[id,source,event],|r|r.get(0)).optional()?;
+        if old.is_some_and(|n| n != start) {
+            return Err("replay_mismatch".into());
+        }
+        c.execute(
+            "INSERT OR IGNORE INTO archive.archive_turns VALUES (?1,?2,?3,?4)",
+            params![id, source, event, start],
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct Version {
+    hash: String,
+    manifest: Value,
+    positions: Vec<(String, i64)>,
+}
+fn versions(c: &Connection, id: &str) -> Res<Vec<Version>> {
+    let mut q=c.prepare("SELECT v.hash,m.manifest,v.source,v.start FROM archive.archive_versions v JOIN archive.archive_manifests m ON m.session=v.session AND m.hash=v.hash WHERE v.session=?1 ORDER BY v.source,v.start")?;
+    let rows = q
+        .query_map([id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut out: Vec<Version> = Vec::new();
+    for (hash, m, source, start) in rows {
+        if let Some(v) = out.iter_mut().find(|v| v.hash == hash) {
+            v.positions.push((source, start));
+        } else {
+            out.push(Version {
+                hash,
+                manifest: serde_json::from_str(&m).map_err(|_| Failure("unavailable"))?,
+                positions: vec![(source, start)],
+            });
+        }
+    }
+    Ok(out)
+}
+fn version_at(c: &Connection, id: &str, source: &str, start: i64) -> Res<Option<String>> {
+    Ok(c.query_row("SELECT hash FROM archive.archive_versions WHERE session=?1 AND source=?2 AND start<=?3 ORDER BY start DESC LIMIT 1",params![id,source,start],|r|r.get(0)).optional()?)
+}
+
+#[derive(Clone, Debug)]
 struct Session {
     id: String,
     ws: String,
@@ -312,6 +470,7 @@ struct Session {
     name: String,
     received: i64,
     deleted: bool,
+    version: Option<String>,
 }
 fn session(c: &Connection, id: &str, subject: &str, write: bool) -> Res<Session> {
     let row=c.query_row("SELECT id,workspace,installation,manifest,name,received,deleted FROM archive.archive_sessions WHERE id=?1",[id],session_row).optional()?.ok_or(Failure("not_found"))?;
@@ -334,6 +493,7 @@ fn session_row(r: &rusqlite::Row) -> rusqlite::Result<Session> {
         name: r.get(4)?,
         received: r.get(5)?,
         deleted: r.get(6)?,
+        version: None,
     })
 }
 
@@ -347,9 +507,11 @@ struct Source {
     observed: i64,
     scrubbed: i64,
     received: i64,
+    total: Option<i64>,
+    complete: bool,
 }
 fn sources(c: &Connection, s: &Session, now: i64) -> Res<Vec<Source>> {
-    let mut q=c.prepare("SELECT s.source,s.format,s.media,COALESCE(MAX(r.end),0),COALESCE(MIN(r.retained),0),COALESCE(MIN(r.received),0),COALESCE(MAX(r.observed),0),COALESCE(SUM(r.scrubbed),0),COALESCE(MAX(r.received),0) FROM archive.archive_sources s LEFT JOIN archive.archive_ranges r ON r.session=s.session AND r.source=s.source WHERE s.session=?1 GROUP BY s.source,s.format,s.media ORDER BY s.source")?;
+    let mut q=c.prepare("SELECT s.source,s.format,s.media,COALESCE(MAX(r.end),0),COALESCE(MIN(r.retained),0),COALESCE(MIN(r.received),0),COALESCE(MAX(r.observed),0),COALESCE(SUM(r.scrubbed),0),COALESCE(MAX(r.received),0),s.total,s.complete FROM archive.archive_sources s LEFT JOIN archive.archive_ranges r ON r.session=s.session AND r.source=s.source WHERE s.session=?1 GROUP BY s.source,s.format,s.media ORDER BY s.source")?;
     Ok(q.query_map([&s.id], |r| {
         Ok(Source {
             id: r.get(0)?,
@@ -360,6 +522,8 @@ fn sources(c: &Connection, s: &Session, now: i64) -> Res<Vec<Source>> {
             observed: r.get(6)?,
             scrubbed: r.get(7)?,
             received: r.get(8)?,
+            total: r.get(9)?,
+            complete: r.get(10)?,
         })
     })?
     .collect::<Result<_, _>>()?)
@@ -389,6 +553,9 @@ fn read_source(
     if src.expired {
         return Err("expired".into());
     }
+    if src.media && !src.complete {
+        return Err("incomplete".into());
+    }
     tx.execute("INSERT INTO archive.archive_audit(actor,workspace,session,source,action,at) VALUES (?1,?2,?3,?4,?5,?6)",params![hash_bytes(subject.as_bytes()),s.ws,s.id,source,action,now])?;
     let audit = tx.last_insert_rowid();
     tx.commit()?;
@@ -404,6 +571,9 @@ fn read_source(
             .ok_or(Failure("not_found"))?;
         if src.expired {
             return Err("expired".into());
+        }
+        if src.media && !src.complete {
+            return Err("incomplete".into());
         }
         let mut q=read.prepare("SELECT hash,start,end FROM archive.archive_ranges WHERE session=?1 AND source=?2 AND retained=1 ORDER BY start")?;
         let ranges = q
@@ -427,6 +597,9 @@ fn read_source(
             bytes.extend(chunk);
         }
         if bytes.len() as i64 != src.end {
+            return Err("unavailable".into());
+        }
+        if src.media && (src.total != Some(bytes.len() as i64) || hash_bytes(&bytes) != src.id) {
             return Err("unavailable".into());
         }
         Ok((s, src, bytes))
@@ -531,7 +704,7 @@ fn mutate(
                 return Err("not_found".into());
             }
             let mut q = tx.prepare(
-                "SELECT id FROM archive.archive_sessions WHERE workspace=?1 AND project=?2",
+                "SELECT s.id FROM archive.archive_sessions s WHERE s.workspace=?1 AND EXISTS(SELECT 1 FROM archive.archive_manifests m WHERE m.session=s.id AND json_extract(m.manifest,'$.project')=?2)",
             )?;
             q.query_map([ws, project], |r| r.get(0))?
                 .collect::<Result<Vec<String>, _>>()?
@@ -563,7 +736,7 @@ fn fail(code: &'static str) -> Resp {
         "scope" | "not_active" | "manual_disabled" | "forbidden" => "403 Forbidden",
         "not_found" => "404 Not Found",
         "method_not_allowed" => "405 Method Not Allowed",
-        "replay_mismatch" | "range_gap" | "deleted" | "expired" => "409 Conflict",
+        "replay_mismatch" | "range_gap" | "deleted" | "expired" | "incomplete" => "409 Conflict",
         _ => "503 Service Unavailable",
     };
     reply(
