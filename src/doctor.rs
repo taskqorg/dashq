@@ -152,7 +152,10 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let p = dir.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\necho '{out}'\nexit {code}\n")).unwrap();
+            // A single-threaded creator cannot leak a writable script descriptor into concurrent test children.
+            let status=std::process::Command::new("/bin/sh").args(["-c", "printf '%s' \"$DASHQ_DOCTOR_SCRIPT\" > \"$DASHQ_DOCTOR_FILE\""])
+                .env("DASHQ_DOCTOR_SCRIPT",format!("#!/bin/sh\necho '{out}'\nexit {code}\n")).env("DASHQ_DOCTOR_FILE",&p).status().unwrap();
+            assert!(status.success());
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
             p
         }
