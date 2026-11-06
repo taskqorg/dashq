@@ -8,12 +8,12 @@ Mandatory for every change. Product sections refine these rules and never weaken
 - **R1 Metadata only.** Except D31, never conversation text, prompts, tool input/output, raw commands, stderr/stdout or stack traces. `/data` holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
 - **R2 Unknown is never healthy.** Every value carries the state of its source. Missing data never becomes zero or healthy (D6).
 - **R3 Read-only by default.** dashq never writes to Langfuse, GitHub, ServerQ or any host, and has no state-changing button, except these narrow authorities: D11 enrollment, ingestion and connection management; D13 TaskQ answers, task controls and PM requests; D14 resource controls; D15 finding tasks; D16 AgentQ configuration; D25 blind host link relay, transport only; D27 public limits push.
-  - D31 adds archive ingestion, naming, deletion and read audit.
+  - D31 adds archive ingestion, naming, deletion and audit of reads and mutations.
   - D11 replaces the no-write, no-push and no-database restrictions only for enrollment, ingestion and connection management.
 - **R4 Grants stay separate.** Enrollment and observation grants carry no answer, control or host-command authority; AgentQ configuration needs a separately ticked D16 capability. Answer grants carry no control authority. D11 authorizes no host commands.
 - **R5 No new auth system.** The page sits behind the existing Langfuse UI forward-auth guard (D3). Browser data, including `/data`, always remains guarded. D11 machine routes use their own narrow authorization instead of browser forward-auth; no wildcard exemption.
 - **R6 Loopback only.** `dashq serve` binds `127.0.0.1:18882`; the port is not configurable to a non-loopback address. No public port.
-- **R7 Secrets stay server side.** Except D31 archive content for its explicit readers, secrets never reach the browser, `/data`, logs, URLs or `report` output.
+- **R7 Secrets stay server side.** Secrets never reach `/data`, logs, URLs or `report` output. Only the D31 browser archive may show content with missed secrets to explicit readers; other browser output carries no secrets.
 - **R8 Pull by default.** dashq pulls the D4 sources. Hosts push only through the R3 machine routes; any other host push is a later task (#4).
 - **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database; D31 adds a separate archive SQLite index and filesystem object store.
 ## D2. Process
@@ -182,7 +182,7 @@ Config `limits_push` (default off) makes DashQ the data source of the public lim
 ## D31. Agent session archive
 - One guarded archive area is the narrow R1/R7/R9 exception. `/data`, `report`, `export`, logs and telemetry stay metadata only. Content can contain missed secrets after producer best-effort scrubbing; only the archive owner and explicit readers accept that risk.
 - Capture launched workers and managers; manual sessions require explicit per-host opt-in, off by default. D11 enrollment grants `agent-history/1` separately from observation; grants bind installation and workspace. No observation or control grant implies archive authority.
-- Content expires after 365 days; index and metadata have no expiry. Content reads require the workspace owner or a separate archive-reader role, including loopback. Each content read is audited. Only the owner can name sessions or delete by session/project; deletion is permanent and refuses replay.
+- Content expires after 365 days; index and metadata have no expiry. Content reads require the workspace owner or a separate archive-reader role, including loopback. Reads are audited; naming/deletion audit is atomic. Only the owner can name sessions or delete by session/project; deletion is permanent and refuses replay.
 - Dedicated private filesystem objects are gzip-compressed, SHA-256 checked and AES-256-GCM encrypted at rest, outside SQLite. The deployment target is pds18; backup/restore includes index, objects and deployment key. Filesystem exhaustion refuses acceptance without acknowledging bytes.
 - `/archive` finds runs by project, task, attempt, runtime, model and host, names them, searches all authorized retained sessions and compares conditions, joining `agent.turn` metadata. Missing metrics stay unknown. Attempt rows link here; last shipped position and age never imply a live relay.
 - Read-time steps come from the pinned AgentQ runtime history API, never a DashQ native parser. Unknown records retain raw bytes; console and full raw reads are on demand. Render all content as untrusted text, never active HTML or media.

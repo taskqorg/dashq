@@ -5,6 +5,7 @@ use std::path::PathBuf;
 const NOW: i64 = 1_800_000_000;
 const OWNER: &str = "github|invented-owner";
 const CRED: &str = "invented-archive-credential";
+const PROXY: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"; // invented
 struct Fixture {
     dir: PathBuf,
     e: Result<Enroll, String>,
@@ -75,12 +76,24 @@ impl Fixture {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
+        if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("host")) {
+            headers.push(("host".into(), "dash.example.test".into()));
+        }
+        if !headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case(super::PROXY))
+        {
+            headers.push((super::PROXY.into(), PROXY.into()));
+        }
         if let Some(s) = subject {
             headers.push((enroll::SUBJECT.into(), s.into()));
         }
         route(
             &self.e,
-            Some(&self.root()),
+            Some(&Config {
+                root: self.root(),
+                proxy_token: Some(PROXY.into()),
+            }),
             &Req {
                 method,
                 path,
@@ -122,6 +135,433 @@ fn form(e: &Enroll, mut pairs: HashMap<String, String>, subject: &str) -> Vec<u8
         .collect::<Vec<_>>()
         .join("&")
         .into_bytes()
+}
+
+fn evidence(file: &str, html: &str) {
+    if let Some(dir) = std::env::var_os("DASHQ_ARCHIVE_EVIDENCE") {
+        let dir = PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let html = html.replace(
+            "<link rel=\"stylesheet\" href=\"/style.css\">",
+            &format!("<style>{}</style>", crate::style_css()),
+        );
+        std::fs::write(dir.join(format!("{file}.html")), html).unwrap();
+    }
+}
+
+// D31: a forwarded subject or a public Host alone cannot authenticate the proxy transport.
+#[test]
+fn browser_archive_refuses_unverified_proxy_on_every_path() {
+    let f = Fixture::new("proxy-boundary");
+    let id = f.ingest(&body("s", "source", &record("s")), NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let query = format!("id={id}&source=source&step=invented");
+    let headers = vec![
+        ("host".into(), "dash.example.test".into()),
+        (enroll::SUBJECT.into(), OWNER.into()),
+        (super::PROXY.into(), PROXY.into()),
+    ];
+    let req = Req {
+        method: "GET",
+        path: "/archive/raw",
+        query: &query,
+        headers: &headers,
+        body: b"",
+    };
+    assert_eq!(
+        route(
+            &f.e,
+            Some(&Config {
+                root: f.root(),
+                proxy_token: None
+            }),
+            &req,
+            NOW
+        )
+        .unwrap()
+        .status,
+        "403 Forbidden",
+        "a root alone must not enable browser reads"
+    );
+    assert_eq!(
+        route(&f.e, None, &req, NOW).unwrap().status,
+        "503 Service Unavailable"
+    );
+    for (method, path) in [
+        ("GET", "/archive"),
+        ("GET", "/archive/raw"),
+        ("GET", "/archive/step"),
+        ("POST", "/archive/search"),
+        ("POST", "/archive/name"),
+        ("POST", "/archive/delete"),
+    ] {
+        let data = form(
+            f.e(),
+            HashMap::from([
+                ("id".into(), id.clone()),
+                ("q".into(), "canary".into()),
+                ("name".into(), "invented".into()),
+                ("confirm".into(), "delete".into()),
+            ]),
+            OWNER,
+        );
+        for (host, token) in [
+            ("localhost:18882", ""),
+            ("127.0.0.1:18882", PROXY),
+            ("dash.example.test", ""),
+            (
+                "dash.example.test",
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            ),
+        ] {
+            let r = f.request(
+                method,
+                path,
+                &query,
+                Some(OWNER),
+                &data,
+                &[
+                    ("host", host),
+                    ("x-dashq-archive-proxy", token),
+                    ("origin", "https://dash.example.test"),
+                ],
+            );
+            assert_eq!(
+                r.status, "403 Forbidden",
+                "{method} {path}, Host {host} trusted an unverified subject"
+            );
+            assert!(!String::from_utf8_lossy(&r.body).contains("invented-private-canary"));
+        }
+        for header in [super::PROXY, enroll::SUBJECT, "host"] {
+            let value = if header == super::PROXY {
+                PROXY
+            } else if header == enroll::SUBJECT {
+                OWNER
+            } else {
+                "dash.example.test"
+            };
+            let r = f.request(
+                method,
+                path,
+                &query,
+                Some(OWNER),
+                &data,
+                &[
+                    (header, value),
+                    (header, value),
+                    ("origin", "https://dash.example.test"),
+                ],
+            );
+            assert_eq!(
+                r.status, "403 Forbidden",
+                "duplicate authoritative header {header}"
+            );
+        }
+        let mut pairs = HashMap::from([
+            ("id".into(), id.clone()),
+            ("q".into(), "canary".into()),
+            ("name".into(), "invented".into()),
+            ("confirm".into(), "delete".into()),
+        ]);
+        if path == "/archive/search" {
+            pairs.remove("id");
+        }
+        let foreign = form(f.e(), pairs, "foreign");
+        role(f.e(), "other-workspace", "foreign", true, true).unwrap();
+        let r = f.request(
+            method,
+            path,
+            if path == "/archive" { "" } else { &query },
+            Some("foreign"),
+            &foreign,
+            &[("origin", "https://dash.example.test")],
+        );
+        assert_eq!(
+            r.status,
+            if ["/archive", "/archive/search"].contains(&path) {
+                "200 OK"
+            } else {
+                "404 Not Found"
+            }
+        );
+        let html = String::from_utf8_lossy(&r.body);
+        assert!(
+            !html.contains(&id)
+                && !html.contains("invented-model")
+                && !html.contains("invented-private-canary"),
+            "cross-workspace response at {path}"
+        );
+    }
+    assert_eq!(f.audit(), 0);
+}
+
+// D31: one corrupt source must not hide healthy sources/runs or multiply reads by manifest count.
+#[test]
+fn unreadable_sources_are_isolated_and_search_reads_each_source_once() {
+    let f = Fixture::new("partial-search");
+    let bad = b"invented-corrupt-object\n";
+    let mut b = body("multi", "bad-source", bad);
+    let id = f.ingest(&b, NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for n in 1..3 {
+        b["start"] = json!(n * bad.len());
+        b["end"] = json!((n + 1) * bad.len());
+        b["manifest"]["model"] = json!(format!("model-{n}"));
+        rehash(&mut b);
+        f.ingest(&b, NOW).unwrap();
+    }
+    f.ingest(&body("multi", "healthy-source", &record("multi")), NOW)
+        .unwrap();
+    let other = f
+        .ingest(&body("other", "source", &record("other")), NOW)
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::fs::write(f.root().join(hash_bytes(bad)), b"invented-corruption").unwrap();
+    let detail = f.request(
+        "GET",
+        "/archive",
+        &format!("id={id}"),
+        Some(OWNER),
+        b"",
+        &[],
+    );
+    assert_eq!(detail.status, "200 OK");
+    let html = String::from_utf8(detail.body).unwrap();
+    assert!(
+        html.contains("unavailable")
+            && html.contains("healthy-source")
+            && html.contains("Open full output")
+    );
+    evidence("partial", &html);
+    let before = f.audit();
+    let data = form(
+        f.e(),
+        HashMap::from([("q".into(), "invented-private-canary".into())]),
+        OWNER,
+    );
+    let searched = f.request(
+        "POST",
+        "/archive/search",
+        "",
+        Some(OWNER),
+        &data,
+        &[("origin", "https://dash.example.test")],
+    );
+    assert_eq!(searched.status, "200 OK");
+    let html = String::from_utf8(searched.body).unwrap();
+    assert!(html.contains(&id) && html.contains(&other) && html.contains("incomplete"));
+    evidence("partial-search", &html);
+    assert_eq!(
+        f.audit() - before,
+        3,
+        "each of the three sources is read once, independent of versions"
+    );
+}
+
+// R3: durable who/what/when evidence is atomic with mutations, and an audit failure rolls them back.
+#[test]
+fn naming_and_deletion_require_atomic_mutation_audits() {
+    let f = Fixture::new("mutation-audit");
+    let id = f.ingest(&body("s", "source", &record("s")), NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let named = form(
+        f.e(),
+        HashMap::from([
+            ("id".into(), id.clone()),
+            ("name".into(), "invented-name".into()),
+        ]),
+        OWNER,
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            "/archive/name",
+            "",
+            Some(OWNER),
+            &named,
+            &[("origin", "https://dash.example.test")]
+        )
+        .status,
+        "200 OK"
+    );
+    {
+        let c = f.e().store().lock().unwrap();
+        let audit: (String, String, String, String, i64, String) = c
+            .query_row(
+                "SELECT actor,workspace,session,action,at,outcome FROM archive.archive_audit",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            audit,
+            (
+                hash_bytes(OWNER.as_bytes()),
+                "ws".into(),
+                id.clone(),
+                "name".into(),
+                NOW,
+                "committed".into()
+            )
+        );
+        c.execute_batch("CREATE TRIGGER archive.refuse_mutation_audit BEFORE INSERT ON archive_audit BEGIN SELECT RAISE(ABORT,'invented refusal'); END;").unwrap();
+    }
+    let renamed = form(
+        f.e(),
+        HashMap::from([
+            ("id".into(), id.clone()),
+            ("name".into(), "must-not-stick".into()),
+        ]),
+        OWNER,
+    );
+    let deleted = form(
+        f.e(),
+        HashMap::from([
+            ("id".into(), id.clone()),
+            ("confirm".into(), "delete".into()),
+        ]),
+        OWNER,
+    );
+    for (path, data) in [
+        ("/archive/name", renamed.as_slice()),
+        ("/archive/delete", deleted.as_slice()),
+    ] {
+        assert_eq!(
+            f.request(
+                "POST",
+                path,
+                "",
+                Some(OWNER),
+                data,
+                &[("origin", "https://dash.example.test")]
+            )
+            .status,
+            "503 Service Unavailable"
+        );
+    }
+    {
+        let c = f.e().store().lock().unwrap();
+        let s = session(&c, &id, OWNER, false).unwrap();
+        assert_eq!(s.name, "invented-name");
+        assert!(!s.deleted);
+        c.execute_batch("DROP TRIGGER archive.refuse_mutation_audit")
+            .unwrap();
+    }
+    let project = form(
+        f.e(),
+        HashMap::from([
+            ("workspace".into(), "ws".into()),
+            ("project".into(), "example/project".into()),
+            ("confirm".into(), "delete".into()),
+        ]),
+        OWNER,
+    );
+    assert_eq!(
+        f.request(
+            "POST",
+            "/archive/delete",
+            "",
+            Some(OWNER),
+            &project,
+            &[("origin", "https://dash.example.test")]
+        )
+        .status,
+        "200 OK"
+    );
+    let c = f.e().store().lock().unwrap();
+    assert_eq!(c.query_row("SELECT COUNT(*) FROM archive.archive_audit WHERE action='delete_project' AND outcome='committed' AND session=?1 AND at=?2",params![id,NOW],|r|r.get::<_,i64>(0)).unwrap(),1);
+}
+
+// D31: object I/O must not block ingest/metadata; concurrent revoke, deletion or retention prevents delivery.
+#[test]
+fn object_io_releases_store_and_rechecks_reader_before_delivery() {
+    for (change, reason) in [
+        ("revoke", "not_found"),
+        ("delete", "deleted"),
+        ("expire", "expired"),
+    ] {
+        let f = Fixture::new(&format!("read-lock-{change}"));
+        let id = f.ingest(&body("s", "source", &record("s")), NOW).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        role(f.e(), "ws", "reader", false, true).unwrap();
+        let (ready, started) = std::sync::mpsc::channel();
+        let (resume, wait) = std::sync::mpsc::channel();
+        let mut objects = f.objects();
+        objects.before_read = Some((ready, std::sync::Mutex::new(wait)));
+        std::thread::scope(|scope| {
+            let read =
+                scope.spawn(|| read_source(f.e(), &objects, &id, "source", "reader", "test", NOW));
+            started
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap();
+            let (done, completed) = std::sync::mpsc::channel();
+            let fixture = &f;
+            let id = &id;
+            let writer = scope.spawn(move || {
+                fixture
+                    .ingest(&body("concurrent", "source", &record("concurrent")), NOW)
+                    .unwrap();
+                match change {
+                    "revoke" => role(fixture.e(), "ws", "reader", false, false).unwrap(),
+                    "delete" => mutate(
+                        fixture.e(),
+                        &fixture.objects(),
+                        &HashMap::from([
+                            ("id".into(), id.clone()),
+                            ("confirm".into(), "delete".into()),
+                        ]),
+                        OWNER,
+                        false,
+                        NOW,
+                    )
+                    .unwrap(),
+                    _ => prune(fixture.e(), &fixture.root(), NOW + RETENTION).unwrap(),
+                }
+                done.send(()).unwrap();
+            });
+            let unblocked = completed
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_ok();
+            resume.send(()).unwrap();
+            writer.join().unwrap();
+            let result = read.join().unwrap();
+            assert!(unblocked, "object I/O held the global store lock");
+            assert_eq!(
+                result.unwrap_err(),
+                Failure(reason),
+                "content was delivered after {change}"
+            );
+        });
+        let c = f.e().store().lock().unwrap();
+        assert_eq!(
+            c.query_row(
+                "SELECT outcome,reason FROM archive.archive_audit WHERE action='test'",
+                [],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            )
+            .unwrap(),
+            ("failed".into(), reason.into())
+        );
+    }
 }
 
 #[test]
@@ -217,6 +657,37 @@ fn ingest_replay_ranges_integrity_and_content_stays_out_of_sqlite() {
     assert_eq!(
         read_source(f.e(), &f.objects(), &id, "source-1", OWNER, "test", NOW).unwrap_err(),
         Failure("unavailable")
+    );
+    // Producer source names are opaque data, never filesystem paths or HTML.
+    let source = "../outside <script>alert(1)</script>";
+    std::fs::write(f.dir.join("outside"), b"invented-sentinel").unwrap();
+    let raw = b"invented-opaque-source";
+    let id = f.ingest(&body("opaque", source, raw), NOW).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let response = f.request(
+        "GET",
+        "/archive/raw",
+        &format!("id={id}&source={}", crate::source::enc(source)),
+        Some(OWNER),
+        b"",
+        &[],
+    );
+    assert_eq!(response.body, raw);
+    let detail = f.request(
+        "GET",
+        "/archive",
+        &format!("id={id}"),
+        Some(OWNER),
+        b"",
+        &[],
+    );
+    let html = String::from_utf8(detail.body).unwrap();
+    assert!(html.contains("&lt;script&gt;") && !html.contains("<script>alert(1)"));
+    assert_eq!(
+        std::fs::read(f.dir.join("outside")).unwrap(),
+        b"invented-sentinel"
     );
 }
 
@@ -419,7 +890,7 @@ fn deletion_retention_shared_media_and_replay_tombstones() {
         ("id".into(), id.clone()),
         ("confirm".into(), "delete".into()),
     ]);
-    mutate(f.e(), &f.objects(), &cmd, OWNER, false).unwrap();
+    mutate(f.e(), &f.objects(), &cmd, OWNER, false, NOW).unwrap();
     assert_eq!(f.ingest(&a, NOW), Err(Failure("deleted")));
     assert!(!f.root().join(hash_bytes(&raw)).exists());
     assert!(f.root().join(hash_bytes(b"invented-media")).exists());
@@ -474,7 +945,7 @@ fn deletion_retention_shared_media_and_replay_tombstones() {
         ("project".into(), "example/project".into()),
         ("confirm".into(), "delete".into()),
     ]);
-    mutate(f.e(), &f.objects(), &project, OWNER, false).unwrap();
+    mutate(f.e(), &f.objects(), &project, OWNER, false, NOW).unwrap();
     assert_eq!(f.ingest(&other, NOW + RETENTION), Err(Failure("deleted")));
 }
 
@@ -673,22 +1144,14 @@ fn viewer_search_full_output_unknown_raw_naming_and_csrf() {
         .status,
         "400 Bad Request"
     );
-    if let Some(dir) = std::env::var_os("DASHQ_ARCHIVE_EVIDENCE") {
-        let dir = PathBuf::from(dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        for (file, html) in [
-            ("list", h),
-            ("detail", detail),
-            ("step", full),
-            ("search", searched),
-            ("console", console),
-        ] {
-            let html = html.replace(
-                "<link rel=\"stylesheet\" href=\"/style.css\">",
-                &format!("<style>{}</style>", crate::style_css()),
-            );
-            std::fs::write(dir.join(format!("{file}.html")), html).unwrap();
-        }
+    for (file, html) in [
+        ("list", h),
+        ("detail", detail),
+        ("step", full),
+        ("search", searched),
+        ("console", console),
+    ] {
+        evidence(file, &html);
     }
 }
 
@@ -1004,7 +1467,7 @@ fn manifest_versions_are_append_only_and_comparison_uses_turn_positions() {
         ("project".into(), "other/project".into()),
         ("confirm".into(), "delete".into()),
     ]);
-    mutate(f.e(), &f.objects(), &project, OWNER, false).unwrap();
+    mutate(f.e(), &f.objects(), &project, OWNER, false, NOW).unwrap();
     assert_eq!(
         f.ingest(&uploads[0], NOW),
         Err(Failure("deleted")),

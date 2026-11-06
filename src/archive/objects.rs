@@ -11,6 +11,11 @@ use std::path::{Path, PathBuf};
 pub struct Objects {
     root: PathBuf,
     key: aead::LessSafeKey,
+    #[cfg(test)]
+    pub before_read: Option<(
+        std::sync::mpsc::Sender<()>,
+        std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    )>,
 }
 
 /// Erase reconstructed plaintext even when decoding fails.
@@ -61,6 +66,8 @@ impl Objects {
         Ok(Self {
             root: root.into(),
             key: aead::LessSafeKey::new(key),
+            #[cfg(test)]
+            before_read: None,
         })
     }
 
@@ -174,6 +181,11 @@ impl Objects {
     }
 
     pub fn read(&self, hash: &str) -> Res<Vec<u8>> {
+        #[cfg(test)]
+        if let Some((ready, resume)) = &self.before_read {
+            ready.send(()).unwrap();
+            resume.lock().unwrap().recv().unwrap();
+        }
         let path = self.path(hash)?;
         let m = std::fs::symlink_metadata(&path)?;
         if !m.is_file() {

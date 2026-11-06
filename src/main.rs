@@ -50,7 +50,7 @@ fn tool() -> Tool {
 }
 
 struct Config {
-    archive: Option<PathBuf>,
+    archive: Option<archive::Config>,
     /// `(base, auth)`; `None`: Langfuse not configured, its sections read unknown (D11: optional source).
     langfuse: Option<(String, String)>,
     /// `langfuse.forward: true`: forward `agentq-event/1` to that project (D11, C5); off by default.
@@ -518,7 +518,7 @@ fn handle(app: &App, mut s: TcpStream) {
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = archive::route(&app.enroll, c.archive.as_deref(), &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = archive::route(&app.enroll, c.archive.as_ref(), &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.archive", x.status)
     } else if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
@@ -663,8 +663,8 @@ fn serve(t: &Tool, service: bool) -> ! {
             let now = source::now() as i64;
             if now - pruned >= 3600 {
                 pruned = now;
-                if let Some(root) = fwd.cfg.archive.as_deref() {
-                    if let Err(x) = archive::prune(e, root, now) { eprintln!("{x}"); }
+                if let Some(cfg) = fwd.cfg.archive.as_ref() {
+                    if let Err(x) = archive::prune(e, &cfg.root, now) { eprintln!("{x}"); }
                 }
                 if let Err(x) = e.store().prune(now) {
                     eprintln!("prune: {x:?}");
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     fn archive_http_chain_and_metadata_boundary() {
         let (mut app, dir) = enrolled_app("archive-http", load_config_fixture());
-        app.cfg.archive = Some(dir.join("objects"));
+        app.cfg.archive = Some(archive::Config {root:dir.join("objects"),proxy_token:Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into())});
         let e = app.enroll.as_ref().unwrap();
         let verifier = enroll::sha256("invented-credential");
         e.store().grant(&store::Installation {id:"archive-host",product:"agentq",runtime:"native",label:"invented-host"},"ws","github|1",r#"["agent-history/1"]"#,&verifier,source::now() as i64).unwrap();
@@ -1220,25 +1220,30 @@ mod tests {
         let hash: String = ring::digest::digest(&ring::digest::SHA256,raw).as_ref().iter().map(|b|format!("{b:02x}")).collect();
         let mut wire = json!({"protocol":1,"schema":"agent-history/1","manifest":{"project":"example/project","task":283,"attempt":1,"actor":"worker","entry":"taskq","runtime":"invented-runtime","cli_version":null,"model":null,"effort":null,"policy":null,"account_label":null,"host":"invented-host","session":"invented-session","parent_session":null,"instructions_hash":null},"source":"source","format":"invented-format","capture":"launched","start":0,"end":raw.len(),"bytes":base64(raw),"sha256":hash,"scrubbed":0,"observed_at":source::now()});
         wire["manifest_sha256"]=json!(coreq::enroll::digest(&wire["manifest"]));
-        let request = |path:&str,method:&str,headers:&str,body:&str| {
+        let request_host = |host:&str,path:&str,method:&str,headers:&str,body:&str| {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
             let (server,_) = listener.accept().unwrap();
             std::thread::scope(|scope| {
                 let done = scope.spawn(||handle(&app,server));
-                write!(client,"{method} {path} HTTP/1.1\r\nHost: dash.example.com\r\n{headers}Content-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+                write!(client,"{method} {path} HTTP/1.1\r\nHost: {host}\r\n{headers}Content-Length: {}\r\n\r\n{body}",body.len()).unwrap();
                 let mut out=String::new();
                 std::io::Read::read_to_string(&mut client,&mut out).unwrap();
                 done.join().unwrap();
                 out
             })
         };
+        let request = |path:&str,method:&str,headers:&str,body:&str|request_host("dash.example.com",path,method,headers,body);
         let accepted=request("/machine/archive/1","POST","Authorization: Bearer invented-credential\r\n",&wire.to_string());
         assert!(accepted.starts_with("HTTP/1.1 200"),"{accepted}");
         let receipt:Value=serde_json::from_str(accepted.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         let raw_path=format!("/archive/raw?id={}&source=source",receipt["id"].as_str().unwrap());
         assert!(request(&raw_path,"GET","","").starts_with("HTTP/1.1 403"));
-        let read=request(&raw_path,"GET","X-Dashq-Subject: github|1\r\n","");
+        assert!(request(&raw_path,"GET","X-Dashq-Subject: github|1\r\n","").starts_with("HTTP/1.1 403"));
+        for host in ["localhost:18882","127.0.0.1:18882"] {
+            assert!(request_host(host,&raw_path,"GET","X-Dashq-Subject: github|1\r\nX-Dashq-Archive-Proxy: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n","").starts_with("HTTP/1.1 403"));
+        }
+        let read=request(&raw_path,"GET","X-Dashq-Subject: github|1\r\nX-Dashq-Archive-Proxy: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n","");
         assert!(read.starts_with("HTTP/1.1 200") && read.ends_with(std::str::from_utf8(raw).unwrap()));
         assert!(read.contains("Cache-Control: no-store") && read.contains("X-Content-Type-Options: nosniff"));
         let metadata=app.doc(1800,json!({}),Some(store::Scope::All)).to_string();
@@ -1589,6 +1594,13 @@ mod tests {
         write(&bad);
         let e = load_config(&p).err().unwrap();
         assert_eq!(e, "config: bad key langfuse.secret_key");
+        // D31/R7: invalid proxy-secret diagnostics expose only the key; archive stays off by default.
+        assert!(c.archive.is_none());
+        for token in [json!("invented-invalid-secret"),json!(true),json!(null)] {
+            let mut bad=good.clone(); bad["archive"]=json!({"root":d.join("archive"),"proxy_token":token});
+            write(&bad);
+            assert_eq!(load_config(&p).err().unwrap(),"config: bad key archive.proxy_token");
+        }
         // #161 A3: telemetry bounds come from config, within limits, and name the bad key
         assert_eq!((c.limits.telemetry_secs, c.limits.telemetry_bytes), (7 * 86400, 160 << 20));
         let mut t = good.clone();

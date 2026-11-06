@@ -106,21 +106,39 @@ fn integer(v: &Value) -> Option<i64> {
     v.as_u64().and_then(|n| i64::try_from(n).ok())
 }
 
-pub fn config(v: &Value) -> Result<Option<std::path::PathBuf>, String> {
+pub struct Config {
+    pub root: std::path::PathBuf,
+    pub proxy_token: Option<String>,
+}
+pub const PROXY: &str = "x-dashq-archive-proxy";
+
+pub fn config(v: &Value) -> Result<Option<Config>, String> {
     match v.get("archive") {
         None => Ok(None),
-        Some(a) => a["root"]
-            .as_str()
-            .filter(|s| {
-                let p = Path::new(s);
-                p.is_absolute()
-                    && p.parent().is_some()
-                    && !p
-                        .components()
-                        .any(|c| matches!(c, std::path::Component::ParentDir))
-            })
-            .map(|s| Some(s.into()))
-            .ok_or_else(|| "config: bad key archive.root".into()),
+        Some(a) => {
+            let root = a["root"]
+                .as_str()
+                .filter(|s| {
+                    let p = Path::new(s);
+                    p.is_absolute()
+                        && p.parent().is_some()
+                        && !p
+                            .components()
+                            .any(|c| matches!(c, std::path::Component::ParentDir))
+                })
+                .map(std::path::PathBuf::from)
+                .ok_or("config: bad key archive.root")?;
+            let proxy_token = match a.get("proxy_token") {
+                None => None,
+                Some(v) => Some(
+                    v.as_str()
+                        .filter(|s| digest(s))
+                        .ok_or("config: bad key archive.proxy_token")?
+                        .to_string(),
+                ),
+            };
+            Ok(Some(Config { root, proxy_token }))
+        }
     }
 }
 
@@ -529,24 +547,18 @@ fn sources(c: &Connection, s: &Session, now: i64) -> Res<Vec<Source>> {
     .collect::<Result<_, _>>()?)
 }
 
-/// Hold the existing writer across authorization, audit commit and decryption; deletion cannot race a read.
-fn read_source(
-    e: &Enroll,
-    o: &objects::Objects,
+fn readable_source(
+    c: &Connection,
     id: &str,
     source: &str,
     subject: &str,
-    action: &str,
     now: i64,
-) -> Res<(Session, Source, Vec<u8>)> {
-    let mut c = e.store().lock()?;
-    o.index(&c)?;
-    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let s = session(&tx, id, subject, false)?;
+) -> Res<(Session, Source)> {
+    let s = session(c, id, subject, false)?;
     if s.deleted {
         return Err("deleted".into());
     }
-    let src = sources(&tx, &s, now)?
+    let src = sources(c, &s, now)?
         .into_iter()
         .find(|s| s.id == source)
         .ok_or(Failure("not_found"))?;
@@ -556,35 +568,41 @@ fn read_source(
     if src.media && !src.complete {
         return Err("incomplete".into());
     }
-    tx.execute("INSERT INTO archive.archive_audit(actor,workspace,session,source,action,at) VALUES (?1,?2,?3,?4,?5,?6)",params![hash_bytes(subject.as_bytes()),s.ws,s.id,source,action,now])?;
-    let audit = tx.last_insert_rowid();
-    tx.commit()?;
-    let read = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let result = (|| -> Res<(Session, Source, Vec<u8>)> {
-        let s = session(&read, id, subject, false)?;
-        if s.deleted {
-            return Err("deleted".into());
-        }
-        let src = sources(&read, &s, now)?
-            .into_iter()
-            .find(|s| s.id == source)
-            .ok_or(Failure("not_found"))?;
-        if src.expired {
-            return Err("expired".into());
-        }
-        if src.media && !src.complete {
-            return Err("incomplete".into());
-        }
-        let mut q=read.prepare("SELECT hash,start,end FROM archive.archive_ranges WHERE session=?1 AND source=?2 AND retained=1 ORDER BY start")?;
-        let ranges = q
-            .query_map([id, source], |r| {
+    Ok((s, src))
+}
+
+/// Commit intent before I/O; recheck live authorization and commit the outcome before returning bytes.
+fn read_source(
+    e: &Enroll,
+    o: &objects::Objects,
+    id: &str,
+    source: &str,
+    subject: &str,
+    action: &str,
+    now: i64,
+) -> Res<(Session, Source, Vec<u8>)> {
+    let (s, src, ranges, audit) = {
+        let mut c = e.store().lock()?;
+        o.index(&c)?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (s, src) = readable_source(&tx, id, source, subject, now)?;
+        let ranges = {
+            let mut q=tx.prepare("SELECT hash,start,end FROM archive.archive_ranges WHERE session=?1 AND source=?2 AND retained=1 ORDER BY start")?;
+            q.query_map([id, source], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, i64>(1)?,
                     r.get::<_, i64>(2)?,
                 ))
             })?
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?
+        };
+        tx.execute("INSERT INTO archive.archive_audit(actor,workspace,session,source,action,at) VALUES (?1,?2,?3,?4,?5,?6)",params![hash_bytes(subject.as_bytes()),s.ws,s.id,source,action,now])?;
+        let audit = tx.last_insert_rowid();
+        tx.commit()?;
+        (s, src, ranges, audit)
+    };
+    let result = (|| -> Res<Vec<u8>> {
         let mut bytes = Vec::new();
         for (hash, start, end) in ranges {
             if start != bytes.len() as i64 {
@@ -602,9 +620,12 @@ fn read_source(
         if src.media && (src.total != Some(bytes.len() as i64) || hash_bytes(&bytes) != src.id) {
             return Err("unavailable".into());
         }
-        Ok((s, src, bytes))
+        Ok(bytes)
     })();
-    read.execute(
+    let mut c = e.store().lock()?;
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let result = readable_source(&tx, id, source, subject, now).and(result);
+    tx.execute(
         "UPDATE archive.archive_audit SET outcome=?2,reason=?3 WHERE id=?1",
         params![
             audit,
@@ -612,8 +633,8 @@ fn read_source(
             result.as_ref().err().map(|e| e.0)
         ],
     )?;
-    read.commit()?;
-    result
+    tx.commit()?;
+    result.map(|bytes| (s, src, bytes))
 }
 
 fn steps(
@@ -673,6 +694,7 @@ fn mutate(
     b: &HashMap<String, String>,
     subject: &str,
     name: bool,
+    now: i64,
 ) -> Res<()> {
     let mut c = e.store().lock()?;
     o.index(&c)?;
@@ -690,6 +712,7 @@ fn mutate(
             "UPDATE archive.archive_sessions SET name=?2 WHERE id=?1",
             [&s.id, name],
         )?;
+        tx.execute("INSERT INTO archive.archive_audit(actor,workspace,session,source,action,at,outcome) VALUES (?1,?2,?3,'','name',?4,'committed')",params![hash_bytes(subject.as_bytes()),s.ws,s.id,now])?;
     } else {
         if b.get("confirm").map(String::as_str) != Some("delete") {
             return Err("invalid_request".into());
@@ -710,6 +733,7 @@ fn mutate(
                 .collect::<Result<Vec<String>, _>>()?
         };
         for id in ids {
+            let s = session(&tx, &id, subject, true)?;
             tx.execute(
                 "UPDATE archive.archive_sessions SET deleted=1 WHERE id=?1",
                 [&id],
@@ -718,6 +742,7 @@ fn mutate(
                 "UPDATE archive.archive_ranges SET retained=0 WHERE session=?1",
                 [&id],
             )?;
+            tx.execute("INSERT INTO archive.archive_audit(actor,workspace,session,source,action,at,outcome) VALUES (?1,?2,?3,'',?4,?5,'committed')",params![hash_bytes(subject.as_bytes()),s.ws,id,if b.get("id").is_some_and(|id|!id.is_empty()) {"delete"} else {"delete_project"},now])?;
         }
     }
     tx.commit()?;
@@ -756,7 +781,7 @@ fn reply(status: &'static str, ctype: &'static str, body: Vec<u8>, forms: bool) 
     }
 }
 
-pub fn route(e: &Result<Enroll, String>, root: Option<&Path>, r: &Req, now: i64) -> Option<Resp> {
+pub fn route(e: &Result<Enroll, String>, cfg: Option<&Config>, r: &Req, now: i64) -> Option<Resp> {
     if ![
         "/machine/archive/1",
         "/archive",
@@ -781,7 +806,8 @@ pub fn route(e: &Result<Enroll, String>, root: Option<&Path>, r: &Req, now: i64)
     }
     let run = || -> Res<Resp> {
         let e = e.as_ref().map_err(|_| Failure("unavailable"))?;
-        let root = root.ok_or(Failure("unavailable"))?;
+        let cfg = cfg.ok_or(Failure("unavailable"))?;
+        let root = &cfg.root;
         if machine {
             let cred = r
                 .header("authorization")
@@ -828,6 +854,30 @@ pub fn route(e: &Result<Enroll, String>, root: Option<&Path>, r: &Req, now: i64)
                 false,
             ));
         }
+        if ["host", enroll::SUBJECT, PROXY].iter().any(|name| {
+            r.headers
+                .iter()
+                .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+                .count()
+                != 1
+        }) || !r
+            .header("host")
+            .is_some_and(|h| h.eq_ignore_ascii_case(e.public_host()))
+        {
+            return Err("forbidden".into());
+        }
+        let expected = cfg.proxy_token.as_deref().ok_or(Failure("forbidden"))?;
+        let supplied = r
+            .header(PROXY)
+            .filter(|s| digest(s))
+            .ok_or(Failure("forbidden"))?;
+        // Existing HMAC verification compares the transport secret in constant time, without exposing it.
+        if !e.token_ok(
+            &format!("archive proxy\n{expected}"),
+            &e.token_for(&format!("archive proxy\n{supplied}")),
+        ) {
+            return Err("forbidden".into());
+        }
         let subject = r
             .header(enroll::SUBJECT)
             .filter(|s| enroll::valid_subject(s))
@@ -853,7 +903,7 @@ pub fn route(e: &Result<Enroll, String>, root: Option<&Path>, r: &Req, now: i64)
             o.index(&c)?;
         }
         if matches!(r.path, "/archive/name" | "/archive/delete") {
-            mutate(e, &o, &b, subject, r.path == "/archive/name")?;
+            mutate(e, &o, &b, subject, r.path == "/archive/name", now)?;
             return Ok(reply(
                 "200 OK",
                 "text/html; charset=utf-8",

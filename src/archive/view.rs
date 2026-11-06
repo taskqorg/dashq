@@ -220,6 +220,8 @@ fn list(
             return Err("invalid_request".into());
         }
         let mut found = Vec::new();
+        let mut content_hits = HashMap::new();
+        let mut unavailable = 0usize;
         for s in sessions {
             let metadata = s.name.to_lowercase().contains(&term) || contains(&s.manifest, &term);
             if metadata {
@@ -229,13 +231,25 @@ fn list(
             if s.deleted {
                 continue;
             }
+            if let Some(hit) = content_hits.get(&s.id) {
+                if *hit {
+                    found.push(s);
+                }
+                continue;
+            }
             let srcs = {
                 let c = e.store().lock()?;
                 sources(&c, &s, now)?
             };
             let mut hit = false;
             for src in srcs.into_iter().filter(|s| !s.expired && !s.media) {
-                let (_, _, bytes) = read_source(e, o, &s.id, &src.id, subject, "search", now)?;
+                let bytes = match read_source(e, o, &s.id, &src.id, subject, "search", now) {
+                    Ok((_, _, bytes)) => bytes,
+                    Err(_) => {
+                        unavailable += 1;
+                        continue;
+                    }
+                };
                 if String::from_utf8_lossy(&bytes)
                     .to_lowercase()
                     .contains(&term)
@@ -245,12 +259,16 @@ fn list(
                     hit |= steps.iter().any(|s| contains(&s.data, &term));
                 }
             }
+            content_hits.insert(s.id.clone(), hit);
             if hit {
                 found.push(s);
             }
         }
         sessions = found;
         out.push_str("<p>Search results across all authorized retained sessions; expired or deleted content cannot be searched.</p>");
+        if unavailable > 0 {
+            write!(out,"<p>Search incomplete: {unavailable} sources unavailable. Other sources were searched; missing matches are unknown.</p>").unwrap();
+        }
     }
     write!(out,"<p>{} session condition versions in scope. Metrics are reported agent.turn quantities, never inferred from transcript text.</p><div class=\"archive-table\"><table><thead><tr><th>Run</th><th>Task / attempt</th><th>Runtime / model</th><th>Conditions</th><th>Usage</th><th>Duration (µs) / observed outcomes</th><th>Archive position</th></tr></thead><tbody>",sessions.len()).unwrap();
     let c = e.store().lock()?;
@@ -387,7 +405,15 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
             out.push_str("</section>");
             continue;
         }
-        let (s, src, bytes) = read_source(e, o, id, &src.id, subject, "normalize", now)?;
+        let (s, src, bytes) = match read_source(e, o, id, &src.id, subject, "normalize", now) {
+            Ok(read) => read,
+            Err(_) => {
+                out.push_str(
+                    "<p>Source unavailable. Other sources remain available.</p></section>",
+                );
+                continue;
+            }
+        };
         match steps(o,&s,&src,&bytes) {
             Ok((steps,pending))=>{
                 if pending>0 {write!(out,"<p>Incomplete final native record: {pending} pending bytes. Raw download includes them.</p>").unwrap();}
@@ -398,7 +424,7 @@ fn detail(e: &Enroll, o: &objects::Objects, id: &str, subject: &str, now: i64) -
                 out.push_str("</ol>");
             }
             Err(Failure("mapping_unknown"))=>out.push_str("<p>Steps unknown: unsupported format or invalid native source. Exact raw bytes remain available; no record is guessed or discarded.</p>"),
-            Err(x)=>return Err(x),
+            Err(_)=>out.push_str("<p>Source normalization unavailable. Other sources remain available.</p>"),
         }
         out.push_str("</section>");
     }
