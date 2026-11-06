@@ -75,6 +75,10 @@
     ]},
     {"installation": "sq-partial", "workspace": "example", "generation": 1, "host": "invented-partial", "history": [
       {"at": 1794000000, "inventory": {"entity": "host", "identity": "invented-partial", "status": "partial", "cpu_count": 4, "ram_total_bytes": 8589934592, "ram_used_bytes": null, "unknown": {"ram_used_bytes": "collection-failed"}}}
-    ]}
+    ]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [{"at": 1794000000, "source": "ssh-diagnostic", "operation": "inventory.sample", "inventory": {"entity": "site", "identity": "example.test", "status": "observed"}}]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [{"at": 1794000000, "source": "ssh-diagnostic", "operation": "inventory.sample", "inventory": {"entity": "finding", "identity": "sshhole:invented", "status": "unknown", "reason": "container-not-running"}}]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [{"at": 1794000000, "source": "ssh-diagnostic", "operation": "inventory.sample", "inventory": {"entity": "link", "identity": "66795c081a50c8bda1ae5f0823e7b5004688a2a1b2ff15e55e6ae539adcbabba", "relation": "uses", "from_entity": "site", "from_identity": "example.test", "to_entity": "folder", "to_identity": "/srv/invented-<cache>"}}]},
+    {"installation": "sq-fresh", "workspace": "example", "generation": 1, "host": "invented-fresh", "history": [{"at": 1794000000, "source": "ssh-diagnostic", "operation": "inventory.sample", "inventory": {"entity": "link", "identity": "12c0da7fb4a40e78b62ecc6361fd40bfdfe4b86a16ac3f442bacd7a883a29a23", "relation": "checks", "from_entity": "finding", "from_identity": "sshhole:invented", "to_entity": "container", "to_identity": "docker:legacy"}}]}
   ]
 }

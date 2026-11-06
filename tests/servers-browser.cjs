@@ -30,7 +30,7 @@ const js=['assets/taskq/resource-controls.js','assets/resources.js','assets/task
    });
    assert(contrast>=4.5,'D7 unknown text contrast '+contrast);
    const detail=table.locator('details').filter({hasText:'invented-fresh/native'});await table.locator('tbody > tr').first().locator('th a').click();assert(await detail.evaluate(e=>e.open),'server link did not open native detail');await detail.locator('summary').focus();
-   for(const s of ['Projects','Services','Largest folders','/srv/invented-<cache>'])assert((await detail.innerText()).includes(s),s);
+   for(const s of ['Configured roots','Services','Sites','Security checks','sshhole','container-not-running','example.test','Largest folders','/srv/invented-<cache>'])assert((await detail.innerText()).includes(s),s);
    // #272 A2/A3: every row opens the Telegram chat with its server selected; a lost payload or a stale pending label fails here.
    const links=table.locator('a[href^="https://t.me/"]');assert.equal(await links.count(),3,'one Telegram link per server row');
    for(const href of await links.evaluateAll(es=>es.map(e=>e.href)))assert.match(href,/^https:\/\/t\.me\/invented_pilot_bot\?start=server-[0-9a-f]{16}$/);

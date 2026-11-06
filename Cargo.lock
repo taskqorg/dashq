@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "dashq"
-version = "0.18.2"
+version = "0.18.3"
 dependencies = [
  "coreq",
  "flate2",

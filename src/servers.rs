@@ -19,7 +19,7 @@ impl Samples {
         let inv = &o["inventory"];
         let key = json!([row.installation, row.workspace, row.generation, host.to_lowercase(), inv["entity"], inv["identity"]]).to_string();
         let (identity, history) = self.0.entry(key).or_insert_with(|| (json!({"installation": row.installation, "workspace": row.workspace, "generation": row.generation, "host": host}), BTreeMap::new()));
-        let sample = json!({"at": at, "inventory": inv, "conflict": false});
+        let sample = json!({"at": at, "inventory": inv, "provenance": o["source"], "operation":o["operation"], "conflict": false});
         if let Some(old) = history.get_mut(&at) {
             if old["inventory"] != *inv { old["conflict"] = json!(true); }
         } else { history.insert(at, sample); }
@@ -38,7 +38,9 @@ fn unknown(why: &str) -> Value { json!({"state": "unknown", "at": null, "age_s":
 fn entity_source(s: &Value, snap: &Value, now: u64) -> Value {
     let at = s["at"].as_u64();
     if at.is_none_or(|t| t > now) { return unknown("producer time missing or in the future") }
-    let mut src = crate::data::source(&json!({"value": true, "at": at, "error": snap["error"], "incomplete": false}), now, FRESH, at);
+    let fresh=match s["operation"].as_str() {Some("resource.self")=>90,Some("resource.storage")=>900,_=>FRESH};
+    let mut src = crate::data::source(&json!({"value": true, "at": at, "error": snap["error"], "incomplete": false}), now, fresh, at);
+    src["fresh_for_s"]=fresh.into();
     if s["conflict"] == true { src["state"] = json!("unknown"); src["reason"] = json!("conflicting samples at one producer time"); }
     else if src["state"] == "ok" && s["inventory"]["status"] == "partial" { src["state"] = json!("incomplete"); src["reason"] = json!("producer reports partial inventory"); src["incomplete"] = json!(true); }
     src
@@ -115,7 +117,7 @@ pub fn build(snap: &Value, installations: &Value, legacy: &Value, host_filter: O
         let history = series["history"].as_array().map(Vec::as_slice).unwrap_or_default();
         let Some(current) = history.last() else { continue };
         let src = entity_source(current, snap, now);
-        let mut entity = json!({"installation": series["installation"], "inventory": current["inventory"], "source": src});
+        let mut entity = json!({"installation": series["installation"], "inventory": current["inventory"], "provenance":current["provenance"], "source": src});
         let inv = &current["inventory"];
         entity["trends"] = match inv["entity"].as_str() {
             Some("host") => json!({"cpu": trend(history,"cpu_used_milli",Some("cpu_count"),now,&src), "ram": trend(history,"ram_used_bytes",Some("ram_total_bytes"),now,&src)}),
@@ -167,7 +169,7 @@ fn status(e: &Value, now: u64) -> String {
     let src = &e["source"];
     let color = if src["state"] == "ok" && e["inventory"]["status"] != "ok" { "unknown" } else { src["state"].as_str().unwrap_or("unknown") };
     let observed = src["at"].as_u64().map_or_else(|| "age unknown".to_string(),|t| format!("<time data-at=\"{t}\">{}</time>",at(&src["at"],now)));
-    format!("<span class=\"server-source\" data-server-valid-for=\"{}\" data-server-state=\"{}\">{} · {observed}<small>{}</small></span>",src["at"].as_u64().map_or(0,|t| FRESH.saturating_sub(now.saturating_sub(t))),esc(src["state"].as_str().unwrap_or("unknown")),badge(color,src["state"].as_str().unwrap_or("unknown")),esc(src["reason"].as_str().unwrap_or("")))
+    format!("<span class=\"server-source\" data-server-valid-for=\"{}\" data-server-state=\"{}\">{} · {observed}<small>{}</small></span>",src["at"].as_u64().map_or(0,|t| src["fresh_for_s"].as_u64().unwrap_or(FRESH).saturating_sub(now.saturating_sub(t))),esc(src["state"].as_str().unwrap_or("unknown")),badge(color,if src["state"]=="ok" {"fresh"} else {src["state"].as_str().unwrap_or("unknown")}),esc(src["reason"].as_str().unwrap_or("")))
 }
 fn trend_text(t: &Value, divisor: f64, unit: &str, now: u64) -> String {
     if let Some(n) = t["per_day"].as_f64() {
@@ -187,14 +189,28 @@ pub fn render(w: &mut String, doc: &Value, now: u64) {
         let inv = &host["inventory"];
         let _ = write!(w,"<tr id=\"{id}\"><th scope=\"row\"><a href=\"#{}\">{}</a></th>",enc(&format!("{id}-content")),esc(row["host"].as_str().unwrap()));
         let _ = write!(detail_html,"<details id=\"{id}-detail\"><summary id=\"{id}-open\">{}</summary><div id=\"{id}-content\"><p>Workspace: {}</p><a href=\"#{}\">Back to server row</a>",esc(row["host"].as_str().unwrap()),esc(row["workspace"].as_str().unwrap_or("legacy source")),enc(&id));
-        for (kind,title) in [("project_root","Projects"),("service","Services"),("container","Containers"),("folder","Largest folders")] {
+        for (kind,title) in [("site","Sites"),("finding","Security checks"),("service","Services"),("container","Containers"),("process","Processes"),("image","Images"),("project_root","Configured roots"),("folder","Largest folders")] {
             let mut entries: Vec<_> = entities.iter().filter(|e| e["inventory"]["entity"] == kind).collect();
-            entries.sort_by_key(|e| std::cmp::Reverse(e["inventory"]["disk_used_bytes"].as_u64()));
+            entries.sort_by_key(|e| std::cmp::Reverse(e["inventory"][if kind=="process" {"ram_used_bytes"}else{"disk_used_bytes"}].as_u64()));
+            let total=entries.len();entries.truncate(100);
             let _ = write!(detail_html,"<h3>{title}</h3>");
             if entries.is_empty() { detail_html.push_str("<p>unknown: no inventory received</p>"); }
+            if total>100 {let _=write!(detail_html,"<p>Showing 100 of {total}; the full inventory is available in the report/export.</p>");}
             for e in entries {
                 let i = &e["inventory"];
+                if matches!(kind,"site"|"image"|"finding") {
+                    let _=write!(detail_html,"<p><code>{}</code> · {} · {}<br>{}</p>",esc(i["identity"].as_str().unwrap_or("unknown")),esc(i["status"].as_str().unwrap_or("unknown")),esc(i["reason"].as_str().unwrap_or("")),status(e,now));
+                } else {
+                if kind=="folder" {
+                    let _=write!(detail_html,"<p><code>{}</code> · {} · {}<br>Disk {}</p>",esc(i["identity"].as_str().unwrap_or("unknown")),esc(i["status"].as_str().unwrap_or("unknown")),status(e,now),value(i,"disk_used_bytes",1073741824.0,"GiB"));
+                } else {
                 let _ = write!(detail_html,"<p><code>{}</code> · {} · {}<br>Disk {} · CPU {} · RAM {}<br>{}</p>",esc(i["identity"].as_str().unwrap_or("unknown")),esc(i["status"].as_str().unwrap_or("unknown")),status(e,now),value(i,"disk_used_bytes",1073741824.0,"GiB"),value(i,"cpu_used_milli",1000.0,"cores"),value(i,"ram_used_bytes",1073741824.0,"GiB"),esc(e["installation"].as_str().unwrap_or("")));
+                }
+                }
+                for connection in entities.iter().filter(|x|x["inventory"]["entity"]=="link"&&x["inventory"]["from_entity"]==kind&&x["inventory"]["from_identity"]==i["identity"]).take(8) {
+                    let relation=&connection["inventory"];
+                    let _=write!(detail_html,"<p><small>{} → {}: <code>{}</code> · {}</small></p>",esc(relation["relation"].as_str().unwrap_or("unknown")),esc(relation["to_entity"].as_str().unwrap_or("unknown")),esc(relation["to_identity"].as_str().unwrap_or("unknown")),esc(e["provenance"].as_str().unwrap_or("source not reported")));
+                }
             }
         }
         let _ = write!(detail_html,"<a data-view-link href=\"/checks?host={}\">Server checks</a></div></details>",enc(row["host"].as_str().unwrap()));
@@ -231,7 +247,7 @@ mod tests {
         let mut samples = Samples::default();
         for series in f["series"].as_array().unwrap() {
             for s in series["history"].as_array().unwrap() {
-                samples.push(crate::store::Observation {installation:series["installation"].as_str().unwrap().into(),workspace:series["workspace"].as_str().unwrap().into(),generation:series["generation"].as_i64().unwrap(),product:"serverq".into(),observed:s["at"].as_i64().unwrap(),received:f["now"].as_i64().unwrap(),payload:json!({"observation":{"host":series["host"],"started_ms":s["at"].as_i64().unwrap()*1000,"inventory":s["inventory"]}}).to_string()},f["now"].as_i64().unwrap());
+                samples.push(crate::store::Observation {installation:series["installation"].as_str().unwrap().into(),workspace:series["workspace"].as_str().unwrap().into(),generation:series["generation"].as_i64().unwrap(),product:"serverq".into(),observed:s["at"].as_i64().unwrap(),received:f["now"].as_i64().unwrap(),payload:json!({"observation":{"host":series["host"],"started_ms":s["at"].as_i64().unwrap()*1000,"source":s["source"],"operation":s["operation"],"inventory":s["inventory"]}}).to_string()},f["now"].as_i64().unwrap());
             }
         }
         json!({"value":samples.finish(),"at":f["now"],"error":null})
@@ -254,7 +270,7 @@ mod tests {
         assert_eq!(host(&d,"invented-partial/native")["source"]["state"],"incomplete");
         assert!(entity(host(&d,"invented-stale/native"),"host")["trends"]["ram"]["per_day"].is_null());
         let mut html = String::new(); render(&mut html,&d,now);
-        for s in ["Servers","All observed and expected servers","Projects","Services","Largest folders","stale","collection-failed","unknown","estimated disk full","/srv/invented-&lt;cache&gt;"] { assert!(html.contains(s),"{s}"); }
+        for s in ["Servers","All observed and expected servers","Configured roots","Services","Sites","Security checks","container-not-running","example.test","Largest folders","stale","collection-failed","unknown","estimated disk full","/srv/invented-&lt;cache&gt;"] { assert!(html.contains(s),"{s}"); }
         assert!(!html.contains("<cache>") && !html.contains("<button") && !html.contains("<form"));
         for row in d["rows"].as_array().unwrap() {
             assert_eq!(serde_json::from_str::<Value>(row["pilotq_selector"].as_str().unwrap()).unwrap(),json!(["example",row["host"]]));

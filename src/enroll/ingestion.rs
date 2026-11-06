@@ -362,6 +362,23 @@ fn inventory_name(v: &Value, text: &str) -> bool {
     inventory_line(text, 256) && !text.contains('=') && !text.contains("://") && metadata_keys(v, 1, field)
 }
 
+fn inventory_endpoint(kind:&str,identity:&Value)->bool {
+    let Some(text)=identity.as_str() else{return false;};
+    match kind {
+        "mount"|"folder"|"project_root"=>inventory_path(text),
+        "host"|"service"|"container"|"process"|"site"|"image"|"endpoint"|"finding"=>inventory_name(identity,text),
+        _=>false,
+    }
+}
+fn inventory_link(o:&serde_json::Map<String,Value>)->bool {
+    let keys=["entity","identity","relation","from_entity","from_identity","to_entity","to_identity"];
+    o.len()==keys.len()&&keys.iter().all(|k|o.get(*k).is_some_and(Value::is_string))
+        &&o["identity"].as_str().is_some_and(|s|s.len()==64&&s.bytes().all(|b|b.is_ascii_hexdigit()))
+        &&matches!(o["relation"].as_str(),Some("uses"|"runs"|"serves"|"contains"|"image"|"checks"))
+        &&inventory_endpoint(o["from_entity"].as_str().unwrap(),&o["from_identity"])
+        &&inventory_endpoint(o["to_entity"].as_str().unwrap(),&o["to_identity"])
+}
+
 /// `observation.inventory` (D28, CoreQ 0.22.0 Inventory): exactly the listed fields of one entity. A measure is null
 /// only with its reason, and a reason needs a null or absent measure.
 // ponytail: copies CoreQ's private validator at its pin; call it when CoreQ exports one and DashQ's pin reaches it
@@ -371,10 +388,13 @@ pub(super) fn inventory(v: &Value) -> bool {
     const WORKLOAD: &[&str] = &["status", "cpu_used_milli", "ram_used_bytes", "disk_used_bytes"];
     const FOLDER: &[&str] = &["status", "disk_used_bytes"];
     let Some(o) = v.as_object() else { return false };
+    if o.get("entity").and_then(Value::as_str)==Some("link") {return inventory_link(o);}
     let (is_path, measures) = match o.get("entity").and_then(Value::as_str) {
         Some("host") => (false, HOST),
         Some("mount") => (true, MOUNT),
-        Some("service" | "container") => (false, WORKLOAD),
+        Some("service" | "container" | "process") => (false, WORKLOAD),
+        Some("site" | "image" | "endpoint") => (false, &["status"][..]),
+        Some("finding") => (false, &["status","reason"][..]),
         Some("project_root") => (true, WORKLOAD),
         Some("folder") => (true, FOLDER),
         _ => return false,
@@ -392,7 +412,7 @@ pub(super) fn inventory(v: &Value) -> bool {
             k if !measures.contains(&k) => false,
             k if x.is_null() => reasons.contains_key(k),
             k if reasons.contains_key(k) => false,
-            "status" | "os" | "os_version" => x.as_str().is_some_and(inventory_code),
+            "status" | "os" | "os_version" | "reason" => x.as_str().is_some_and(inventory_code),
             _ => x.is_u64(),
         })
         && reasons.iter().all(|(k, why)| measures.contains(&k.as_str()) && o.get(k).is_none_or(Value::is_null) && why.as_str().is_some_and(inventory_code))
