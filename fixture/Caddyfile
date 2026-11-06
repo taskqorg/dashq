@@ -4,6 +4,7 @@ dash.example.com {
 	# a client never supplies the identity or address dashq trusts
 	request_header -X-Dashq-Subject
 	request_header -X-Dashq-Client
+	request_header -X-Dashq-Archive-Proxy
 	@machine {
 		method POST
 		path /machine/*
@@ -21,6 +22,10 @@ dash.example.com {
 			# the guard's verified provider subject; qualify the source header name before release (#4)
 			copy_headers X-Auth-Subject>X-Dashq-Subject
 		}
-		reverse_proxy 127.0.0.1:18882
+		reverse_proxy 127.0.0.1:18882 {
+			# Independent random 32-byte hex token, also archive.proxy_token in DashQ's private config.
+			# Set through Caddy's protected environment, never a committed literal or dashq.key.
+			header_up X-Dashq-Archive-Proxy {$DASHQ_ARCHIVE_PROXY_TOKEN}
+		}
 	}
 }

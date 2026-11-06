@@ -1,26 +1,27 @@
 # dashq
-dashq is one guarded operator page for the taskqorg tools: hosts and versions, TaskQ boards, agent activity and AgentQ events from Langfuse, and ServerQ checks. It reads and shows metadata; it is not an editor, scheduler, shell or second auth system, and it changes state only through the narrow authorities that R3 lists.
+dashq is one guarded operator page for the taskqorg tools: hosts and versions, TaskQ boards, agent activity and AgentQ events from Langfuse, and ServerQ checks. It reads and shows metadata and the guarded D31 session archive; it is not an editor, scheduler, shell or second auth system, and it changes state only through the narrow authorities that R3 lists.
 
 This file holds every decision and no history, at most 200 lines (declared cap below); changes follow specq [spec first](https://github.com/taskqorg/specq/blob/main/engineering/spec-first.md). Lower-priority detail lives in the files under [Linked detail](#linked-detail).
 <!-- contract-budget: bytes=61440 lines=200 -->
 ## Rules
 Mandatory for every change. Product sections refine these rules and never weaken them.
-- **R1 Metadata only.** Never conversation text, prompts, tool input/output, raw commands, stderr/stdout or stack traces. `/data` holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
+- **R1 Metadata only.** Except D31, never conversation text, prompts, tool input/output, raw commands, stderr/stdout or stack traces. `/data` holds aggregates and evidence trace IDs, never prompts, commands, tool results, tokens or keys.
 - **R2 Unknown is never healthy.** Every value carries the state of its source. Missing data never becomes zero or healthy (D6).
 - **R3 Read-only by default.** dashq never writes to Langfuse, GitHub, ServerQ or any host, and has no state-changing button, except these narrow authorities: D11 enrollment, ingestion and connection management; D13 TaskQ answers, task controls and PM requests; D14 resource controls; D15 finding tasks; D16 AgentQ configuration; D25 blind host link relay, transport only; D27 public limits push.
+  - D31 adds archive ingestion, naming, deletion and audit of reads and mutations.
   - D11 replaces the no-write, no-push and no-database restrictions only for enrollment, ingestion and connection management.
 - **R4 Grants stay separate.** Enrollment and observation grants carry no answer, control or host-command authority; AgentQ configuration needs a separately ticked D16 capability. Answer grants carry no control authority. D11 authorizes no host commands.
 - **R5 No new auth system.** The page sits behind the existing Langfuse UI forward-auth guard (D3). Browser data, including `/data`, always remains guarded. D11 machine routes use their own narrow authorization instead of browser forward-auth; no wildcard exemption.
 - **R6 Loopback only.** `dashq serve` binds `127.0.0.1:18882`; the port is not configurable to a non-loopback address. No public port.
-- **R7 Secrets stay server side.** Secrets never reach the browser, `/data`, logs, URLs or `report` output.
+- **R7 Secrets stay server side.** Secrets never reach `/data`, logs, URLs or `report` output. Only the D31 browser archive may show content with missed secrets to explicit readers; other browser output carries no secrets.
 - **R8 Pull by default.** dashq pulls the D4 sources. Hosts push only through the R3 machine routes; any other host push is a later task (#4).
-- **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database.
+- **R9 No other database.** Caches are in memory and a restart rebuilds them from the sources. The D11 SQLite store is the only database; D31 adds a separate archive SQLite index and filesystem object store.
 ## D2. Process
 - One Rust binary `dashq` on the shared `taskqorg/coreq` crate, pinned in `Cargo.toml` and updated by Dependabot (release, update, launcher, service). Installation prepares and activates the release before reloading the service; a refusal leaves the running unit alone. `dashq serve` serves the page (R6).
 - `dashq report [--period=S] [--host=H] [--agent=A] [--session=ID] [--cursor=N] [--block=ID]` prints the `/data` JSON once (D7) for agents on the host without a browser login. `dashq admin WORKSPACE SUBJECT` binds a workspace administrator for enrollment (D11). `dashq limits [--check]` prints the D27 payload, or compares it with the live page. `dashq export` and `dashq parity` read the D28 store.
 - `dashq selftest` loads config, renders the fixture snapshot and reads each source once; no writes. Without any config file it skips the source reads and says so.
 - `dashq service install|uninstall|run` and `dashq update [--check]` are the coreq commands; `service run` is `serve` and marks the release healthy after 60 s. `profile`, `doctor`, `--snapshot`, update, rollback and release: [process detail](docs/contract/process.md).
-- Baseline routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. D11, D13, D14, D16, D22 and D25 add their explicit routes. Any other path is 404; any other method is 405.
+- Baseline routes: `GET /` (page), `GET /app.js`, `GET /style.css`, `GET /data`. D11, D13, D14, D16, D22, D25 and D31 add their explicit routes. Any other path is 404; any other method is 405.
 - Every response sends `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin` and CSP `default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`. No third-party assets.
 - Requests whose `Host` is neither the loopback address nor the configured public name get 421 (DNS rebinding).
 - Config is a private JSON file named by env `DASHQ_CONFIG`, else `<install>/config.json` (coreq service units pass only `PATH`), mode 0600. Invalid config: the service refuses to start and names the bad key, never the value. Keys: [process detail](docs/contract/process.md#config).
@@ -178,9 +179,18 @@ Config `limits_push` (default off) makes DashQ the data source of the public lim
 - CPU and RAM show observed change per day; disk exhaustion is the latest free space divided by positive fitted usage growth, added to producer time. Short, stale, inconsistent or non-growing history gives no date and states why; estimates are not policy or guarantees.
 - Each row has a PilotQ handoff selector and, with `pilotq_url` configured, a discussion link. The selector carries only workspace and machine/kind, never paths or authority. The link contract is in [views detail](docs/contract/views.md#pilotq-link-contract); live chat selection is qualified by PilotQ, separately from this table.
 - Telegram deep link: `pilotq_url` `https://t.me/BOT` gives each row `https://t.me/BOT?start=server-DIGEST`. DIGEST is FNV-1a 64-bit of the exact `pilotq_selector`, in 16 lowercase hexadecimal digits. Only this link drops the `chat selection pending` label; any other target keeps it, and no target reads `PilotQ unavailable: not configured`.
+## D31. Agent session archive
+- One guarded archive area is the narrow R1/R7/R9 exception. `/data`, `report`, `export`, logs and telemetry stay metadata only. Content can contain missed secrets after producer best-effort scrubbing; only the archive owner and explicit readers accept that risk.
+- Capture launched workers and managers; manual sessions require explicit per-host opt-in, off by default. D11 enrollment grants `agent-history/1` separately from observation; grants bind installation and workspace. No observation or control grant implies archive authority.
+- Content expires after 365 days; index and metadata have no expiry. Content reads require the workspace owner or a separate archive-reader role, including loopback. Reads are audited; naming/deletion audit is atomic. Only the owner can name sessions or delete by session/project; deletion is permanent and refuses replay.
+- Dedicated private filesystem objects are gzip-compressed, SHA-256 checked and AES-256-GCM encrypted at rest, outside SQLite. The deployment target is pds18; backup/restore includes index, objects and deployment key. Filesystem exhaustion refuses acceptance without acknowledging bytes.
+- `/archive` finds runs by project, task, attempt, runtime, model and host, names them, searches all authorized retained sessions and compares conditions, joining `agent.turn` metadata. Missing metrics stay unknown. Attempt rows link here; last shipped position and age never imply a live relay.
+- Read-time steps come from the pinned AgentQ runtime history API, never a DashQ native parser. Unknown records retain raw bytes; console and full raw reads are on demand. Render all content as untrusted text, never active HTML or media.
+- Routes, raw-native manifest/range wire, durability, roles, retention and qualification: [archive detail](docs/contract/archive.md). No deployment or production-data change follows from this contract.
 ## D20. Profiling
 - Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/engineering/profiling.md). Counters are always on in `serve`, `service run`, `report` and `update`; records hold no secrets, content, URLs or paths. A failed write never fails the operation. Detail: [process detail](docs/contract/process.md#profiling).
 ## Linked detail
 - [docs/contract/process.md](docs/contract/process.md): config keys, profile command, host requirements, snapshot command, update and rollback, release, profiling.
 - [docs/contract/connections.md](docs/contract/connections.md): registry, pairing, ingestion and allowlist, forwarding, projection, lifecycle UI, enrolled ServerQ, TaskQ telemetry and resources, AgentQ operations, link relay.
 - [docs/contract/views.md](docs/contract/views.md): `/data` document, source reads, refresh, page items, redesign target, shareable views, gated TaskQ actions, resource controls, findings, agent work, reports, waiting work, model use, optimization, service versions and AssetQ.
+- [docs/contract/archive.md](docs/contract/archive.md): archive ingest wire, storage, readers, search, comparison, deletion and recovery.

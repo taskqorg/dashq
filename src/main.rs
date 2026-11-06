@@ -1,6 +1,7 @@
 //! dashq: one read-only page for the taskqorg tools (dashq.md).
 
 mod accounting;
+mod archive;
 mod agent_work;
 mod assetq;
 mod fleet;
@@ -42,13 +43,14 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:18882";
 const FIXTURE: &str = include_str!("../fixture/input.json");
 const FIXTURE_HTML: &str = include_str!("../fixture/page.html");
-const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | export [--window=S] [--to=UNIX] [--format=jsonl|csv] [--product=P] | parity [--window=S] [--to=UNIX] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
+const USAGE: &str = "usage: dashq serve | report [--period=S] [--host=H] [--agent=A] [--session=ID] [--block=ID] [--cursor=N] | limits [--check] | export [--window=S] [--to=UNIX] [--format=jsonl|csv] [--product=P] | parity [--window=S] [--to=UNIX] | selftest | doctor | profile [--window=S] | --snapshot DIR | admin WORKSPACE SUBJECT | archive owner WORKSPACE SUBJECT | archive reader WORKSPACE SUBJECT on|off | answerer WORKSPACE SUBJECT on|off | pm-requester WORKSPACE SUBJECT on|off | controller WORKSPACE SUBJECT on|off | resources grant WORKSPACE SUBJECT INSTALLATION HOURS [host] [project-limits] [project=ID].. [runtime=ID].. | resources revoke GRANT_ID | update [--check] | service install|uninstall|run | version";
 
 fn tool() -> Tool {
     Tool::new("dashq", "DashQ", "taskqorg/dashq", env!("CARGO_PKG_VERSION"))
 }
 
 struct Config {
+    archive: Option<archive::Config>,
     /// `(base, auth)`; `None`: Langfuse not configured, its sections read unknown (D11: optional source).
     langfuse: Option<(String, String)>,
     /// `langfuse.forward: true`: forward `agentq-event/1` to that project (D11, C5); off by default.
@@ -186,6 +188,7 @@ fn load_config(p: &std::path::Path) -> Result<Config, String> {
     let limits_push = v.get("limits_push").map(limits::Config::parse).transpose()?;
     let assetq = assetq::config(&v)?;
     Ok(Config {
+        archive: archive::config(&v)?,
         limits_push,
         assetq,
         limits,
@@ -515,7 +518,10 @@ fn handle(app: &App, mut s: TcpStream) {
     let cctx = configure::Ctx { enroll: &app.enroll, enabled: c.agentq_configure, public_host: &c.public_host };
     let pctx = pm::Ctx { enroll: &app.enroll, enabled: c.pm_requests, public_host: &c.public_host, state: &app.answers };
     let t0 = profile::begin();
-    let (op, status) = if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
+    let (op, status) = if let Some(x) = archive::route(&app.enroll, c.archive.as_ref(), &req, source::now() as i64) {
+        respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
+        ("http.archive", x.status)
+    } else if let Some(x) = link::route(&app.link, &app.enroll, &req, source::now() as i64) {
         respond_with(&mut s, x.status, x.ctype, &x.body, &x.headers, x.forms);
         ("http.link", x.status)
     } else if let Some(x) = pm::route(&pctx, &req, source::now() as i64) {
@@ -657,6 +663,9 @@ fn serve(t: &Tool, service: bool) -> ! {
             let now = source::now() as i64;
             if now - pruned >= 3600 {
                 pruned = now;
+                if let Some(cfg) = fwd.cfg.archive.as_ref() {
+                    if let Err(x) = archive::prune(e, &cfg.root, now) { eprintln!("{x}"); }
+                }
                 if let Err(x) = e.store().prune(now) {
                     eprintln!("prune: {x:?}");
                 }
@@ -695,7 +704,7 @@ fn app_js() -> String {
 }
 
 fn style_css() -> String {
-    [include_str!("../assets/style.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css"), include_str!("../assets/taskq/pm-composer.css"), include_str!("../assets/workspace.css"), &format!("@scope (#taskq-workspace) {{{}}}", include_str!("../assets/taskq/task-workspace.css"))].join("\n")
+    [include_str!("../assets/style.css"), include_str!("../assets/archive.css"), include_str!("../assets/taskq/resource-controls.css"), include_str!("../assets/resources.css"), include_str!("../assets/taskq/project-blocks.css"), include_str!("../assets/taskq/answer-card.css"), include_str!("../assets/taskq/pm-composer.css"), include_str!("../assets/workspace.css"), &format!("@scope (#taskq-workspace) {{{}}}", include_str!("../assets/taskq/task-workspace.css"))].join("\n")
 }
 
 fn fixture_doc() -> Value {
@@ -881,6 +890,13 @@ fn main() {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
             enroll::Enroll::admin(&dir, workspace, subject).unwrap_or_else(|e| t.die(&e));
             println!("admin: {subject} administers {workspace}");
+        }
+        ["archive", "owner", workspace, subject] | ["archive", "reader", workspace, subject, "on" | "off"] => {
+            let cfg = load_config(&config_path(&t)).unwrap_or_else(|e| t.die(&e));
+            let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
+            let e = enroll::Enroll::open(&dir, &cfg.public_host).unwrap_or_else(|e| t.die(&e));
+            archive::role(&e, workspace, subject, a[1] == "owner", a.last() != Some(&"off")).unwrap_or_else(|e| t.die(&e));
+            println!("archive role updated");
         }
         ["answerer", workspace, subject, op @ ("on" | "off")] => {
             let dir = config_path(&t).parent().map(PathBuf::from).unwrap_or_default();
@@ -1191,6 +1207,54 @@ mod tests {
         (App { cfg, cache: source::Cache::default(), enroll: e, answers: Default::default(), resources: Default::default(), export: Default::default(), link: Default::default() }, d)
     }
 
+    // D31 boundary: the real HTTP dispatcher reaches archive ingestion and guarded content; /data stays metadata.
+    #[test]
+    fn archive_http_chain_and_metadata_boundary() {
+        let (mut app, dir) = enrolled_app("archive-http", load_config_fixture());
+        app.cfg.archive = Some(archive::Config {root:dir.join("objects"),proxy_token:Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into())});
+        let e = app.enroll.as_ref().unwrap();
+        let verifier = enroll::sha256("invented-credential");
+        e.store().grant(&store::Installation {id:"archive-host",product:"agentq",runtime:"native",label:"invented-host"},"ws","github|1",r#"["agent-history/1"]"#,&verifier,source::now() as i64).unwrap();
+        e.store().ack(&verifier,source::now() as i64).unwrap();
+        let raw = b"invented-private-archive-content\n";
+        let hash: String = ring::digest::digest(&ring::digest::SHA256,raw).as_ref().iter().map(|b|format!("{b:02x}")).collect();
+        let mut wire = json!({"protocol":1,"schema":"agent-history/1","manifest":{"project":"example/project","task":283,"attempt":1,"actor":"worker","entry":"taskq","runtime":"invented-runtime","cli_version":null,"model":null,"effort":null,"policy":null,"account_label":null,"host":"invented-host","session":"invented-session","parent_session":null,"instructions_hash":null},"source":"source","format":"invented-format","capture":"launched","start":0,"end":raw.len(),"bytes":base64(raw),"sha256":hash,"scrubbed":0,"observed_at":source::now()});
+        wire["manifest_sha256"]=json!(coreq::enroll::digest(&wire["manifest"]));
+        let request_host = |host:&str,path:&str,method:&str,headers:&str,body:&str| {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            let (server,_) = listener.accept().unwrap();
+            std::thread::scope(|scope| {
+                let done = scope.spawn(||handle(&app,server));
+                write!(client,"{method} {path} HTTP/1.1\r\nHost: {host}\r\n{headers}Content-Length: {}\r\n\r\n{body}",body.len()).unwrap();
+                let mut out=String::new();
+                std::io::Read::read_to_string(&mut client,&mut out).unwrap();
+                done.join().unwrap();
+                out
+            })
+        };
+        let request = |path:&str,method:&str,headers:&str,body:&str|request_host("dash.example.com",path,method,headers,body);
+        let accepted=request("/machine/archive/1","POST","Authorization: Bearer invented-credential\r\n",&wire.to_string());
+        assert!(accepted.starts_with("HTTP/1.1 200"),"{accepted}");
+        let receipt:Value=serde_json::from_str(accepted.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let raw_path=format!("/archive/raw?id={}&source=source",receipt["id"].as_str().unwrap());
+        assert!(request(&raw_path,"GET","","").starts_with("HTTP/1.1 403"));
+        assert!(request(&raw_path,"GET","X-Dashq-Subject: github|1\r\n","").starts_with("HTTP/1.1 403"));
+        for host in ["localhost:18882","127.0.0.1:18882"] {
+            assert!(request_host(host,&raw_path,"GET","X-Dashq-Subject: github|1\r\nX-Dashq-Archive-Proxy: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n","").starts_with("HTTP/1.1 403"));
+        }
+        let read=request(&raw_path,"GET","X-Dashq-Subject: github|1\r\nX-Dashq-Archive-Proxy: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n","");
+        assert!(read.starts_with("HTTP/1.1 200") && read.ends_with(std::str::from_utf8(raw).unwrap()));
+        assert!(read.contains("Cache-Control: no-store") && read.contains("X-Content-Type-Options: nosniff"));
+        let metadata=app.doc(1800,json!({}),Some(store::Scope::All)).to_string();
+        assert!(!metadata.contains("invented-private-archive-content") && !metadata.contains(&base64(raw)));
+        let bypass=json!({"protocol":1,"records":[{"event_id":"invented-bypass","schema":"agent-history/1","observed_at":source::now(),"payload":{"state":"ok"}}]});
+        let refused=request("/machine/ingest","POST","Authorization: Bearer invented-credential\r\n",&bypass.to_string());
+        assert!(refused.contains("rejected") && refused.contains("scope"),"{refused}");
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn accept_shipped(app: &App, installation: &str, product: &str, verifier: &[u8], at: i64) {
         let s = app.enroll.as_ref().unwrap().store();
         s.grant(&store::Installation { id: installation, product, runtime: "native", label: "mac" }, "ws", "github|1", r#"["coreq-observation/1","taskq-telemetry/1"]"#, verifier, at).unwrap();
@@ -1465,7 +1529,7 @@ mod tests {
     }
 
     fn load_config_fixture() -> Config {
-        Config { assetq: None, limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
+        Config { archive: None, assetq: None, limits_push: None, prices: Value::Null, langfuse: None, forward: false, links: json!({}), github_token: None, projects: vec![], taskq_bin: None, serverq_report: String::new(), serverq_host: "pds18.ufobe.com/native".into(), public_host: "dash.example.com".into(), answer: None, task_controls: None, pm_requests: false, resources: false, agentq_configure: false, taskq_logs: vec![], limits: store::LIMITS }
     }
 
     /// D19 U2: report -> failed refresh -> recovery retains producer age, values and incident evidence.
@@ -1530,6 +1594,13 @@ mod tests {
         write(&bad);
         let e = load_config(&p).err().unwrap();
         assert_eq!(e, "config: bad key langfuse.secret_key");
+        // D31/R7: invalid proxy-secret diagnostics expose only the key; archive stays off by default.
+        assert!(c.archive.is_none());
+        for token in [json!("invented-invalid-secret"),json!(true),json!(null)] {
+            let mut bad=good.clone(); bad["archive"]=json!({"root":d.join("archive"),"proxy_token":token});
+            write(&bad);
+            assert_eq!(load_config(&p).err().unwrap(),"config: bad key archive.proxy_token");
+        }
         // #161 A3: telemetry bounds come from config, within limits, and name the bad key
         assert_eq!((c.limits.telemetry_secs, c.limits.telemetry_bytes), (7 * 86400, 160 << 20));
         let mut t = good.clone();

@@ -1,6 +1,6 @@
 # Connections detail
 
-Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Independent product connections: registry, scope and lifecycle), D16 (AgentQ operations) and D25 (Host link relay). The contract rules R1–R9 apply; this page adds lower-priority detail and never weakens them. [Enrollment C1–C7](../design/enrollment.md) and [connections L1–L4](../design/connections.md) own the accepted design.
+Linked detail of [dashq.md](../../dashq.md) D4.3 (enrolled ServerQ), D11 (Independent product connections: registry, scope and lifecycle), D16 (AgentQ operations) and D25 (Host link relay). The contract rules R1–R9 apply, including the narrow [D31 archive exception](archive.md); this page adds lower-priority detail and never weakens them. [Enrollment C1–C7](../design/enrollment.md) and [connections L1–L4](../design/connections.md) own the accepted design.
 
 ## Registry and scope
 
@@ -221,3 +221,7 @@ Source: coreq v0.11.0 [operations](https://github.com/taskqorg/coreq/blob/v0.11.
 - A newer receive of the same installation ends the older wait empty, so one host holds one thread.
 - Messages expire 60 s after send. Pending bytes per installation, addressed to it and sent by it each, stay at most 4 MiB, else 429 `cap`.
 - A receiver revoked meanwhile gets nothing. Messages from a sender no longer connected in that workspace are dropped at delivery.
+
+## Agent history
+
+`agent-history/1` is separate content authority, never an observation schema. Enrollment, approval and revocation reuse D11; [archive detail](archive.md#producer-wire) owns its dedicated ingest route, manifest, ranges and guarded readers.

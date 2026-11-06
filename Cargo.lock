@@ -9,6 +9,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "agentq-runtime"
+version = "0.13.0"
+source = "git+https://github.com/taskqorg/agentq?rev=15baf4ee4fb43ec83f6fa7a571b11ad6bb7daf20#15baf4ee4fb43ec83f6fa7a571b11ad6bb7daf20"
+dependencies = [
+ "coreq 0.23.0",
+ "libc",
+ "ring",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -38,10 +50,10 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 
 [[package]]
 name = "coreq"
-version = "0.23.4"
-source = "git+https://github.com/taskqorg/coreq?tag=v0.23.4#ffbcafe764b6dfe0fd5584017dbcc9c2f5b12ba7"
+version = "0.23.0"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.23.0#34ae02cbe35065b08a5e0643d45881ec494276b6"
 dependencies = [
- "coreq-instrument",
+ "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.23.0)",
  "flate2",
  "libc",
  "ring",
@@ -49,6 +61,31 @@ dependencies = [
  "serde_json",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "coreq"
+version = "0.23.4"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.23.4#ffbcafe764b6dfe0fd5584017dbcc9c2f5b12ba7"
+dependencies = [
+ "coreq-instrument 0.1.0 (git+https://github.com/taskqorg/coreq?tag=v0.23.4)",
+ "flate2",
+ "libc",
+ "ring",
+ "rusqlite",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "coreq-instrument"
+version = "0.1.0"
+source = "git+https://github.com/taskqorg/coreq?tag=v0.23.0#34ae02cbe35065b08a5e0643d45881ec494276b6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -74,7 +111,8 @@ dependencies = [
 name = "dashq"
 version = "0.18.4"
 dependencies = [
- "coreq",
+ "agentq-runtime",
+ "coreq 0.23.4",
  "flate2",
  "ring",
  "rusqlite",
@@ -314,6 +352,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

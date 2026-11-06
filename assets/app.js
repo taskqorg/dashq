@@ -301,7 +301,8 @@ function bind() {
 // agentq-settings.md G1–G3 (#63): the host plans the draft, review shows its exact diff, apply confirms that plan,
 // results come from the host and its readback. Per installation: CSRF, operations, the reviewed plan, a pending apply ID.
 const aq = new Map();
-const AQ = { planning: 'Asking the host for a plan…', planned: 'Plan ready for review', accepted: 'Accepted · host configuration not yet confirmed',
+const AQ = {
+  feature_retired: 'Feature retired · this operation is no longer available', planning: 'Asking the host for a plan…', planned: 'Plan ready for review', accepted: 'Accepted · host configuration not yet confirmed',
   configured: 'Configured · host readback matches; reload the client if the plan says so', verified: 'Verified · a new client turn confirmed it',
   rejected: 'Rejected · nothing changed, draft kept', partial: 'Partial · some profiles changed', unknown: 'Unknown · reconcile before any new change' };
 const aqState = inst => { if (!aq.has(inst)) aq.set(inst, { ops: [] }); return aq.get(inst); };
@@ -344,7 +345,7 @@ async function aqSubmit(inst, body) {
   const s = aqState(inst);
   try {
     const [st, v] = await aqCall(inst, '/agentq/configure', body);
-    if (st !== 202) { s.error = 'Refused: ' + (v.reason || st) + '. Draft kept.'; return null; }
+    if (st !== 202) { s.error = 'Refused: ' + (AQ[v.reason] || v.reason || st) + '. Draft kept.'; return null; }
     s.error = null;
     aqKeep(inst, v);
     aqWatch(inst, v.operation);
@@ -396,7 +397,7 @@ function aqRender(box) {
   if (apply) {
     const good = apply.status === 'configured' || apply.status === 'verified';
     const p = aqEl('p', AQ[apply.status] || apply.status, good ? 'aq-good' : apply.status === 'accepted' ? '' : 'aq-ask');
-    if (apply.reason) p.append(aqEl('small', 'Reason: ' + apply.reason));
+    if (apply.reason) p.append(aqEl('small', 'Reason: ' + (AQ[apply.reason] || apply.reason)));
     p.append(aqEl('small', apply.changes.map(c => c.profile + ' ' + c.field + ' → ' + c.value).join(' · ') + ' · operation ' + apply.operation));
     out.append(p);
     if (apply.status === 'unknown' || apply.status === 'partial' || apply.status === 'accepted') {
@@ -411,7 +412,7 @@ function aqPlan(box, op, busy) {
   const d = aqEl('div', '', 'aq-plan');
   if (op.status !== 'planned') {
     d.append(aqEl('p', AQ[op.status] || op.status, op.status === 'planning' ? '' : 'aq-ask'));
-    if (op.reason) d.append(aqEl('small', 'Reason: ' + op.reason));
+    if (op.reason) d.append(aqEl('small', 'Reason: ' + (AQ[op.reason] || op.reason)));
     return d;
   }
   const h = op.host;
@@ -424,7 +425,7 @@ function aqPlan(box, op, busy) {
     if (p.conflicts?.length) d.append(aqEl('small', 'Conflicts: ' + p.conflicts.join(', '), 'aq-ask'));
   }
   // a newer snapshot revision invalidates this confirmation (G1, A3)
-  const stale = h.revision !== box.dataset.revision, why = !h.writable ? 'Blocked: ' + (h.blocked || []).join(', ')
+  const stale = h.revision !== box.dataset.revision, why = !h.writable ? 'Blocked: ' + (h.blocked || []).map(c => AQ[c] || c).join(', ')
     : stale ? 'Settings changed since this plan: review again.' : busy ? 'Another change is still unresolved.' : '';
   if (why) d.append(aqEl('p', why, 'aq-ask'));
   const b = aqEl('button', 'Apply this plan');

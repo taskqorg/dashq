@@ -80,7 +80,7 @@ pub(super) fn device(e: &Enroll, r: &Req, b: &Value, now: i64) -> Resp {
     let ok_schema = |x: &&str| x.strip_prefix(product).and_then(|x| x.strip_prefix('-')).and_then(|x| x.split_once('/')).is_some_and(|(n, v)| id(n, 32) && !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()));
     // D28: every product's shipper may add the shared observation schema; a shipper-only product may name nothing else
     let shared = |x: &&str| *x == crate::observations::SCHEMA;
-    let allowed = |v: &Vec<&str>| (PRODUCTS.contains(&product) && v.iter().all(|x| shared(x) || ok_schema(x))) || (SHIPPERS.contains(&product) && v.iter().all(shared));
+    let allowed = |v: &Vec<&str>| (PRODUCTS.contains(&product) && v.iter().all(|x| shared(x) || ok_schema(x) || (product == "agentq" && *x == crate::archive::WIRE))) || (SHIPPERS.contains(&product) && v.iter().all(shared));
     let Some(schemas) = schemas.filter(allowed) else { return error("400 Bad Request", "invalid_request") };
     let Ok(board) = board(b) else { return error("400 Bad Request", "invalid_request") };
     let Ok(caps) = capabilities(b, product) else { return error("400 Bad Request", "invalid_request") };
@@ -217,6 +217,8 @@ pub(super) fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
         let effect = CAPABILITIES.iter().find(|(_, k, _)| k == c).map_or("", |(_, _, e)| e);
         format!("<dt>Also requested</dt><dd><label><input type=\"checkbox\" name=\"capability.{0}\" value=\"grant\"> Allow <code>{0}</code>: {1}</label></dd>\n", esc(c), esc(effect))
     }).collect();
+    let archive = if p.schemas.contains(crate::archive::WIRE) { "<p><strong>Archive content:</strong> full sessions, code and command output; best-effort scrubbing may miss secrets. Readable only by the workspace archive owner and explicit readers. This is separate from observation.</p>" } else { "" };
+    let data_effect = if p.schemas.contains(crate::archive::WIRE) { "archive content and selected metadata; no commands or task answers" } else { "observation only, no commands or task answers" };
     // pick a workspace only when there is a choice (C1)
     let ws = if let [(w, _)] = spaces.as_slice() {
         format!("<dt>Workspace</dt><dd>{0}<input type=\"hidden\" name=\"workspace\" value=\"{0}\"></dd>\n", esc(w))
@@ -227,7 +229,7 @@ pub(super) fn browser(e: &Enroll, r: &Req, now: i64) -> Resp {
     html(
         "200 OK",
         &format!(
-            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: observation only, no commands or task answers</dd>\n{scope}{caps}{ws}</dl>\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
+            "{who}{replaces}<form method=\"post\" action=\"/connect\">\n<dl>\n<dt>Code</dt><dd><strong>{code}</strong>: check that the command shows the same code</dd>\n<dt>Product</dt><dd>{}</dd>\n<dt>Host</dt><dd>{} ({})</dd>\n<dt>Installation</dt><dd><code>{}</code></dd>\n<dt>Data</dt><dd>{}: {data_effect}</dd>\n{scope}{caps}{ws}</dl>{archive}\n<input type=\"hidden\" name=\"code\" value=\"{code}\">\n<input type=\"hidden\" name=\"csrf\" value=\"{}\">\n<button name=\"decision\" value=\"approve\">Approve</button>\n<button name=\"decision\" value=\"deny\">Deny</button>\n</form>\n",
             esc(&p.product),
             esc(&p.label),
             esc(&p.runtime),

@@ -53,6 +53,8 @@ dash.ufobe.com {
 
 Enrollment (D11, inactive until set up): use [fixture/Caddyfile](fixture/Caddyfile) instead, exempting only `POST /machine/*` from the guard (and from Cloudflare Access), then run `dashq admin <workspace> <provider subject>` on the host; `/connect` shows a signed-in account its subject.
 
+Archive (D31) is off without `archive.root`. Before enabling browser archive access, qualify the forward-auth subject and configure the independent proxy transport secret in DashQ and Caddy as described in the [archive contract](docs/contract/archive.md#readers-and-mutations); a subject header or loopback connection alone never authorizes archive access.
+
 Cloudflare: proxied DNS record for `dash.ufobe.com`, the host added to the Langfuse Access application, a public bypass for `/.well-known/acme-challenge/*`. Rollback: remove the site block, `systemctl reload caddy`, `dashq service uninstall`.
 
 Fixture: `fixture/input.json` renders to `fixture/page.html` and `fixture/data.json`; after an intended change rerun `DASHQ_UPDATE_FIXTURE=1 cargo test` and review the diff.
