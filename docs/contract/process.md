@@ -66,7 +66,7 @@ Source rule: [specq host requirements](https://github.com/taskqorg/specq/blob/ma
 
 ## Release
 
-- CI (`.github/workflows/release.yml`) on a `v<ver>` tag equal to the `Cargo.toml` version builds static `dashq-<ver>-linux-x86_64` and `dashq-<ver>-linux-aarch64`, `SHA256SUMS` and `latest.json` into a GitHub release of `taskqorg/dashq`.
+- CI (`.github/workflows/release.yml`) on a `v<ver>` tag equal to the `Cargo.toml` version builds static `dashq-<ver>-linux-x86_64`, `SHA256SUMS` and `latest.json` into a GitHub release of `taskqorg/dashq`.
 - Each artifact passes `selftest` with `DASHQ_SELFTEST_OFFLINE=1` before publishing; a failure publishes nothing.
 - Every pull request runs the same two builds and selftests without publishing; `main` requires them with `tests`.
 - Only owners push tags. Installed services take a release on their own (above), other hosts with `dashq update`; rollback is coreq `previous`.

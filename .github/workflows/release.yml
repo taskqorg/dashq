@@ -20,11 +20,6 @@ jobs:
             local: '["self-hosted", "Linux", "X64", "dashq-wsl"]'
             target: x86_64-unknown-linux-musl
             name: linux-x86_64
-          # No local Linux arm64 host.
-          - hosted: '"ubuntu-24.04-arm"'
-            local: '"ubuntu-24.04-arm"'
-            target: aarch64-unknown-linux-musl
-            name: linux-aarch64
     # A release builds on our hosts; pull requests, forks included, stay on disposable GitHub runners.
     runs-on: ${{ fromJSON(github.event_name == 'push' && matrix.local || matrix.hosted) }}
     env:
@@ -78,7 +73,7 @@ jobs:
           import json, os, sys
           ver = sys.argv[1]
           files = {n[len(f'dashq-{ver}-'):]: n for n in sorted(os.listdir('.')) if n.startswith(f'dashq-{ver}-')}
-          assert set(files) == {'linux-x86_64', 'linux-aarch64'}, files
+          assert set(files) == {'linux-x86_64'}, files
           json.dump({'version': ver, 'files': files}, open('latest.json', 'w'), indent=1)
           PY
       - name: Publish
