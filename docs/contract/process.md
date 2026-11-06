@@ -91,3 +91,16 @@ Applies [built-in profiling](https://github.com/taskqorg/specq/blob/main/enginee
 - Report: JSON `{schema 1, window_s, from, to, trace, store, samples, operations, unknown}`.
 - Operations rank worst first by the larger of p95/budget and failure rate/error budget, then by variation (`cv`). Each has count, p50/p95/max ms, outcome counts and error classes.
 - A named operation without samples is listed under `unknown` with its reason. A missing store is `unknown`. A prune that dropped records inside the window makes the store `unknown` with the covered start. Skipped corrupt records make it `incomplete` with their count. Never zero or ok.
+
+### Legacy updater handoff
+
+For an official 0.18.1 installation updating to 0.18.2, run
+`sh scripts/update-handoff.sh INSTALL` from a reviewed DashQ checkout, replacing
+`INSTALL` with the installation directory. Run as the installation owner with
+permission to update its service. This invokes the installed updater with an
+explicit `DASHQ_INSTALL`; it does not replace an artifact or skip verification.
+CoreQ 0.11's updater passed offline-selftest mode without the installation root;
+CoreQ 0.19.2 rejects automatic root discovery from `releases/0.18.2.tmp/dashq`.
+The explicit root lets that same released candidate run its normal selftest.
+Checksum or selftest refusal leaves `current` unchanged. Successful activation
+uses the normal service restart and `previous` rollback described above.
