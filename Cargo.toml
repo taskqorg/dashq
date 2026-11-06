@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.19.2" }
+coreq = { git = "https://github.com/taskqorg/coreq", tag = "v0.23.4" }
 flate2 = "1"
 ring = "0.17"
 rusqlite = { version = "0.40", features = ["bundled"] }
